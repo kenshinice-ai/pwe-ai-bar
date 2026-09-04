@@ -34,6 +34,10 @@ final class RuleEngine {
         return idle > awayAfter
     }
 
+    private var remainingWord: String {
+        Prefs.shared.showRemaining ? "剩 " : "到 "
+    }
+
     func evaluate(_ snap: Snapshot) -> [Alert] {
         var out: [Alert] = []
         let now = Date()
@@ -61,7 +65,10 @@ final class RuleEngine {
             } else if band == .warm {
                 out.append(Alert(
                     kind: .threshold,
-                    title: "\(w.title)到 \(w.display)",
+                    // Same convention as everything else. An alert that says "到 89%" while
+                    // the panel says "剩余 11%" makes the user do the subtraction to work out
+                    // whether the two are even talking about the same thing.
+                    title: "\(w.provider.name) \(w.title) \(remainingWord)\(Readout.text(w, remaining: Prefs.shared.showRemaining))",
                     body: reset(w) ?? "留意剩余额度",
                     provider: w.provider, urgent: false))
             }
@@ -74,7 +81,7 @@ final class RuleEngine {
             if (w?.band ?? .calm) == .calm {
                 out.append(Alert(kind: .reset,
                                  title: "额度已重置",
-                                 body: "\(w?.title ?? "窗口")回到 \(w?.display ?? "0%")，可以继续了",
+                                 body: "\(w?.title ?? "窗口")已重置，可以继续了",
                                  provider: w?.provider ?? .claude, urgent: false))
             }
         }

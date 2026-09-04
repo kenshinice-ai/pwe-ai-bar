@@ -24,6 +24,19 @@ struct SettingsView: View {
                     ForEach(PanelMode.allCases) { Text($0.label).tag($0) }
                 }.pickerStyle(.segmented).labelsHidden()
             }
+            row("百分比口径") {
+                VStack(alignment: .leading, spacing: 5) {
+                    Picker("", selection: $prefs.showRemaining) {
+                        Text(Readout.label.remaining).tag(true)
+                        Text(Readout.label.used).tag(false)
+                    }
+                    .pickerStyle(.segmented).labelsHidden()
+                    Text("Codex 自己显示的是剩余，Claude 的接口给的是已用。"
+                         + "统一成一种，免得同一个数看着像两回事。")
+                        .font(Theme.sans(10.5)).foregroundStyle(Theme.text2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             row("提醒落点") {
                 VStack(alignment: .leading, spacing: 5) {
                     // The notch choice is removed, not greyed. A segmented control cannot show

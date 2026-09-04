@@ -221,7 +221,8 @@ enum Probe {
                 // Pad in Swift, never with %-Ns: that pads by C-string bytes and chops a
                 // multi-byte character clean in half — "信用耗尽" came out as mojibake.
                 print("  " + pad(w.provider.rawValue, 8) + pad(w.channel.label, 5)
-                      + pad(w.display, 8) + pad(w.severity.rawValue, 10)
+                      + pad(w.percent.map { "已用 \(Int($0))%" } ?? (w.note ?? "—"), 12)
+                      + pad(w.severity.rawValue, 10)
                       + "active=\(w.isActive ? "y" : "n")  reset=\(reset)")
             }
             print("\n翼形仪表（内→外）")
@@ -231,7 +232,9 @@ enum Probe {
                 print("  \(ch.channel.label.padding(toLength: 4, withPad: " ", startingAt: 0)) \(bar) \(ch.band.word)")
             }
             print("  overall = \(snap.overall.word)")
-            if let p = snap.protagonist { print("  主角     = \(p.title) \(p.display)") }
+            if let p = snap.protagonist {
+                print("  主角     = \(p.provider.name) \(p.title)（已用 \(p.percent.map { String(Int($0)) } ?? "—")%）")
+            }
             print("\n上下文      \(snap.contextPercent.map { String(format: "%.0f%%", $0) } ?? "—")")
 
             let t = snap.trophy

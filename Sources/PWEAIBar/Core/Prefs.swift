@@ -32,6 +32,9 @@ final class Prefs: ObservableObject {
     @Published var placement: AlertPlacement { didSet { d.set(placement.rawValue, forKey: "placement") } }
     @Published var trackClaude: Bool { didSet { d.set(trackClaude, forKey: "trackClaude") } }
     @Published var trackCodex: Bool  { didSet { d.set(trackCodex, forKey: "trackCodex") } }
+    /// Whether percentages read as "how much is left" rather than "how much is spent".
+    /// Defaults to remaining — see `Readout` for why.
+    @Published var showRemaining: Bool { didSet { d.set(showRemaining, forKey: "showRemaining") } }
     @Published var sound: Bool       { didSet { d.set(sound, forKey: "sound") } }
     @Published var pushURL: String   { didSet { d.set(pushURL, forKey: "pushURL") } }
     @Published var launchAtLogin: Bool {
@@ -48,6 +51,7 @@ final class Prefs: ObservableObject {
         placement = (saved == .notch && !Prefs.hasNotch) ? .menubar : saved
         trackClaude = d.object(forKey: "trackClaude") as? Bool ?? true
         trackCodex  = d.object(forKey: "trackCodex")  as? Bool ?? true
+        showRemaining = d.object(forKey: "showRemaining") as? Bool ?? true
         sound       = d.object(forKey: "sound")       as? Bool ?? true
         pushURL     = d.string(forKey: "pushURL") ?? ""
         launchAtLogin = d.object(forKey: "launchAtLogin") as? Bool ?? false

@@ -26,7 +26,8 @@ actor CodexProvider {
     /// Two windows when the log has them, plus the credit pool when it is exhausted.
     func windows() -> [QuotaWindow] {
         var quota: [String: Any]?      // newest `limit_id: codex`
-        var credits: [String: Any]?    // newest record whose pool is spent
+        var quotaAt = Date.distantPast
+        var creditsAt: Date?           // when the pool was last reported spent
 
         var observed = Date.distantPast
         for (url, mtime) in Self.recentFiles(12) {
@@ -36,13 +37,14 @@ actor CodexProvider {
 
             if id == "codex", quota == nil, rl["primary"] is [String: Any] {
                 quota = rl
+                quotaAt = mtime
             }
-            if credits == nil,
+            if creditsAt == nil,
                let reached = rl["rate_limit_reached_type"] as? String,
                reached.contains("credits") {
-                credits = rl
+                creditsAt = mtime
             }
-            if quota != nil && credits != nil { break }
+            if quota != nil && creditsAt != nil { break }
         }
 
         var out: [QuotaWindow] = []
@@ -52,13 +54,18 @@ actor CodexProvider {
             if let w = Self.window(rl, key: "secondary", id: "codex_7d", title: "周窗口", observed: observed) { out.append(w) }
         }
 
-        if credits != nil {
-            // A spent add-on pool is a standing fact, not a window: no percentage, no reset.
-            // `Snapshot.overall` deliberately leaves windows shaped like this out of the
-            // menu-bar colour, so it cannot pin the mark red for weeks.
+        // The add-on credit pool is reported only while it is genuinely the current state.
+        //
+        // These records interleave with the quota ones, and a `premium` record saying the pool
+        // is spent stays on disk forever. Reporting it unconditionally kept a red "额度耗尽" row
+        // in the panel a full day after the fact — Codex's own interface showed no such thing,
+        // because to Codex it is an account attribute, not a usage window. So it has to be both
+        // the newest record we saw and recent enough to still mean something.
+        if let creditsAt, creditsAt >= quotaAt,
+           Date().timeIntervalSince(creditsAt) < 3600 {
             out.append(QuotaWindow(id: "codex_credits", provider: .codex, channel: .codex,
                                    title: "附加额度", percent: nil, severity: .critical,
-                                   note: "已用尽", observedAt: observed))
+                                   note: "已用尽", observedAt: creditsAt))
         }
 
         if out.isEmpty {

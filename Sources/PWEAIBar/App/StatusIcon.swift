@@ -26,6 +26,7 @@ enum StatusIcon {
     }
 
     static func render(_ snap: Snapshot, mode: MenuBarMode, dark: Bool) -> NSImage {
+        let remaining = Prefs.shared.showRemaining
         let label: NSColor = dark ? .white : .black
         let font = Theme.nsNumber(11.5, 500)
 
@@ -43,18 +44,18 @@ enum StatusIcon {
             case .compact:
                 for p in providers(snap) {
                     segments.append(Segment(text: "", colour: tint(p.band, dark), mark: p.provider))
-                    segments.append(Segment(text: p.display, colour: tint(p.band, dark)))
+                    segments.append(Segment(text: Readout.text(p, remaining: remaining), colour: tint(p.band, dark)))
                 }
             case .full:
                 for p in providers(snap) {
                     segments.append(Segment(text: "", colour: tint(p.band, dark), mark: p.provider))
                     if p.provider == .claude,
                        let five = snap.window(.session), let week = snap.window(.week) {
-                        segments.append(Segment(text: five.display, colour: tint(five.band, dark)))
+                        segments.append(Segment(text: Readout.text(five, remaining: remaining), colour: tint(five.band, dark)))
                         segments.append(Segment(text: "/", colour: label.withAlphaComponent(0.45)))
-                        segments.append(Segment(text: week.display, colour: tint(week.band, dark)))
+                        segments.append(Segment(text: Readout.text(week, remaining: remaining), colour: tint(week.band, dark)))
                     } else {
-                        segments.append(Segment(text: p.display, colour: tint(p.band, dark)))
+                        segments.append(Segment(text: Readout.text(p, remaining: remaining), colour: tint(p.band, dark)))
                     }
                 }
                 if let c = countdown(snap) {

@@ -17,6 +17,59 @@ actor ClaudeProvider {
 
     private var cache: [QuotaWindow] = []
     private var fetchedAt: Date?
+    private var loadedFromDisk = false
+
+    /// The last good response, kept between launches.
+    ///
+    /// Without it every fresh process starts with an empty cache and fires a request
+    /// immediately — which is exactly how a few relaunches in a row earn a 429 from an endpoint
+    /// that is rate-limited hard. It also means the panel shows real figures the instant it
+    /// opens rather than after a round trip.
+    private static var diskCache: URL {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("PWE AI Bar", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("quota-cache.json")
+    }
+
+    private func loadCache() {
+        guard !loadedFromDisk else { return }
+        loadedFromDisk = true
+        guard let data = try? Data(contentsOf: Self.diskCache),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let at = root["at"] as? Double,
+              let rows = root["windows"] as? [[String: Any]] else { return }
+        fetchedAt = Date(timeIntervalSince1970: at)
+        cache = rows.compactMap { r in
+            guard let id = r["id"] as? String, let ch = r["channel"] as? Int,
+                  let channel = Channel(rawValue: ch) else { return nil }
+            return QuotaWindow(
+                id: id, provider: .claude, channel: channel,
+                title: r["title"] as? String ?? "",
+                percent: r["percent"] as? Double,
+                severity: Severity(word: r["severity"] as? String),
+                resetsAt: (r["resetsAt"] as? Double).map { Date(timeIntervalSince1970: $0) },
+                isActive: r["isActive"] as? Bool ?? false,
+                observedAt: Date(timeIntervalSince1970: at),
+                gradedBy: .server)
+        }
+        // A window whose reset has already passed is not news, it is yesterday's high.
+        cache.removeAll { w in w.resetsAt.map { $0 < Date() } ?? false }
+    }
+
+    private func saveCache() {
+        let rows: [[String: Any]] = cache.map { w in
+            var r: [String: Any] = ["id": w.id, "channel": w.channel.rawValue,
+                                    "title": w.title, "severity": w.severity.rawValue,
+                                    "isActive": w.isActive]
+            if let p = w.percent { r["percent"] = p }
+            if let d = w.resetsAt { r["resetsAt"] = d.timeIntervalSince1970 }
+            return r
+        }
+        let root: [String: Any] = ["at": Date().timeIntervalSince1970, "windows": rows]
+        guard let data = try? JSONSerialization.data(withJSONObject: root) else { return }
+        try? data.write(to: Self.diskCache, options: .atomic)
+    }
     private var retryAfter: Date?
     /// Why we have no Claude numbers, when we have none. The panel needs to tell the
     /// difference: "log in" and "grant keychain access" are different problems with different
@@ -146,7 +199,10 @@ actor ClaudeProvider {
     // MARK: Fetch
 
     func windows() async -> (windows: [QuotaWindow], stale: Bool) {
-        if let at = fetchedAt, Date().timeIntervalSince(at) < ttl { return (cache, false) }
+        loadCache()
+        if let at = fetchedAt, Date().timeIntervalSince(at) < ttl, !cache.isEmpty {
+            return (cache, false)
+        }
         if let r = retryAfter, Date() < r { return (cache, true) }
 
         guard let cred = await token() else {
@@ -185,6 +241,7 @@ actor ClaudeProvider {
             blocker = .none
             cache = parse(root)
             fetchedAt = Date()
+            saveCache()
             return (cache, false)
         } catch {
             return (cache.isEmpty ? offline() : cache, true)

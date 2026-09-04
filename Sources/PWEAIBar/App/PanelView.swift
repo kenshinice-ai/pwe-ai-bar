@@ -81,7 +81,7 @@ struct PanelView: View {
 
             if let p = snap.protagonist {
                 HStack(alignment: .firstTextBaseline, spacing: Theme.s2) {
-                    Text(p.display).font(Theme.figures(36))
+                    Text(Readout.text(p, remaining: prefs.showRemaining)).font(Theme.figures(36))
                         .foregroundStyle(Theme.health(p.band, dark: isDark))
                     Spacer()
                     Text(resetText(p) ?? "").font(Theme.sans(11)).foregroundStyle(Theme.text2)
@@ -90,7 +90,7 @@ struct PanelView: View {
                 HStack(spacing: 5) {
                     ProviderMarkView(provider: p.provider, tint: Theme.text2)
                         .frame(width: 10, height: 10)
-                    Text("\(p.provider.name) · \(p.title)")
+                    Text("\(p.provider.name) · \(p.title) · \(prefs.showRemaining ? Readout.label.remaining : Readout.label.used)")
                         .font(Theme.sans(11)).foregroundStyle(Theme.text2)
                 }
                 .padding(.top, Theme.s2)
@@ -205,7 +205,7 @@ struct PanelView: View {
             Text(w.title).font(Theme.sans(11)).foregroundStyle(Theme.text2)
                 .frame(width: 66, alignment: .leading)
             track(w).frame(maxWidth: .infinity)
-            Text(w.display).font(Theme.figures(11.5, 600))
+            Text(Readout.text(w, remaining: prefs.showRemaining)).font(Theme.figures(11.5, 600))
                 .foregroundStyle(Theme.health(w.band, dark: isDark))
                 .frame(width: 52, alignment: .trailing)
             Text(shortReset(w) ?? "").font(Theme.sans(10))
@@ -291,16 +291,16 @@ struct PanelView: View {
     /// have. It gets a dashed rule: present, clearly not a scale.
     @ViewBuilder
     private func track(_ w: QuotaWindow) -> some View {
-        if let pct = w.percent {
+        if let fraction = Readout.fill(w, remaining: prefs.showRemaining) {
             GeometryReader { g in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Theme.sunk)
-                    // A genuine zero draws nothing. A 2 pt minimum was there to keep small
-                    // values visible, but it also painted a sliver on an empty window, which
-                    // reads as "a little bit used" when the truth is "not used at all".
-                    if pct > 0 {
+                    // A genuine zero draws nothing. A minimum width keeps small values visible,
+                    // but painting a sliver on an empty window reads as "a little bit" when the
+                    // truth is "none".
+                    if fraction > 0 {
                         Capsule().fill(Theme.health(w.band, dark: isDark))
-                            .frame(width: max(3, g.size.width * min(1, pct / 100)))
+                            .frame(width: max(3, g.size.width * fraction))
                     }
                 }
             }

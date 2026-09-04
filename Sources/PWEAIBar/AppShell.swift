@@ -69,7 +69,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func tooltip(_ snap: Snapshot) -> String {
-        var lines = snap.windows.map { "\($0.title) \($0.display)" }
+        let remaining = Prefs.shared.showRemaining
+        var lines = snap.windows.map {
+            "\($0.provider.name) \($0.title) \(Readout.text($0, remaining: remaining))"
+        }
         if let c = snap.contextPercent { lines.append("上下文 \(Int(c))%") }
         if snap.stale { lines.append("（显示的是上次成功读到的数字）") }
         return lines.isEmpty ? "PWE AI Bar" : lines.joined(separator: "\n")
