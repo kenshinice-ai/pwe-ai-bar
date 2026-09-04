@@ -6,7 +6,11 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var prefs = Prefs.shared
     var installHooks: () -> Bool
+    var saveToken: (String) -> Void
+    var enableRealQuota: () -> Void
     @State private var hookState: String = HookProvider.isInstalled ? "已安装" : "未安装"
+    @State private var token: String = ""
+    @State private var tokenState: String = Credentials.hasOwnToken ? "已保存" : ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -31,6 +35,41 @@ struct SettingsView: View {
                     if !Prefs.hasNotch {
                         Text("这台机器没有刘海，该选项不可用。")
                             .font(Theme.sans(10.5)).foregroundStyle(Theme.text2)
+                    }
+                }
+            }
+            row("额度数据来源") {
+                VStack(alignment: .leading, spacing: Theme.s2) {
+                    // The whole point of this section is that the first option never shows a
+                    // dialog. Say so plainly — a permission prompt the user did not expect is
+                    // the thing most likely to make them quit the app on day one.
+                    Text(Credentials.hasOwnToken
+                         ? "正在用长期令牌，不会有任何授权弹框。"
+                         : "正在读 Claude Code 的钥匙串凭据，首次需要点一次「始终允许」。")
+                        .font(Theme.sans(11)).foregroundStyle(Theme.text2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack(spacing: Theme.s1 + 1) {
+                        SecureField("粘贴 claude setup-token 生成的令牌", text: $token)
+                            .textFieldStyle(.roundedBorder).font(Theme.sans(11.5))
+                        Button(Credentials.hasOwnToken && token.isEmpty ? "清除" : "保存") {
+                            saveToken(token)
+                            tokenState = token.isEmpty ? "" : "已保存"
+                            token = ""
+                        }
+                        .font(Theme.sans(12))
+                    }
+
+                    HStack(spacing: Theme.s2) {
+                        Text("想彻底不再弹框：终端运行 claude setup-token，把结果粘进来。")
+                            .font(Theme.sans(10.5)).foregroundStyle(Theme.text2)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        Button("授权钥匙串") { enableRealQuota() }
+                            .font(Theme.sans(11))
+                    }
+                    if !tokenState.isEmpty {
+                        Text(tokenState).font(Theme.sans(10.5)).foregroundStyle(Theme.accent)
                     }
                 }
             }

@@ -16,6 +16,7 @@ struct PanelView: View {
     var onTrophy: () -> Void
     var onSettings: () -> Void
     var onOpen: (Provider) -> Void
+    var onEnableQuota: () -> Void
 
     private var snap: Snapshot { store.snapshot }
 
@@ -104,6 +105,8 @@ struct PanelView: View {
     private var emptyState: some View {
         let (headline, fix): (String, String?) = {
             switch store.blocker {
+            case .needsSetup:
+                return ("还没接上真实额度", "下面显示的是本地估算")
             case .notLoggedIn:
                 return ("还没登录", "在终端运行 claude auth login")
             case .keychainRefused:
@@ -119,11 +122,16 @@ struct PanelView: View {
                 return ("暂时读不到额度", nil)
             }
         }()
-        return VStack(alignment: .leading, spacing: 5) {
+        return VStack(alignment: .leading, spacing: 6) {
             Text(headline).font(Theme.sans(13, 600)).foregroundStyle(Theme.text)
             if let fix {
                 Text(fix).font(Theme.sans(11)).foregroundStyle(Theme.text2)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            if store.blocker == .needsSetup || store.blocker == .keychainRefused {
+                Button("启用真实额度") { onEnableQuota() }
+                    .font(Theme.sans(11.5))
+                    .help("会弹一次 macOS 钥匙串授权，选「始终允许」后不再询问")
             }
         }
     }

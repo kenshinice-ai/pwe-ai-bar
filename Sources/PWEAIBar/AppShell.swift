@@ -101,7 +101,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PanelView(store: store,
                   onTrophy: { [weak self] in self?.showTrophy() },
                   onSettings: { [weak self] in self?.showSettings() },
-                  onOpen: { [weak self] p in self?.activate(p) })
+                  onOpen: { [weak self] p in self?.activate(p) },
+                  onEnableQuota: { [weak self] in self?.store.enableRealQuota() })
     }
 
     private func togglePopover() {
@@ -173,7 +174,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showSettings() {
         closePopover()
-        let view = SettingsView(installHooks: { [weak self] in self?.installHooks() ?? false })
+        let view = SettingsView(
+            installHooks: { [weak self] in self?.installHooks() ?? false },
+            saveToken: { [weak self] t in self?.store.saveToken(t) },
+            enableRealQuota: { [weak self] in self?.store.enableRealQuota() })
         if let w = settingsWindow {
             w.contentView = NSHostingView(rootView: view)
             present(w); return

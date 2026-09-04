@@ -95,5 +95,13 @@ final class Store: ObservableObject {
     }
 
     func reloadPricing() { pricing = Pricing.load(); refresh() }
+
+    func saveToken(_ t: String) {
+        Task { await claude.useOwnToken(t); refresh() }
+    }
+
+    func enableRealQuota() {
+        Task { await claude.enableSharedKeychain(); refresh() }
+    }
     func clearAttention() { rules.clearAttention() }
 }

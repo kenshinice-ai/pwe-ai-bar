@@ -24,6 +24,25 @@ enum PWEAIBarMain {
             }
             return
         }
+        // Headless credential setup, so a token can be piped straight in:
+        //     claude setup-token | "PWE AI Bar.app/Contents/MacOS/PWEAIBar" --token -
+        if let i = CommandLine.arguments.firstIndex(of: "--token") {
+            let arg = i + 1 < CommandLine.arguments.count ? CommandLine.arguments[i + 1] : ""
+            var value = arg
+            if arg == "-" {
+                value = String(data: FileHandle.standardInput.readDataToEndOfFile(),
+                               encoding: .utf8) ?? ""
+            }
+            value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            let ok = Credentials.storeOwnToken(value)
+            print(value.isEmpty ? (ok ? "已清除令牌" : "清除失败")
+                                : (ok ? "已保存令牌，之后不会再有授权弹框" : "保存失败"))
+            return
+        }
+        if CommandLine.arguments.contains("--cred") {
+            Probe.credentials()
+            return
+        }
         if CommandLine.arguments.contains("--probe") {
             Probe.run()
             return

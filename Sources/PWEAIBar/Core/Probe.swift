@@ -97,7 +97,7 @@ enum Probe {
         for dark in [true, false] {
             for mode in PanelMode.allCases {
                 Prefs.shared.panelMode = mode
-                let view = PanelView(store: store, onTrophy: {}, onSettings: {}, onOpen: { _ in })
+                let view = PanelView(store: store, onTrophy: {}, onSettings: {}, onOpen: { _ in }, onEnableQuota: {})
                     .environment(\.colorScheme, dark ? .dark : .light)
                 let host = NSHostingView(rootView: view)
                 host.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
@@ -111,6 +111,33 @@ enum Probe {
                 try? png.write(to: URL(fileURLWithPath: dir + "/" + name))
                 print("  \(name)  \(Int(host.frame.width))×\(Int(host.frame.height))")
             }
+        }
+    }
+
+    /// `--cred` — where the token would come from, and whether asking costs a dialog.
+    /// Deliberately does not read the shared item, so running it can never raise a prompt.
+    static func credentials() {
+        let own = Credentials.hasOwnToken
+        let shared = Credentials.sharedItemExists()
+        let refused = UserDefaults.standard.bool(forKey: "keychainRefused")
+
+        print("PWE AI Bar — 凭据\n" + String(repeating: "─", count: 52))
+        print("自有长期令牌   \(own ? "有（零弹框）" : "无")")
+        print("Claude 钥匙串  \(shared ? "存在" : "不存在（没登录过）")")
+        print("曾被拒绝       \(refused ? "是——不会再自动询问" : "否")")
+        print("")
+        if own {
+            print("当前来源：自有令牌。永远不会弹框。")
+        } else if refused {
+            print("当前来源：无。")
+            print("两条路：")
+            print("  1) 零弹框：claude setup-token 拿到令牌后")
+            print("     \"PWE AI Bar.app/Contents/MacOS/PWEAIBar\" --token <令牌>")
+            print("  2) 一次弹框：设置里点「重试钥匙串」，然后选「始终允许」")
+        } else if shared {
+            print("当前来源：Claude Code 的钥匙串。首次读取会弹一次框，选「始终允许」后不再问。")
+        } else {
+            print("当前来源：无。先运行 claude auth login。")
         }
     }
 
@@ -145,6 +172,7 @@ enum Probe {
             let why: String
             switch await claude.blocker {
             case .none: why = "—"
+            case .needsSetup: why = "未授权（面板点「启用真实额度」，或用 --token 设长期令牌）"
             case .notLoggedIn: why = "未登录（运行 claude auth login）"
             case .keychainRefused: why = "钥匙串拒绝（重新运行 claude auth login 即可重建授权）"
             case .expired: why = "登录过期（打开一次 Claude Code）"

@@ -22,14 +22,84 @@ actor Transcript {
         let input, output, cacheWrite, cacheRead: Int
     }
 
-    /// What one file contributed, remembered so an unchanged file is never read twice.
+    /// What one file contributed, remembered so an unchanged file is never read twice — and
+    /// so a growing one is only read from where we stopped.
     private struct FileCache {
         let modified: Date
         let size: Int
+        /// Byte offset just past the last complete line we parsed. A session log is appended to
+        /// while you work, so the live file changes on every sweep; without this its whole
+        /// twenty-odd megabytes are re-read each time, which was the last two and a half
+        /// seconds of the refresh.
+        let parsedUpTo: Int
         let turns: [Turn]
     }
 
     private var cache: [String: FileCache] = [:]
+    private var loadedFromDisk = false
+
+    /// Where the parsed aggregate lives between launches.
+    ///
+    /// The in-memory cache makes the second sweep of a session instant, but the first one still
+    /// re-read 159 MB — every launch, and every reboot. Turns are small and there are only about
+    /// eleven thousand of them, so the whole parse result fits in a few hundred kilobytes on
+    /// disk. Keyed by modification date and size, exactly like the in-memory copy, so a file
+    /// that changed is still re-read and one that did not is never touched.
+    private static var diskCache: URL {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("PWE AI Bar", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("transcript-cache.json")
+    }
+
+    /// Rows are `[epochSeconds, modelIndex, input, output, cacheWrite, cacheRead]`, with the
+    /// model names held once in their own list. Storing the model string on every row would
+    /// triple the file for no gain.
+    private func loadDisk() {
+        guard !loadedFromDisk else { return }
+        loadedFromDisk = true
+        guard let data = try? Data(contentsOf: Self.diskCache),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              root["version"] as? Int == 1,
+              let models = root["models"] as? [String],
+              let files = root["files"] as? [String: [String: Any]] else { return }
+
+        for (path, entry) in files {
+            guard let modified = entry["m"] as? Double,
+                  let size = entry["s"] as? Int,
+                  let rows = entry["t"] as? [[Double]] else { continue }
+            let turns: [Turn] = rows.compactMap { r in
+                guard r.count == 6, Int(r[1]) < models.count else { return nil }
+                return Turn(at: Date(timeIntervalSince1970: r[0]), model: models[Int(r[1])],
+                            input: Int(r[2]), output: Int(r[3]),
+                            cacheWrite: Int(r[4]), cacheRead: Int(r[5]))
+            }
+            cache[path] = FileCache(modified: Date(timeIntervalSince1970: modified),
+                                    size: size,
+                                    parsedUpTo: entry["p"] as? Int ?? 0,
+                                    turns: turns)
+        }
+    }
+
+    private func saveDisk() {
+        var models: [String] = []
+        var index: [String: Int] = [:]
+        var files: [String: [String: Any]] = [:]
+        for (path, entry) in cache {
+            let rows: [[Double]] = entry.turns.map { t in
+                let i: Int
+                if let hit = index[t.model] { i = hit }
+                else { i = models.count; index[t.model] = i; models.append(t.model) }
+                return [t.at.timeIntervalSince1970, Double(i), Double(t.input),
+                        Double(t.output), Double(t.cacheWrite), Double(t.cacheRead)]
+            }
+            files[path] = ["m": entry.modified.timeIntervalSince1970, "s": entry.size,
+                           "p": entry.parsedUpTo, "t": rows]
+        }
+        let root: [String: Any] = ["version": 1, "models": models, "files": files]
+        guard let data = try? JSONSerialization.data(withJSONObject: root) else { return }
+        try? data.write(to: Self.diskCache, options: .atomic)
+    }
 
     struct Result: Sendable {
         var trophy: Trophy
@@ -37,9 +107,11 @@ actor Transcript {
     }
 
     func refresh(pricing: Pricing) -> Result {
+        loadDisk()
         let fm = FileManager.default
         var seen = Set<String>()
         var all: [Turn] = []
+        var changed = false
 
         if let e = fm.enumerator(at: Self.root,
                                  includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
@@ -55,13 +127,33 @@ actor Transcript {
                     all += hit.turns                      // untouched since last sweep
                     continue
                 }
-                let turns = Self.parse(url)
-                cache[key] = FileCache(modified: modified, size: size, turns: turns)
+
+                // Appended to, and the part we already read has not moved: parse only the tail.
+                // A rewrite or truncation (size below where we stopped) falls through to a full
+                // re-read, because the offsets we hold no longer mean anything.
+                if let hit = cache[key], size >= hit.parsedUpTo, hit.parsedUpTo > 0 {
+                    let (fresh, end) = Self.parse(url, from: hit.parsedUpTo)
+                    let turns = hit.turns + fresh
+                    cache[key] = FileCache(modified: modified, size: size,
+                                           parsedUpTo: end, turns: turns)
+                    all += turns
+                    changed = true
+                    continue
+                }
+
+                let (turns, end) = Self.parse(url, from: 0)
+                cache[key] = FileCache(modified: modified, size: size,
+                                       parsedUpTo: end, turns: turns)
                 all += turns
+                changed = true
             }
         }
         // Drop files that have gone away, so the cache cannot grow forever.
-        for key in cache.keys where !seen.contains(key) { cache.removeValue(forKey: key) }
+        for key in cache.keys where !seen.contains(key) {
+            cache.removeValue(forKey: key)
+            changed = true
+        }
+        if changed { saveDisk() }
 
         return Self.summarise(all, pricing: pricing)
     }
@@ -76,19 +168,24 @@ actor Transcript {
     /// lines, and almost all of that work is spent rejecting lines we do not want. Scanning
     /// raw bytes for an ASCII marker and only decoding the survivors turns the same sweep into
     /// a couple of seconds. The file is memory-mapped so a big log is never fully resident.
-    private static func parse(_ url: URL) -> [Turn] {
-        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return [] }
+    /// Returns the turns found from `offset` onward, and the offset just past the last
+    /// **complete** line — a log being written to can end mid-line, and resuming from inside
+    /// one would produce garbage on the next sweep.
+    private static func parse(_ url: URL, from offset: Int) -> ([Turn], Int) {
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe),
+              offset <= data.count else { return ([], 0) }
         var out: [Turn] = []
+        var end = offset
 
         data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
             guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
             let count = raw.count
             let usage = Array("\"usage\"".utf8)
-            var lineStart = 0
-            var i = 0
+            var lineStart = offset
+            var i = offset
 
-            while i <= count {
-                guard i == count || base[i] == 0x0A else { i += 1; continue }
+            while i < count {
+                guard base[i] == 0x0A else { i += 1; continue }
                 let length = i - lineStart
                 if length > 40, contains(base + lineStart, length, usage) {
                     let slice = Data(bytes: base + lineStart, count: length)
@@ -96,9 +193,10 @@ actor Transcript {
                 }
                 i += 1
                 lineStart = i
+                end = i                       // only ever advances past a real newline
             }
         }
-        return out
+        return (out, end)
     }
 
     /// Naive substring search over bytes. The needle is seven bytes and the haystack is one
@@ -139,14 +237,20 @@ actor Transcript {
         var t = Trophy()
         t.turns = turns.count
 
-        let cal = Calendar.current
-        var perModel: [String: (Int, Double)] = [:]
-        var perDay: [String: Double] = [:]
-        var perHour: [Date: Double] = [:]
-        var days = Set<String>()
+        // Integer arithmetic, not Calendar and DateFormatter.
+        //
+        // The obvious version calls `DateFormatter.string(from:)` and `Calendar.dateInterval`
+        // once per turn. At eleven thousand turns that alone accounted for most of a five-second
+        // sweep — both are far heavier than they look, and neither is doing anything here that
+        // an offset and a division cannot. Only the handful of distinct days that survive ever
+        // get formatted.
+        let offset = Double(TimeZone.current.secondsFromGMT())
+        let nowLocal = Date().timeIntervalSince1970 + offset
+        let thisHour = floor(nowLocal / 3600)
 
-        let topOfHour = cal.dateInterval(of: .hour, for: Date())?.start ?? Date()
-        let dayFmt = DateFormatter(); dayFmt.dateFormat = "yyyy-MM-dd"
+        var perModel: [String: (Int, Double)] = [:]
+        var perDay: [Int: Double] = [:]
+        var perHour: [Int: Double] = [:]
 
         var latest: (Date, String, Int)?
         for turn in turns {
@@ -157,25 +261,31 @@ actor Transcript {
             t.tokens.cacheWrite += turn.cacheWrite; t.tokens.cacheRead += turn.cacheRead
 
             var m = perModel[turn.model] ?? (0, 0); m.0 += 1; m.1 += c; perModel[turn.model] = m
-            let day = dayFmt.string(from: turn.at)
-            days.insert(day); perDay[day, default: 0] += c
-            if turn.at > topOfHour.addingTimeInterval(-23 * 3600),
-               let h = cal.dateInterval(of: .hour, for: turn.at)?.start {
-                perHour[h, default: 0] += c
-            }
+
+            let local = turn.at.timeIntervalSince1970 + offset
+            perDay[Int(floor(local / 86400)), default: 0] += c
+            let hour = Int(floor(local / 3600))
+            if Double(hour) > thisHour - 24 { perHour[hour, default: 0] += c }
+
             if latest == nil || turn.at > latest!.0 {
                 latest = (turn.at, turn.model, turn.input + turn.cacheWrite + turn.cacheRead)
             }
         }
 
-        t.days = days.count
+        t.days = perDay.count
         t.byModel = perModel.map { ($0.key, $0.value.0, $0.value.1) }.sorted { $0.usd > $1.usd }
-        t.byDay = perDay.map { ($0.key, $0.value) }.sorted { $0.day < $1.day }
+
+        let dayFmt = DateFormatter()
+        dayFmt.dateFormat = "yyyy-MM-dd"
+        t.byDay = perDay.keys.sorted().map { d in
+            (dayFmt.string(from: Date(timeIntervalSince1970: Double(d) * 86400 - offset)),
+             perDay[d] ?? 0)
+        }
         // Empty hours keep their slot: a gap is information, and closing it up would make a
         // quiet night look busy.
         t.byHour = (0..<24).reversed().map { back in
-            let h = topOfHour.addingTimeInterval(-Double(back) * 3600)
-            return (h, perHour[h] ?? 0)
+            let h = Int(thisHour) - back
+            return (Date(timeIntervalSince1970: Double(h) * 3600 - offset), perHour[h] ?? 0)
         }
         t.subscriptionUSD = pricing.subscriptionMonthlyUSD * Double(max(t.days, 1)) / 30.0
 
@@ -193,9 +303,16 @@ actor Transcript {
     }
 
     /// The most recent 429 — the only place a real reset time is recorded locally, and the
-    /// offline fallback when the usage endpoint is unreachable. Scans only recently-touched
-    /// files: an old rate limit is not news.
+    /// offline fallback when the usage endpoint is unreachable.
+    ///
+    /// Byte-scanned and cached, for the same reason the main parse is: these files run to nine
+    /// megabytes each, and the naive String version cost three seconds on every refresh — while
+    /// answering a question whose answer changes a few times a week.
+    private static var rateLimitCache: (at: Date, value: (resetsAt: Date, kind: String)?)?
+
     static func lastRateLimit() -> (resetsAt: Date, kind: String)? {
+        if let c = rateLimitCache, Date().timeIntervalSince(c.at) < 300 { return c.value }
+
         guard let e = FileManager.default.enumerator(
             at: root, includingPropertiesForKeys: [.contentModificationDateKey],
             options: [.skipsHiddenFiles]) else { return nil }
@@ -205,19 +322,33 @@ actor Transcript {
                 .contentModificationDate ?? .distantPast
             recent.append((url, d))
         }
+
         var best: (Date, String)?
-        for (url, _) in recent.sorted(by: { $0.1 > $1.1 }).prefix(8) {
-            guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
-            for line in text.split(separator: "\n") where line.contains("quotaLimits") {
-                guard let data = line.data(using: .utf8),
-                      let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let q = o["quotaLimits"] as? [String: Any],
-                      let secs = q["resetsAt"] as? Double else { continue }
-                let at = Date(timeIntervalSince1970: secs)
-                let kind = q["rateLimitType"] as? String ?? "five_hour"
-                if best == nil || at > best!.0 { best = (at, kind) }
+        let needle = Array("quotaLimits".utf8)
+        for (url, _) in recent.sorted(by: { $0.1 > $1.1 }).prefix(6) {
+            guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { continue }
+            data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+                guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
+                var lineStart = 0, i = 0
+                while i <= raw.count {
+                    guard i == raw.count || base[i] == 0x0A else { i += 1; continue }
+                    let length = i - lineStart
+                    if length > 40, contains(base + lineStart, length, needle),
+                       let o = try? JSONSerialization.jsonObject(
+                           with: Data(bytes: base + lineStart, count: length)) as? [String: Any],
+                       let q = o["quotaLimits"] as? [String: Any],
+                       let secs = q["resetsAt"] as? Double {
+                        let at = Date(timeIntervalSince1970: secs)
+                        if best == nil || at > best!.0 {
+                            best = (at, q["rateLimitType"] as? String ?? "five_hour")
+                        }
+                    }
+                    i += 1
+                    lineStart = i
+                }
             }
         }
+        rateLimitCache = (Date(), best)
         return best
     }
 }

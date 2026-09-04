@@ -1,5 +1,4 @@
 import Foundation
-import Security
 import os
 
 /// Claude Code's quota, read from the same OAuth endpoint the `/usage` command uses.
@@ -24,6 +23,7 @@ actor ClaudeProvider {
     /// fixes, and "读不到额度" helps with neither.
     enum Blocker: Equatable {
         case none
+        case needsSetup           // never asked yet — we do not raise a dialog uninvited
         case notLoggedIn          // no credential in the keychain at all
         case keychainRefused      // the item is there, macOS will not let us read it
         case expired              // token past its expiry; opening Claude Code refreshes it
@@ -35,28 +35,56 @@ actor ClaudeProvider {
 
     private let ttl: TimeInterval = 60
 
-    // MARK: Keychain
+    // MARK: Credential
 
-    private struct Credential { let token: String; let expiresAt: Date? }
+    /// Persisted across launches. Without it, a dialog the user closed once comes back on every
+    /// launch forever — which is the single most common reason people delete a menu-bar app.
+    private var refusedBefore: Bool {
+        get { UserDefaults.standard.bool(forKey: "keychainRefused") }
+        set { UserDefaults.standard.set(newValue, forKey: "keychainRefused") }
+    }
 
-    /// Set once the user dismisses the keychain prompt without allowing access. Without this we
-    /// would re-ask every refresh, which turns one dialog into a dialog every sixty seconds.
-    private var keychainDenied = false
-
-    /// The keychain read blocks its thread for as long as macOS shows the access dialog, and
-    /// a newly-signed binary always gets one. If nobody is at the machine, that is forever.
+    /// Whether the user has ever said yes to reading Claude Code's credential.
     ///
-    /// Two earlier attempts at a timeout both hung, and the second failure is the instructive
-    /// one. Racing the read against a sleep in a `withTaskGroup` looks right and cannot work:
-    /// the group does not return until *every* child finishes, `cancelAll()` has no effect on a
-    /// synchronous `SecItemCopyMatching` already in flight, and so the group sits waiting on the
-    /// loser it was supposed to abandon. (The first attempt was worse — both children shared
-    /// this actor's executor, so the blocking read owned it and the timer never even ran.)
+    /// The app does not touch the shared item until they do. An access dialog that appears on
+    /// its own, seconds after first launch, for reasons the user has not been told, is the most
+    /// alarming thing a small menu-bar app can do — and it arrives before anything has had a
+    /// chance to explain why it is needed. So the first run shows local figures and a button,
+    /// and the dialog only ever appears as the direct result of pressing it.
+    private var sharedAllowed: Bool {
+        get { UserDefaults.standard.bool(forKey: "sharedKeychainOptIn") }
+        set { UserDefaults.standard.set(newValue, forKey: "sharedKeychainOptIn") }
+    }
+
+    /// Order matters. Our own long-lived token can never raise a dialog, so it is tried first
+    /// and, when present, the shared item is never touched at all.
+    private func token() async -> Credentials.Token? {
+        if let own = Credentials.ownToken() { return own }
+        guard sharedAllowed else {
+            blocker = Credentials.sharedItemExists() ? .needsSetup : .notLoggedIn
+            return nil
+        }
+        guard !refusedBefore else {
+            blocker = .keychainRefused        // asked, declined; say so instead of going quiet
+            return nil
+        }
+        return await sharedWithTimeout()
+    }
+
+    /// The shared read blocks its thread for as long as macOS shows the access dialog, and if
+    /// nobody is at the machine that is forever.
     ///
-    /// So: no task group. Two queues race to resume one continuation, a lock decides who got
-    /// there first, and the loser is simply never waited on.
-    private func credentialWithTimeout() async -> Credential?? {
-        await withCheckedContinuation { (cont: CheckedContinuation<Credential??, Never>) in
+    /// Two earlier attempts at a timeout both hung, and the second is the instructive one.
+    /// Racing the read against a sleep in a `withTaskGroup` looks right and cannot work: the
+    /// group does not return until *every* child finishes, `cancelAll()` has no effect on a
+    /// synchronous `SecItemCopyMatching` already in flight, so the group sits waiting on the
+    /// loser it was meant to abandon. (The first attempt was worse still — both children shared
+    /// this actor's executor, so the blocking read owned it and the timer never ran.)
+    ///
+    /// So: no task group. Two queues race to resume one continuation, a lock decides who won,
+    /// and the loser is simply never waited on.
+    private func sharedWithTimeout() async -> Credentials.Token? {
+        let result: Credentials.Token?? = await withCheckedContinuation { cont in
             let resumed = OSAllocatedUnfairLock(initialState: false)
             func claim() -> Bool {
                 resumed.withLock { done in
@@ -66,47 +94,53 @@ actor ClaudeProvider {
                 }
             }
             DispatchQueue.global(qos: .userInitiated).async {
-                let c = Self.readKeychain()
-                if claim() { cont.resume(returning: .some(c)) }
+                let t = Credentials.readShared()
+                if claim() { cont.resume(returning: .some(t)) }
             }
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 8) {
-                // Outer nil: the dialog was never answered.
-                if claim() { cont.resume(returning: Credential??.none) }
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 20) {
+                if claim() { cont.resume(returning: .none) }   // outer nil: never answered
             }
         }
+
+        guard let inner = result else {
+            // The dialog went unanswered. Remember that, so it is asked once and not once a
+            // minute; Settings has a button to try again deliberately.
+            refusedBefore = true
+            blocker = .keychainRefused
+            return nil
+        }
+        guard let t = inner else {
+            // The item is there for the CLI but we could not read it: macOS is refusing this
+            // signature, which is a different problem from never having logged in.
+            if Credentials.sharedItemExists() {
+                refusedBefore = true
+                blocker = .keychainRefused
+            } else {
+                blocker = .notLoggedIn
+            }
+            return nil
+        }
+        return t
     }
 
-    /// Does the item exist at all? Asking for the attributes rather than the data does not
-    /// trip the access dialog, which is what separates "you never logged in" from "macOS is
-    /// refusing this build".
-    private static func credentialExists() -> Bool {
-        let q: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "Claude Code-credentials",
-            kSecReturnAttributes as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        return SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess
+    /// The user has asked for the real numbers, which is the only thing that puts the access
+    /// dialog on screen. Called from the panel's button and from Settings.
+    func enableSharedKeychain() {
+        sharedAllowed = true
+        refusedBefore = false
+        blocker = .none
+        fetchedAt = nil
     }
 
-    private static func readKeychain() -> Credential? {
-        let q: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "Claude Code-credentials",
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data,
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
+    func useOwnToken(_ value: String) {
+        Credentials.storeOwnToken(value.trimmingCharacters(in: .whitespacesAndNewlines))
+        blocker = .none
+        fetchedAt = nil
+    }
 
-        let node = (root["claudeAiOauth"] as? [String: Any]) ?? root
-        guard let token = node["accessToken"] as? String, !token.isEmpty else { return nil }
-        let exp = (node["expiresAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }
-        return Credential(token: token, expiresAt: exp)
+    var source: Credentials.Source {
+        if Credentials.hasOwnToken { return .ownToken }
+        return loggedIn ? .sharedKeychain : Credentials.Source.none
     }
 
     // MARK: Fetch
@@ -115,35 +149,21 @@ actor ClaudeProvider {
         if let at = fetchedAt, Date().timeIntervalSince(at) < ttl { return (cache, false) }
         if let r = retryAfter, Date() < r { return (cache, true) }
 
-        if keychainDenied { return (cache.isEmpty ? offline() : cache, true) }
-
-        let attempt = await credentialWithTimeout()
-        guard let inner = attempt else {
-            // Nobody answered the dialog. Stop asking — one prompt an hour is a nuisance, one
-            // every sixty seconds is a reason to delete the app.
-            keychainDenied = true
+        guard let cred = await token() else {
             loggedIn = false
-            blocker = .keychainRefused
-            return (offline(), true)
-        }
-        guard let cred = inner else {
-            loggedIn = false
-            // The item exists for the `claude` CLI but we could not read it: macOS is refusing
-            // this binary's signature, which is a different fix from logging in.
-            blocker = Self.credentialExists() ? .keychainRefused : .notLoggedIn
-            return (offline(), true)
+            return (cache.isEmpty ? offline() : cache, true)
         }
         if let e = cred.expiresAt, e < Date() {
+            // Expired: opening Claude Code refreshes it. Say so rather than sending a token we
+            // already know will bounce. A long-lived token has no expiry and never lands here.
             blocker = .expired
-            // Expired: opening Claude Code refreshes it. Say so by going stale rather than
-            // sending a token we already know will bounce.
             loggedIn = false
             return (cache.isEmpty ? offline() : cache, true)
         }
         loggedIn = true
 
         var req = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
-        req.setValue("Bearer \(cred.token)", forHTTPHeaderField: "Authorization")
+        req.setValue("Bearer \(cred.value)", forHTTPHeaderField: "Authorization")
         req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         req.timeoutInterval = 12
 
