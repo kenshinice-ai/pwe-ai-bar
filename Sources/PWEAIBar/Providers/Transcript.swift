@@ -62,6 +62,11 @@ actor Transcript {
     struct Result: Sendable {
         var trophy: Trophy
         var context: Double?
+        /// When the newest turn landed. The refresh loop uses it to tell "you are working" from
+        /// "you walked away", which the context reading cannot: that one stays valid for six
+        /// hours, so keying the fast cadence off it kept a laptop polling every twenty seconds
+        /// for most of an afternoon after the last thing you typed.
+        var lastTurnAt: Date?
     }
 
     // MARK: Sweep
@@ -208,7 +213,7 @@ actor Transcript {
         if let l = d.latest, Date().timeIntervalSince(l.at) < 6 * 3600 {
             ctx = min(100, Double(l.contextTokens) / contextWindow(for: l.model) * 100)
         }
-        return Result(trophy: t, context: ctx)
+        return Result(trophy: t, context: ctx, lastTurnAt: d.latest?.at)
     }
 
     private static func contextWindow(for model: String) -> Double {

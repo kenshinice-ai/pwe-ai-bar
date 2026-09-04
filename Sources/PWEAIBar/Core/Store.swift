@@ -28,7 +28,10 @@ final class Store: ObservableObject {
     /// 5 min is plenty when nothing has moved; a sleeping Mac gets nothing at all and one fresh
     /// read on wake rather than a backlog of missed ticks.
     private var interval: TimeInterval {
-        Date().timeIntervalSince(lastActivity) > 15 * 60 ? 300 : 20
+        let quiet = Date().timeIntervalSince(lastActivity)
+        if quiet > 60 * 60 { return 900 }      // nothing for an hour: check quarter-hourly
+        if quiet > 15 * 60 { return 300 }
+        return 20
     }
 
     func start() {
@@ -48,12 +51,17 @@ final class Store: ObservableObject {
 
     private func schedule() {
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+        let t = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 self?.refresh()
                 self?.schedule()
             }
         }
+        // `.common`, not the default mode. A default-mode timer stops firing while a menu or a
+        // popover is tracking — which is exactly when the panel is open in front of you and its
+        // numbers are the thing you are looking at.
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     func refresh() {
@@ -85,11 +93,12 @@ final class Store: ObservableObject {
             snap.events = HookProvider.events()
             snap.updatedAt = Date()
 
-            // "Something is happening" is what keeps the fast cadence alive.
-            if snap.events.first.map({ Date().timeIntervalSince($0.at) < 300 }) == true
-                || (snap.contextPercent ?? 0) > 0 {
-                lastActivity = Date()
-            }
+            // "Something is happening" is what keeps the fast cadence alive: a session event,
+            // or a turn that landed in the last few minutes. Not the context reading — that
+            // stays valid for six hours and would hold the fast loop open all afternoon.
+            let recentTurn = local.lastTurnAt.map { Date().timeIntervalSince($0) < 300 } ?? false
+            let recentEvent = snap.events.first.map { Date().timeIntervalSince($0.at) < 300 } ?? false
+            if recentTurn || recentEvent { lastActivity = Date() }
 
             let alerts = rules.evaluate(snap)
             let away = rules.isAway
