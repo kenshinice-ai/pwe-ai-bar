@@ -58,12 +58,12 @@ struct SettingsView: View {
             }
             row("额度数据来源") {
                 VStack(alignment: .leading, spacing: Theme.s2) {
-                    // The whole point of this section is that the first option never shows a
-                    // dialog. Say so plainly — a permission prompt the user did not expect is
-                    // the thing most likely to make them quit the app on day one.
-                    Text(Credentials.hasOwnToken
-                         ? "正在用长期令牌，不会有任何授权弹框。"
-                         : "正在读 Claude Code 的钥匙串凭据，首次需要点一次「始终允许」。")
+                    // The whole point of this section is that the default never shows a dialog.
+                    // Say which of the three states you are in — a permission prompt the user
+                    // did not expect is the thing most likely to make them quit on day one, and
+                    // a line claiming we are reading something we deliberately are not is just
+                    // as bad in the other direction.
+                    Text(sourceLine)
                         .font(Theme.sans(11)).foregroundStyle(Theme.text2)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -128,6 +128,16 @@ struct SettingsView: View {
         // System blue on a navy-and-amber panel reads as someone else's app. One tint at the
         // root covers every switch, picker and button below it.
         .tint(Theme.accent)
+    }
+
+    private var sourceLine: String {
+        if Credentials.hasOwnToken {
+            return "正在用长期令牌，不会有任何授权弹框。"
+        }
+        if UserDefaults.standard.bool(forKey: "sharedKeychainOptIn") {
+            return "正在读 Claude Code 的钥匙串凭据，已授权。"
+        }
+        return "还没接真实额度，只有本地估算——而且不会有任何弹框。"
     }
 
     private func row<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {

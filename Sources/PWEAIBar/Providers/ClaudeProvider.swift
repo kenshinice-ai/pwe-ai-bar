@@ -3,10 +3,11 @@ import os
 
 /// Claude Code's quota, read from the same OAuth endpoint the `/usage` command uses.
 ///
-/// Two things shape this file. First, the token is read from the keychain on demand and sent
-/// only to `api.anthropic.com` — it is never written to disk, logged, or held longer than the
-/// request. Second, the endpoint is rate-limited hard, so a cache and a strict `Retry-After`
-/// are not optimisations here, they are the difference between working and being locked out.
+/// Two things shape this file. First, the token: it comes from `Credentials`, is sent only to
+/// `api.anthropic.com`, and never reaches a log or a plain file — a long-lived token is stored,
+/// but in a keychain item this app owns, never on disk. Second, the endpoint is rate-limited
+/// hard, so the cache and a strict `Retry-After` are not optimisations here; they are the
+/// difference between working and being locked out for the next hour.
 ///
 /// Parsing is driven by the response's `limits[]` array rather than its named fields. The
 /// payload already carries a row of buckets that are null today — per-model weeklies, extra
