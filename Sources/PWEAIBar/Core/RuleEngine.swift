@@ -145,6 +145,8 @@ final class RuleEngine {
             case .failed:
                 out.append(Alert(kind: .failed, title: "会话出错",
                                  body: e.text, provider: e.provider, urgent: true))
+            case .answered:
+                break            // a state change, not something to say out loud
             }
         }
 

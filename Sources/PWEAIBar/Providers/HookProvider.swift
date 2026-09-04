@@ -57,6 +57,7 @@ enum HookProvider {
         case .waiting:  return "Claude 在等你回话\(where_)"
         case .finished: return "任务完成\(where_)"
         case .failed:   return "会话出错\(where_)"
+        case .answered: return "已回复\(where_)"
         }
     }
 
@@ -81,7 +82,12 @@ enum HookProvider {
            let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { root = o }
 
         var hooks = root["hooks"] as? [String: Any] ?? [:]
-        for (event, kind) in [("Notification", "waiting"), ("Stop", "finished")] {
+        // Three hooks. `UserPromptSubmit` is the one that makes "waiting" accurate: without it
+        // the state only clears when the turn ends, so the menu bar keeps saying Claude is
+        // waiting for minutes after you have already answered.
+        for (event, kind) in [("Notification", "waiting"),
+                              ("UserPromptSubmit", "answered"),
+                              ("Stop", "finished")] {
             var matchers = hooks[event] as? [[String: Any]] ?? []
             let command = "\(scriptPath.replacingOccurrences(of: " ", with: "\\ ")) \(kind)"
             let already = matchers.contains { m in

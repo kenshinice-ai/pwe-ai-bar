@@ -88,7 +88,12 @@ enum Provider: String, CaseIterable {
 
 /// Something that happened in a session, as opposed to something that is merely true.
 struct AgentEvent: Identifiable {
-    enum Kind: String { case waiting, finished, failed }
+    enum Kind: String {
+        case waiting, finished, failed
+        /// You replied. Carries no message of its own — it exists so a "waiting" state stops
+        /// being true the moment you answer, instead of lingering until the turn ends.
+        case answered
+    }
     let id: String
     let provider: Provider
     let kind: Kind

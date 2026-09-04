@@ -25,13 +25,15 @@ except Exception:
     o = {}
 if not isinstance(o, dict):
     o = {}
+# "answered" carries no text on purpose: the payload for it is whatever you just typed, and
+# none of it is needed — the event exists only to end the waiting state.
 rec = {
     "kind": kind,
     "provider": "claude",
     "at": time.time(),
     "session": o.get("session_id", ""),
     "cwd": o.get("cwd", ""),
-    "text": (o.get("message") or "")[:200],
+    "text": "" if kind == "answered" else (o.get("message") or "")[:200],
 }
 # A ring of recent events, not an archive.
 lines = []
