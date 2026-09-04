@@ -60,9 +60,12 @@ struct PanelView: View {
                 .frame(width: 15, height: 15 / BrandMark.aspect)
             Text("PWE AI Bar").font(Theme.serif(15)).foregroundStyle(Theme.text)
             Spacer()
-            if snap.stale {
+            // The dot means "these numbers are older than they look". With no numbers at all
+            // it means nothing, and the section's own line already says what is wrong.
+            if snap.stale, !snap.windows.isEmpty {
                 Circle().fill(Theme.accent).frame(width: 5, height: 5)
                     .help("显示的是上一次成功读到的数字")
+                    .accessibilityLabel("数据可能已过时")
             }
             Button(action: onSettings) {
                 Image(systemName: "gearshape").font(.system(size: 11))
@@ -289,7 +292,8 @@ struct PanelView: View {
     // MARK: Pieces
 
     private func gauge(_ w: CGFloat) -> some View {
-        WingView(channels: snap.channels(), perFeather: true)
+        WingView(channels: snap.channels(), perFeather: true,
+                 spoken: snap.spoken(remaining: prefs.showRemaining))
             .frame(width: w, height: w / BrandMark.aspect)
     }
 

@@ -280,7 +280,7 @@ enum Probe {
                 let reset = w.resetsAt.map { f($0) } ?? "—"
                 // Pad in Swift, never with %-Ns: that pads by C-string bytes and chops a
                 // multi-byte character clean in half — "信用耗尽" came out as mojibake.
-                print("  " + pad(w.provider.rawValue, 8) + pad(w.channel.label, 5)
+                print("  " + pad(w.provider.rawValue, 8) + pad(w.title, 14)
                       + pad(w.percent.map { "已用 \(Int($0))%" } ?? (w.note ?? "—"), 12)
                       + pad(w.severity.rawValue, 10)
                       + "active=\(w.isActive ? "y" : "n")  reset=\(reset)")
@@ -309,6 +309,9 @@ enum Probe {
             print(String(format: "  token  in %@  out %@  cw %@  cr %@",
                          big(t.tokens.input), big(t.tokens.output),
                          big(t.tokens.cacheWrite), big(t.tokens.cacheRead)))
+
+            print("\n朗读（VoiceOver / tooltip）")
+            print("  " + snap.spoken(remaining: Prefs.shared.showRemaining))
 
             print("\n事件")
             if snap.events.isEmpty { print("  （无）") }

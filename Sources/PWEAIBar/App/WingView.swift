@@ -11,6 +11,8 @@ struct WingView: NSViewRepresentable {
     /// mark is a signature rather than an instrument.
     var solid: Bool = false
     var tint: Color = Theme.accent
+    /// What a screen reader says instead of "image".
+    var spoken: String?
 
     func makeNSView(context: Context) -> WingNSView { WingNSView() }
 
@@ -20,6 +22,8 @@ struct WingView: NSViewRepresentable {
         v.solid = solid || channels.isEmpty
         v.tint = NSColor(tint)
         v.ink = NSColor(Theme.text)
+        v.setAccessibilityRole(.image)
+        v.setAccessibilityLabel(spoken ?? "PWE 翼形仪表")
         v.needsDisplay = true
     }
 }

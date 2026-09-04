@@ -180,6 +180,29 @@ struct Snapshot {
     /// One colour for the menu bar. `channels()` already reports only actionable readings, so
     /// nothing here needs a special case: a permanently spent credit pool cannot reach this.
     var overall: Health { channels().map(\.band).max() ?? .calm }
+
+    /// One sentence, for VoiceOver and the tooltip.
+    ///
+    /// The wing is a picture of a number, and a picture is all a screen reader gets from it.
+    /// The house standard spells the gauge out for the same reason — a mark that carries the
+    /// reading has to be able to say it.
+    func spoken(remaining: Bool) -> String {
+        var parts: [String] = []
+        for w in windows.sorted(by: { $0.strain > $1.strain }) {
+            let value = w.percent.map {
+                remaining ? "剩余 \(Int((100 - $0).rounded()))%" : "已用 \(Int($0.rounded()))%"
+            } ?? (w.note ?? "无数据")
+            parts.append("\(w.provider.name) \(w.title) \(value)")
+        }
+        if let c = contextPercent {
+            parts.append("上下文 \(remaining ? "剩余 \(Int((100 - c).rounded()))" : "已用 \(Int(c.rounded()))")%")
+        }
+        if let a = attention { parts.insert(a.text, at: 0) }
+        // Only when there is actually an old number on screen. Saying it while a provider has
+        // no data at all points at nothing — the panel's own line explains that case.
+        if stale, !windows.isEmpty { parts.append("显示的是上一次成功读到的数字") }
+        return parts.isEmpty ? "PWE AI Bar，暂无数据" : parts.joined(separator: "，")
+    }
 }
 
 /// The trophy figures. On a subscription the interesting number is not what you spent — you

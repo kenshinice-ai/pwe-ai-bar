@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var outsideMonitor: Any?
     private var prefsWatch: AnyCancellable?
     private var localMonitor: Any?
+    private var escapeMonitor: Any?
 
     func applicationDidFinishLaunching(_ n: Notification) {
         // The faces have to be in the process font list before the first view is laid out, or
@@ -70,23 +71,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         button.image = image
         // A zero-size image would leave an invisible, unclickable item — say something instead.
         button.title = image.size.width > 1 ? "" : "AI"
-        button.toolTip = tooltip(snap)
+        let sentence = snap.spoken(remaining: Prefs.shared.showRemaining)
+        button.toolTip = sentence
+        button.setAccessibilityLabel("PWE AI Bar")
+        button.setAccessibilityValue(sentence)
         if ProcessInfo.processInfo.environment["PWEBAR_DEBUG"] != nil {
             FileHandle.standardError.write(Data("""
             [redraw] image=\(Int(image.size.width))x\(Int(image.size.height))             dark=\(dark) visible=\(statusItem.isVisible) len=\(statusItem.length)             windows=\(snap.windows.count) buttonWindow=\(button.window != nil)
 
             """.utf8))
         }
-    }
-
-    private func tooltip(_ snap: Snapshot) -> String {
-        let remaining = Prefs.shared.showRemaining
-        var lines = snap.windows.map {
-            "\($0.provider.name) \($0.title) \(Readout.text($0, remaining: remaining))"
-        }
-        if let c = snap.contextPercent { lines.append("上下文 \(Int(c))%") }
-        if snap.stale { lines.append("（显示的是上次成功读到的数字）") }
-        return lines.isEmpty ? "PWE AI Bar" : lines.joined(separator: "\n")
     }
 
     @objc private func clicked() {
@@ -143,6 +137,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
                 Task { @MainActor in self?.closePopover() }
             }
+        // Escape closes it. `.applicationDefined` means we own dismissal entirely, and a panel
+        // you can open with the mouse but not close with the keyboard is a panel that traps you.
+        escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            guard event.keyCode == 53 else { return event }   // Escape
+            Task { @MainActor in self?.closePopover() }
+            return nil
+        }
         localMonitor = NSEvent.addLocalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
                 // A click inside the popover is not a dismissal; a click anywhere else is.
@@ -159,6 +160,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.highlight(false)
         if let m = outsideMonitor { NSEvent.removeMonitor(m); outsideMonitor = nil }
         if let m = localMonitor { NSEvent.removeMonitor(m); localMonitor = nil }
+        if let m = escapeMonitor { NSEvent.removeMonitor(m); escapeMonitor = nil }
     }
 
     private func showMenu() {

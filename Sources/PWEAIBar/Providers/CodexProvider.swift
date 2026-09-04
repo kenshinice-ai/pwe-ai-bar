@@ -29,10 +29,8 @@ actor CodexProvider {
         var quotaAt = Date.distantPast
         var creditsAt: Date?           // when the pool was last reported spent
 
-        var observed = Date.distantPast
         for (url, mtime) in Self.recentFiles(12) {
             guard let rl = Self.lastRateLimits(in: url) else { continue }
-            if observed == .distantPast { observed = mtime }
             let id = rl["limit_id"] as? String ?? ""
 
             if id == "codex", quota == nil, rl["primary"] is [String: Any] {
@@ -50,8 +48,12 @@ actor CodexProvider {
         var out: [QuotaWindow] = []
 
         if let rl = quota {
-            if let w = Self.window(rl, key: "primary", id: "codex_5h", title: "五小时窗口", observed: observed) { out.append(w) }
-            if let w = Self.window(rl, key: "secondary", id: "codex_7d", title: "周窗口", observed: observed) { out.append(w) }
+            // `observed` is the age of the record the reading came from, not of the newest file
+            // we happened to open. Those differ whenever the most recent session is a `premium`
+            // record, which is exactly the case that made this worth getting right.
+            for key in ["primary", "secondary"] {
+                if let w = Self.window(rl, key: key, observed: quotaAt) { out.append(w) }
+            }
         }
 
         // The add-on credit pool is reported only while it is genuinely the current state.
@@ -74,10 +76,32 @@ actor CodexProvider {
         return out
     }
 
+    /// Names the window from the length the record itself reports.
+    ///
+    /// The obvious shortcut is to call `primary` the five-hour window and `secondary` the
+    /// weekly one, which is what they are today. But the record carries `window_minutes`, and
+    /// hardcoding the names means that the day OpenAI changes a window, the panel keeps
+    /// confidently printing the old one — a label that lies is worse than a vague one.
+    private static func name(minutes: Int?, key: String) -> String {
+        // Chinese numerals for the two everyone has, so Codex's rows read the same as Claude's;
+        // digits for anything unusual, where being exact matters more than matching.
+        switch minutes {
+        case .some(300):                       return "五小时窗口"
+        case .some(10080):                     return "周窗口"
+        case .some(let m) where m <= 60:       return "\(m) 分钟窗口"
+        case .some(let m) where m < 1440:      return "\(m / 60) 小时窗口"
+        case .some(let m) where m % 1440 == 0: return "\(m / 1440) 天窗口"
+        default: return key == "primary" ? "短窗口" : "长窗口"
+        }
+    }
+
     private static func window(_ rl: [String: Any], key: String,
-                               id: String, title: String, observed: Date) -> QuotaWindow? {
+                               observed: Date) -> QuotaWindow? {
         guard let n = rl[key] as? [String: Any],
               let pct = (n["used_percent"] as? NSNumber)?.doubleValue else { return nil }
+        let minutes = (n["window_minutes"] as? NSNumber)?.intValue
+        let title = name(minutes: minutes, key: key)
+        let id = "codex_\(minutes.map(String.init) ?? key)"
         let reset = (n["resets_at"] as? NSNumber)
             .map { Date(timeIntervalSince1970: $0.doubleValue) }
 
