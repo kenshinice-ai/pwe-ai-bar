@@ -105,7 +105,25 @@ actor ClaudeProvider {
     private(set) var loggedIn = false
     private(set) var blocker: Blocker = .none
 
-    private let ttl: TimeInterval = 60
+    /// How long a reading stays fresh enough to reuse — and therefore how often we ask.
+    ///
+    /// Deliberately conservative. This endpoint's limit is long: a burst of debugging earned a
+    /// fifty-three minute block, and a single request the moment it expired earned another
+    /// fifty-seven. At the old flat sixty seconds an ordinary working day would have made up to
+    /// sixty requests an hour, which is on the wrong side of that. A five-hour window does not
+    /// need minute-by-minute resolution — but the last stretch before a reset does, and so does
+    /// a window already in warning, which is when the number is worth watching.
+    private func ttl(for windows: [QuotaWindow]) -> TimeInterval {
+        let tightest = windows.map(\.band).max() ?? .calm
+        let soon = windows.compactMap(\.resetsAt)
+            .map { $0.timeIntervalSinceNow }
+            .filter { $0 > 0 }
+            .min() ?? .greatestFiniteMagnitude
+
+        if tightest == .hot || soon < 15 * 60 { return 60 }
+        if tightest == .warm { return 150 }
+        return 300
+    }
 
     // MARK: Credential
 
@@ -219,10 +237,15 @@ actor ClaudeProvider {
 
     func windows() async -> (windows: [QuotaWindow], stale: Bool) {
         loadCache()
-        if let at = fetchedAt, Date().timeIntervalSince(at) < ttl, !cache.isEmpty {
+        if let at = fetchedAt, !cache.isEmpty,
+           Date().timeIntervalSince(at) < ttl(for: cache) {
             return (cache, false)
         }
         if let r = retryAfter {
+            // Having a credential and being temporarily blocked are different facts. Reporting
+            // "not logged in" here sent people off to re-run `claude auth login` for a problem
+            // that fixes itself.
+            loggedIn = Credentials.hasOwnToken || Credentials.sharedItemExists()
             blocker = .rateLimited(r)
             return (cache, true)
         }
