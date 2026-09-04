@@ -76,8 +76,14 @@ enum StatusIcon {
         let image = NSImage(size: NSSize(width: ceil(total), height: height), flipped: false) { rect in
             let box = CGRect(x: lead, y: rect.midY - wingHeight / 2,
                              width: wingWidth, height: wingHeight)
-            WingGauge.barImage(snap.channels(), size: box.size, calmInk: label, dark: dark)
-                .draw(in: box)
+            // One reading, not five. `barImage` takes the worst band of whatever it is handed,
+            // so handing it every channel bypasses `Snapshot.overall` and lets a standing
+            // condition — a spent credit pool with no percentage and no reset — hold the mark
+            // red indefinitely. The bar gets the actionable band and the matching fill.
+            let band = snap.overall
+            let fill = snap.channels().filter { $0.band <= band }.map(\.fill).max() ?? 0
+            let bar = [ChannelHealth(channel: .session, band: band, fill: fill)]
+            WingGauge.barImage(bar, size: box.size, calmInk: label, dark: dark).draw(in: box)
 
             var x = lead + wingWidth + gap
             for (i, seg) in segments.enumerated() {

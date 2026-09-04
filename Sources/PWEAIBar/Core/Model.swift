@@ -193,9 +193,20 @@ struct Snapshot {
     /// mark red permanently — and a gauge that is always red has stopped being a gauge. Those
     /// windows keep their own feather in the panel, where five colours can say "this one is a
     /// background fact"; they just do not get to speak for the whole mark.
-    /// One colour for the menu bar. `channels()` already reports only actionable readings, so
-    /// nothing here needs a special case: a permanently spent credit pool cannot reach this.
-    var overall: Health { channels().map(\.band).max() ?? .calm }
+    /// One colour for the menu bar.
+    ///
+    /// Only channels that have something actionable on them get a vote. `window(_:)` prefers an
+    /// actionable window but falls back to whatever exists, which is right for the panel — a
+    /// feather should still show that Codex's credit pool is spent — and wrong here: a channel
+    /// whose *only* reading is a standing condition would hold the whole mark red for weeks,
+    /// which is the thing this rule exists to prevent. A gauge that is always red is not a gauge.
+    var overall: Health {
+        let live: Set<Channel> = Set(
+            windows.filter(isActionable).map(\.channel)
+        ).union(contextPercent != nil ? [.context] : [])
+        let voting = channels().filter { live.contains($0.channel) }
+        return voting.map(\.band).max() ?? .calm
+    }
 
     /// One sentence, for VoiceOver and the tooltip.
     ///
