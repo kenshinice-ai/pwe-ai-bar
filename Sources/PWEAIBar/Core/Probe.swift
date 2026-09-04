@@ -148,24 +148,29 @@ enum Probe {
         let own = Credentials.hasOwnToken
         let shared = Credentials.sharedItemExists()
         let refused = UserDefaults.standard.bool(forKey: "keychainRefused")
+        let optedIn = UserDefaults.standard.bool(forKey: "sharedKeychainOptIn")
 
         print("PWE AI Bar — 凭据\n" + String(repeating: "─", count: 52))
-        print("自有长期令牌   \(own ? "有（零弹框）" : "无")")
+        print("自有长期令牌   \(own ? "有" : "无")")
         print("Claude 钥匙串  \(shared ? "存在" : "不存在（没登录过）")")
-        print("曾被拒绝       \(refused ? "是——不会再自动询问" : "否")")
+        print("已授权读取     \(optedIn ? "是" : "否——不会主动去读")")
+        print("曾被拒绝       \(refused ? "是" : "否")")
         print("")
+
         if own {
-            print("当前来源：自有令牌。永远不会弹框。")
+            print("当前来源：自有长期令牌。永远不会弹框。")
+        } else if !shared {
+            print("当前来源：本地估算。先运行 claude auth login。")
+        } else if !optedIn {
+            print("当前来源：本地估算——有总量和战绩，没有百分比。")
+            print("这是默认状态，且不会有任何弹框。想要真实额度，二选一：")
+            print("  零弹框   claude setup-token | \"…/PWEAIBar\" --token -")
+            print("  一次弹框 面板点「启用」，在框里选「始终允许」")
         } else if refused {
-            print("当前来源：无。")
-            print("两条路：")
-            print("  1) 零弹框：claude setup-token 拿到令牌后")
-            print("     \"PWE AI Bar.app/Contents/MacOS/PWEAIBar\" --token <令牌>")
-            print("  2) 一次弹框：设置里点「重试钥匙串」，然后选「始终允许」")
-        } else if shared {
-            print("当前来源：Claude Code 的钥匙串。首次读取会弹一次框，选「始终允许」后不再问。")
+            print("当前来源：本地估算。授权被拒过，不会再自动询问。")
+            print("设置 → 额度数据来源 → 授权钥匙串，可以重来。")
         } else {
-            print("当前来源：无。先运行 claude auth login。")
+            print("当前来源：Claude Code 的钥匙串。已授权，读取时不再弹框。")
         }
     }
 
