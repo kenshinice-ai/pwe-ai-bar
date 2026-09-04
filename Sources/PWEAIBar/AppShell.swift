@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
@@ -11,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = Store()
     private var appearanceObserver: NSKeyValueObservation?
     private var outsideMonitor: Any?
+    private var prefsWatch: AnyCancellable?
     private var localMonitor: Any?
 
     func applicationDidFinishLaunching(_ n: Notification) {
@@ -31,6 +33,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         appearanceObserver = statusItem.button?.observe(\.effectiveAppearance) { [weak self] _, _ in
             Task { @MainActor in self?.redraw(self?.store.snapshot ?? Snapshot()) }
+        }
+
+        // Density and the used/remaining convention both change what the glyph says. Without
+        // this the settings window updates instantly and the menu bar keeps showing the old
+        // reading for up to twenty seconds, which reads as the switch not having worked.
+        prefsWatch = Prefs.shared.objectWillChange.sink { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.redraw(self.store.snapshot)
+            }
         }
     }
 
