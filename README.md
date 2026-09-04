@@ -99,6 +99,21 @@ claude setup-token | "build/PWE AI Bar.app/Contents/MacOS/PWEAIBar" --token -
 Codex 来自会话日志，有多旧取决于它上次运行，而且只有裸百分比、分级是我们判的。
 所以面板会标「9 小时前读到」。
 
+**百分比只有一种口径。** Codex 自己的界面写「Usage remaining 84%」，
+Claude 的接口给的是 `utilization`——同一个窗口的两头，两个数看着像两回事。
+统一，可切换，默认剩余：那才是你真正在问的问题，也是一条会排空的进度条不用标签就能读懂的原因。
+翼形仪表不跟着翻面——羽毛长度是离出事有多远，翻了就会跟旁边的数字打架。
+
+## 三家为什么不一样
+
+| | 要授权吗 | 为什么 |
+|---|---|---|
+| **Codex** | 不要 | 它把 `rate_limits` 明文写进自己的会话日志。我们只是读一个已经在磁盘上的文件 |
+| **Claude Code** | 要 | transcript 里 `rateLimits` 字段留着但**从不填**（57 处全是 null），全盘搜 `utilization` / `resets_at` 零命中。唯一来源是 API，API 要 token |
+| **Gemini** | 读不到 | 桌面版 `com.google.GeminiMacOS` 只有 settings 数据库，没有任何额度字段。CLI 有 `gemini_cli.token.usage`，那是 **token 计数不是额度**，而且遥测要手动开 |
+
+不是我们对三家用了三种办法，是三家各自决定了往本地写什么。
+
 ## 自检
 
 界面不是调数据源的地方——22 点的图标上，错的数字和对的长得一模一样。
