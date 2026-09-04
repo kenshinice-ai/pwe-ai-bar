@@ -7,7 +7,7 @@ PWE Studio 菜单栏家族的第四位，接在 Loan Bar、Lumen Bar、MAC MONIT
 ![菜单栏](docs/menubar.png)
 
 ```
-[翼] ✳ 68% / 88%  ⚛ 额度耗尽  ↻17:18
+[翼] ✳ 68% / 88%   ⚛ 额度耗尽   ↻17:18
 ```
 
 翼形仪表 · Claude 的五小时与周窗口 · Codex 状态 · 距重置倒计时。
@@ -16,19 +16,56 @@ PWE Studio 菜单栏家族的第四位，接在 Loan Bar、Lumen Bar、MAC MONIT
 
 ## 它做什么
 
-**看板部分**（这部分市面上已经有二十几个实现）
+**看板**（这部分市面上已有二十几个实现，我们只是做得合乎自家规范）
 
 - Claude Code 的五小时与周窗口，真实百分比，来自 `/api/oauth/usage`
 - Codex 额度，读它自己的会话日志，零凭据
 - 当前会话上下文占用
 - 战绩页：按 API 目录价折算的等效成本、回本倍数、模型与日期分布
 
-**哨兵部分**（这部分没人做）
+**哨兵**（这部分没人做）
 
 - **额度重置了** —— 到点主动告诉你可以继续干活
 - **Claude 在等你回话** —— 权限确认卡住时，菜单栏让位、通知弹出
 - **离座推手机** —— 超过五分钟没碰键盘，提醒转发到 ntfy / Bark
 - 阈值预警用服务端自己的 `severity`，不是我们瞎定的数字
+
+## 装
+
+```bash
+./scripts/build-app.sh
+open "build/PWE AI Bar.app"
+```
+
+**不会有任何授权弹框。** 首次运行只显示本地估算，面板里给一个「启用」按钮——
+真实额度要不要接、什么时候接，由你按下去决定。
+
+会话事件要装 hook：设置 → 会话事件 → 安装。它以合并方式写进
+`~/.claude/settings.json`，不覆盖你已有的配置。
+
+## 额度数据从哪来
+
+钥匙串按「条目 + 代码签名」授权。Claude Code 的凭据条目只信任 `claude` 二进制，
+别的程序读它就会弹框；点一次「始终允许」会把该程序的签名写进访问列表，之后静默。
+**前提是签名不变**——所以本机构建用固定的 Apple Development 身份，
+ad-hoc 每次编译都换身份，每次都算新 app，也就每次都要重问。
+
+两条路，按你能忍受的弹框次数选：
+
+| | 弹框 | 怎么做 |
+|---|---|---|
+| **长期令牌**（推荐） | 0 次 | `claude setup-token` 拿到令牌，粘进设置，或 `--token` 传入 |
+| 共享钥匙串 | 1 次 | 面板点「启用」，在弹框里选「始终允许」 |
+| 都不要 | 0 次 | 什么都不做。本地估算有总量和战绩，没有百分比 |
+
+长期令牌存在**本 app 自己创建**的钥匙串条目里。自己的条目自己天然可读，
+永不弹框，也不会过期。
+
+```bash
+claude setup-token | "build/PWE AI Bar.app/Contents/MacOS/PWEAIBar" --token -
+```
+
+被拒绝过会持久记住，不会每次启动重问。想重来：设置 → 额度数据来源 → 授权钥匙串。
 
 ## 设计要点
 
@@ -38,47 +75,64 @@ PWE Studio 菜单栏家族的第四位，接在 Loan Bar、Lumen Bar、MAC MONIT
 
 **菜单栏一色，面板五色。** 22 点高的栏里每根羽毛约 1 点粗，五种色调糊成一片。
 
-**菜单栏永远静止。** 只在读数变化时重画。动效全部关在战绩页，点开跑一次就停。
+**菜单栏永远静止。** 只在读数变化时重画。
+
+**动效不碰几何和数值。** 数字从零涨上来很好看，但任何动画没跑完的时刻，页面就在说谎——
+离屏渲染、刚打开的一瞬、隐藏状态下重建的视图，都会显示「$0.00」。
+把动画挪到柱高只是换个地方犯同样的错。现在只留一个谁都不会误读的入场缩放。
 
 **密度可选。** 菜单栏三档（图标／紧凑／完整）＋事件抢占，面板三档（精简／标准／完整），
 两边互不牵连。出厂给足信息，想安静自己往回调。
 
-**主角会换人。** 面板里那个大数字不是固定窗口，是**当前最紧的那条**，
+**面板不用缩写。** 菜单栏才是空间紧张的地方，那里靠剪影认 provider；
+面板是你专程点开来读的，所以是「Claude Code · 周窗口」，不是「CDX 15%」。
+
+**主角会换人。** 大数字不是固定窗口，是**当前最紧的那条**，
 由接口的 `is_active` 与 strain 共同决定。
 
-**没有百分比就不画进度条。** team 计划的额度耗尽是一个状态，不是一个比例，
-画成满格进度条等于假装我们知道一个并不知道的数。它拿虚线。
+**没有百分比就不画进度条。** team 计划的额度耗尽是一个状态，不是一个比例。它拿虚线。
 
-**长期无解的红不钉死整只翼。** 一个永远 critical、没有重置时间的通道，
-只保留自己那根羽毛的颜色，不参与菜单栏的整体判定——一直红的仪表就不是仪表了。
+**长期无解的红不进仪表。** 一个永远 critical、没有重置时间的通道不参与菜单栏配色，
+也不当面板头条——一直红的仪表就不是仪表了。它在面板里仍然独占一行。
 
-## 装
-
-```bash
-./scripts/build-app.sh          # 本机构建（ad-hoc 签名）
-open "build/PWE AI Bar.app"
-```
-
-首次启动 macOS 会问一次钥匙串权限，选「始终允许」。
-没登录过就先 `claude auth login`；不登录会降级成本地日志估算，有总量没有百分比。
-
-会话事件要装 hook：设置 → 会话事件 → 安装。它以合并方式写进
-`~/.claude/settings.json`，不覆盖你已有的配置。
+**Claude 和 Codex 的读数不是一回事。** Claude 来自实时接口且自带 `severity`；
+Codex 来自会话日志，有多旧取决于它上次运行，而且只有裸百分比、分级是我们判的。
+所以面板会标「9 小时前读到」。
 
 ## 自检
 
 界面不是调数据源的地方——22 点的图标上，错的数字和对的长得一模一样。
+两块最容易烂掉的界面都在两次点击之外，所以也一并渲染出来。
 
 ```bash
-.build/release/PWEAIBar --probe        # 各数据源实际返回了什么
-.build/release/PWEAIBar --icon DIR     # 菜单栏图标，三档 × 明暗，外加 provider 标记
-.build/release/PWEAIBar --panel DIR    # 面板，三档 × 明暗，跑真实数据
+BIN="build/PWE AI Bar.app/Contents/MacOS/PWEAIBar"
+
+"$BIN" --probe        # 各数据源实际返回了什么，以及每一段耗时
+"$BIN" --cred         # 令牌从哪来，问一次要不要弹框
+"$BIN" --icon DIR     # 菜单栏图标：三档 × 明暗，外加 provider 剪影
+"$BIN" --panel DIR    # 面板三档、设置页、战绩页，各两种外观，跑真实数据
 ```
+
+## 性能
+
+菜单栏应用整天在跑，任何开销都要乘以几万次。
+
+| | |
+|---|---|
+| 刷新（冷启动） | 4.0 秒 |
+| 刷新（之后） | **0.35 秒** |
+| 图标重绘 | 0.43 ms（缓存命中，量化到 5% 步长） |
+| 空闲时轮询 | 5 分钟 |
+
+会话日志有 159 MB。做到这个数用了三件事：字节级扫描加 mmap，
+而不是 `String.contains`（Unicode 逐字素比较，几乎全部开销花在拒绝不要的行上）；
+按文件记住解析到的字节偏移，只读新增部分（JSONL 只追加，而当前会话那个文件一直在长）；
+解析结果落盘，重启不用从头再来。
 
 ## 发布
 
 **在发布机上做。** Developer ID 私钥在那台，这台只有 Apple Development，
-本机产物是 ad-hoc 签名，Gatekeeper 在别的机器上一定拦。
+本机产物 Gatekeeper 在别的机器上一定拦。
 
 ```bash
 ./scripts/package.sh --notarize
@@ -97,13 +151,16 @@ xcrun notarytool store-credentials PWE_NOTARY --team-id 2SQV3H5MH9 \
 Sources/PWEAIBar/
 ├── Brand/       BrandMark · WingGauge  ← MAC MONITOR，零修改
 │                Theme                   ← 品牌色板与字体
-├── Core/        Channel · Model · Store · RuleEngine · Notifier · Pricing · Prefs · Probe
-├── Providers/   Claude（OAuth，降级本地）· Codex（本地）· Transcript · Hook
-└── App/         StatusIcon · PanelView · TrophyView · SettingsView · ProviderMark · NotchWindow
+├── Core/        Channel · Model · Store · RuleEngine · Notifier
+│                Pricing · Prefs · Probe
+├── Providers/   Credentials · Claude（OAuth）· Codex（本地）
+│                Transcript · Hook
+└── App/         StatusIcon · PanelView · TrophyView · SettingsView
+                 ProviderMark · UsageChart · WingView · NotchWindow
 ```
 
-自己写的其实只有 `Providers/` 和 `Core/`。品牌层、翼形仪表、菜单栏外壳、打包脚本
-都来自家族里已有的产品。
+自己写的其实只有 `Providers/` 和 `Core/`。品牌层、翼形仪表、菜单栏外壳、
+打包脚本都来自家族里已有的产品。
 
 设计方案全文：[docs/design.html](docs/design.html)
 
