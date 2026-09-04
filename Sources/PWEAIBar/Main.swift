@@ -39,6 +39,12 @@ enum PWEAIBarMain {
                                 : (ok ? "已保存令牌，之后不会再有授权弹框" : "保存失败"))
             return
         }
+        if let i = CommandLine.arguments.firstIndex(of: "--stress"),
+           i + 1 < CommandLine.arguments.count {
+            Theme.registerFonts()
+            Probe.stress(into: CommandLine.arguments[i + 1])
+            return
+        }
         if CommandLine.arguments.contains("--cred") {
             Probe.credentials()
             return

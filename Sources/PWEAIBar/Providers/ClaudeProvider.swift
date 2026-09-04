@@ -27,8 +27,11 @@ actor ClaudeProvider {
     /// that is rate-limited hard. It also means the panel shows real figures the instant it
     /// opens rather than after a round trip.
     private static var diskCache: URL {
-        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("PWE AI Bar", isDirectory: true)
+        // `.first` rather than `[0]`: the array is never empty in practice, but a cache path
+        // is not worth a trap if it ever is.
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let dir = base.appendingPathComponent("PWE AI Bar", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("quota-cache.json")
     }
@@ -304,13 +307,26 @@ actor ClaudeProvider {
         return out
     }
 
+    /// Known kinds get a proper name; anything new gets a readable one rather than a raw
+    /// identifier. The endpoint already ships several buckets that report nothing yet
+    /// (`seven_day_opus`, `seven_day_oauth_apps`, a few unlaunched names), and the day one of
+    /// them starts reporting, this is what the panel will call it.
     private func title(_ kind: String) -> String {
         switch kind {
-        case "session":    return "五小时窗口"
-        case "five_hour":  return "五小时窗口"
-        case "weekly_all", "seven_day": return "周窗口"
-        default:           return kind.replacingOccurrences(of: "_", with: " ")
+        case "session", "five_hour":     return "五小时窗口"
+        case "weekly_all", "seven_day":  return "周窗口"
+        case "seven_day_opus":           return "周 · Opus"
+        case "seven_day_sonnet":         return "周 · Sonnet"
+        default: break
         }
+        var t = kind
+            .replacingOccurrences(of: "seven_day", with: "周")
+            .replacingOccurrences(of: "five_hour", with: "五小时")
+            .replacingOccurrences(of: "_", with: " ")
+        // The column that shows this is fixed width. Better a clipped name than a row that
+        // shoves the number off the edge of the panel.
+        if t.count > 10 { t = String(t.prefix(9)) + "…" }
+        return t
     }
 
     /// No token, no network, or rate-limited: fall back to what the transcripts remember. A 429

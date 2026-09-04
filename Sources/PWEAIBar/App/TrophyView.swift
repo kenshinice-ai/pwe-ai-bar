@@ -57,6 +57,7 @@ struct TrophyView: View {
                     .foregroundStyle(Theme.hex(Theme.textDark2))
                 Text(money(t.equivalentUSD))
                     .font(Theme.figures(44)).foregroundStyle(Theme.hex(Theme.amber))
+                    .lineLimit(1).minimumScaleFactor(0.6)
             }
             VStack(alignment: .leading, spacing: Theme.s1) {
                 Text("订阅同期摊销".uppercased()).brandLabel()
@@ -94,6 +95,7 @@ struct TrophyView: View {
                         RoundedRectangle(cornerRadius: 2).fill(modelColour(i))
                             .frame(width: 9, height: 9)
                         Text(short(m.model)).font(Theme.sans(12)).foregroundStyle(Theme.text)
+                            .lineLimit(1).truncationMode(.middle)
                         Text("\(m.turns) 次").font(Theme.figures(11, 400))
                             .foregroundStyle(Theme.text2)
                         Spacer()

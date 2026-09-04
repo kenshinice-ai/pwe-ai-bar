@@ -47,8 +47,11 @@ actor Transcript {
     /// disk. Keyed by modification date and size, exactly like the in-memory copy, so a file
     /// that changed is still re-read and one that did not is never touched.
     private static var diskCache: URL {
-        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("PWE AI Bar", isDirectory: true)
+        // `.first` rather than `[0]`: the array is never empty in practice, but a cache path
+        // is not worth a trap if it ever is.
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let dir = base.appendingPathComponent("PWE AI Bar", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("transcript-cache.json")
     }
@@ -70,7 +73,7 @@ actor Transcript {
                   let size = entry["s"] as? Int,
                   let rows = entry["t"] as? [[Double]] else { continue }
             let turns: [Turn] = rows.compactMap { r in
-                guard r.count == 6, Int(r[1]) < models.count else { return nil }
+                guard r.count == 6, r[1] >= 0, Int(r[1]) < models.count else { return nil }
                 return Turn(at: Date(timeIntervalSince1970: r[0]), model: models[Int(r[1])],
                             input: Int(r[2]), output: Int(r[3]),
                             cacheWrite: Int(r[4]), cacheRead: Int(r[5]))
@@ -174,61 +177,14 @@ actor Transcript {
 
     // MARK: Parsing
 
-    /// Byte-level, on purpose.
-    ///
-    /// The obvious version — read the file as a `String`, `split` on newlines, test each line
-    /// with `contains` — takes minutes across a 159 MB tree. Swift's `String` comparison is
-    /// Unicode-correct, which means grapheme-cluster work on every one of several million
-    /// lines, and almost all of that work is spent rejecting lines we do not want. Scanning
-    /// raw bytes for an ASCII marker and only decoding the survivors turns the same sweep into
-    /// a couple of seconds. The file is memory-mapped so a big log is never fully resident.
     /// Returns the turns found from `offset` onward, and the offset just past the last
-    /// **complete** line — a log being written to can end mid-line, and resuming from inside
-    /// one would produce garbage on the next sweep.
+    /// complete line. See `LineScanner` for why this is byte-level.
     private static func parse(_ url: URL, from offset: Int) -> ([Turn], Int) {
-        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe),
-              offset <= data.count else { return ([], 0) }
         var out: [Turn] = []
-        var end = offset
-
-        data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
-            guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
-            let count = raw.count
-            let usage = Array("\"usage\"".utf8)
-            var lineStart = offset
-            var i = offset
-
-            while i < count {
-                guard base[i] == 0x0A else { i += 1; continue }
-                let length = i - lineStart
-                if length > 40, contains(base + lineStart, length, usage) {
-                    let slice = Data(bytes: base + lineStart, count: length)
-                    if let turn = decode(slice) { out.append(turn) }
-                }
-                i += 1
-                lineStart = i
-                end = i                       // only ever advances past a real newline
-            }
+        let end = LineScanner.scan(url, marker: "\"usage\"", from: offset) { line in
+            if let turn = decode(line) { out.append(turn) }
         }
         return (out, end)
-    }
-
-    /// Naive substring search over bytes. The needle is seven bytes and the haystack is one
-    /// line, so anything cleverer would cost more to set up than it saves.
-    private static func contains(_ hay: UnsafePointer<UInt8>, _ n: Int, _ needle: [UInt8]) -> Bool {
-        let m = needle.count
-        guard m <= n else { return false }
-        let first = needle[0]
-        var i = 0
-        while i <= n - m {
-            if hay[i] == first {
-                var k = 1
-                while k < m, hay[i + k] == needle[k] { k += 1 }
-                if k == m { return true }
-            }
-            i += 1
-        }
-        return false
     }
 
     private static func decode(_ line: Data) -> Turn? {
@@ -338,27 +294,14 @@ actor Transcript {
         }
 
         var best: (Date, String)?
-        let needle = Array("quotaLimits".utf8)
         for (url, _) in recent.sorted(by: { $0.1 > $1.1 }).prefix(6) {
-            guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { continue }
-            data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
-                guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
-                var lineStart = 0, i = 0
-                while i <= raw.count {
-                    guard i == raw.count || base[i] == 0x0A else { i += 1; continue }
-                    let length = i - lineStart
-                    if length > 40, contains(base + lineStart, length, needle),
-                       let o = try? JSONSerialization.jsonObject(
-                           with: Data(bytes: base + lineStart, count: length)) as? [String: Any],
-                       let q = o["quotaLimits"] as? [String: Any],
-                       let secs = q["resetsAt"] as? Double {
-                        let at = Date(timeIntervalSince1970: secs)
-                        if best == nil || at > best!.0 {
-                            best = (at, q["rateLimitType"] as? String ?? "five_hour")
-                        }
-                    }
-                    i += 1
-                    lineStart = i
+            LineScanner.scan(url, marker: "quotaLimits") { line in
+                guard let o = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+                      let q = o["quotaLimits"] as? [String: Any],
+                      let secs = q["resetsAt"] as? Double else { return }
+                let at = Date(timeIntervalSince1970: secs)
+                if best == nil || at > best!.0 {
+                    best = (at, q["rateLimitType"] as? String ?? "five_hour")
                 }
             }
         }

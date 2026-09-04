@@ -123,6 +123,7 @@ enum StatusIcon {
         guard let w = snap.protagonist, let at = w.resetsAt else { return nil }
         let s = Int(at.timeIntervalSinceNow)
         guard s > 0 else { return nil }
+        if s < 60 { return "<1m" }
         return s < 3600 ? "\(s / 60)m" : String(format: "%d:%02d", s / 3600, (s % 3600) / 60)
     }
 }

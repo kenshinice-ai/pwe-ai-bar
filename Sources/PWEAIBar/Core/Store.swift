@@ -100,6 +100,13 @@ final class Store: ObservableObject {
         }
     }
 
+    /// Only used by `--stress`, which needs a snapshot that real data will never produce.
+    func injectForTesting(_ s: Snapshot) {
+        snapshot = s
+        timer?.invalidate()
+        timer = nil
+    }
+
     func saveToken(_ t: String) {
         Task { await claude.useOwnToken(t); refresh() }
     }

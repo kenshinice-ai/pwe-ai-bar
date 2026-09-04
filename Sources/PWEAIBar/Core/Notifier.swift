@@ -14,12 +14,39 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     var onOpen: ((Provider) -> Void)?
 
     private var authorised = false
+    private var asked = false
+
+    /// Notification permission is asked for the first time we actually have something to say,
+    /// not at launch.
+    ///
+    /// The same reasoning as the keychain: a permission sheet that appears seconds after first
+    /// run, before the app has shown you anything, is asking you to trust a program you have not
+    /// seen work yet. Waiting costs nothing — the first alert is delivered from the completion
+    /// handler, so nothing is lost while the sheet is up.
+    private func ensureAuthorised() async -> Bool {
+        if authorised { return true }
+        if asked { return false }
+        asked = true
+        return await withCheckedContinuation { cont in
+            UNUserNotificationCenter.current()
+                .requestAuthorization(options: [.alert, .sound]) { ok, _ in
+                    Task { @MainActor in
+                        self.authorised = ok
+                        cont.resume(returning: ok)
+                    }
+                }
+        }
+    }
 
     func start() {
         let c = UNUserNotificationCenter.current()
         c.delegate = self
-        c.requestAuthorization(options: [.alert, .sound]) { ok, _ in
-            Task { @MainActor in self.authorised = ok }
+        // Only find out whether we already have permission; do not ask for it.
+        c.getNotificationSettings { s in
+            Task { @MainActor in
+                self.authorised = s.authorizationStatus == .authorized
+                self.asked = s.authorizationStatus != .notDetermined
+            }
         }
         c.setNotificationCategories([
             UNNotificationCategory(identifier: "attention",
@@ -38,14 +65,17 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             NotchWindow.shared.flash(title: a.title, body: a.body)
         }
 
-        if authorised {
+        Task { @MainActor in
+            guard await self.ensureAuthorised() else { return }
             let n = UNMutableNotificationContent()
             n.title = a.title
             n.body = a.body
             n.categoryIdentifier = a.kind == .waiting ? "attention" : ""
             n.userInfo = ["provider": a.provider.rawValue]
             if p.sound && a.urgent { n.sound = .default }
-            UNUserNotificationCenter.current().add(
+            // In an async context this resolves to the throwing overload; a failed delivery is
+            // not worth interrupting anything over.
+            try? await UNUserNotificationCenter.current().add(
                 UNNotificationRequest(identifier: UUID().uuidString, content: n, trigger: nil))
         }
 

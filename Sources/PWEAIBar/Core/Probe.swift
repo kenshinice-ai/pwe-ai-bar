@@ -174,6 +174,61 @@ enum Probe {
         }
     }
 
+    /// `--stress DIR` renders the panel against data designed to break it: every bucket the
+    /// endpoint might one day populate, names longer than their column, a hundred-per-cent
+    /// window, a state with no ratio, and a trophy in the millions.
+    ///
+    /// Real data is always tidy — two windows, short names, sane numbers — so layout that only
+    /// ever meets real data has never actually been tested.
+    static func stress(into dir: String) {
+        var snap = Snapshot()
+        snap.windows = [
+            QuotaWindow(id: "session", provider: .claude, channel: .session,
+                        title: "五小时窗口", percent: 3, severity: .normal,
+                        resetsAt: Date().addingTimeInterval(59), isActive: true),
+            QuotaWindow(id: "weekly_all", provider: .claude, channel: .week,
+                        title: "周窗口", percent: 100, severity: .critical,
+                        resetsAt: Date().addingTimeInterval(9 * 86400)),
+            QuotaWindow(id: "seven_day_oauth_apps", provider: .claude, channel: .other,
+                        title: "周 oauth apps 超长名字测试", percent: 66.6, severity: .warning,
+                        resetsAt: Date().addingTimeInterval(3600)),
+            QuotaWindow(id: "codex_5h", provider: .codex, channel: .codex,
+                        title: "五小时窗口", percent: 0, severity: .normal),
+            QuotaWindow(id: "codex_credits", provider: .codex, channel: .codex,
+                        title: "附加额度", percent: nil, severity: .critical,
+                        note: "已用尽且说明很长",
+                        observedAt: Date().addingTimeInterval(-9 * 86400)),
+        ]
+        snap.contextPercent = 99.7
+        snap.events = [AgentEvent(id: "s", provider: .claude, kind: .waiting,
+                                  text: String(repeating: "很长的等待说明文字，", count: 12),
+                                  at: Date().addingTimeInterval(-45))]
+        snap.trophy = Trophy(
+            days: 365, turns: 1_234_567, equivalentUSD: 987_654.32, subscriptionUSD: 243.33,
+            byModel: [("claude-opus-5", 1_200_000, 900_000), ("claude-fable-5-1", 34_567, 87_654.32)],
+            byDay: (0..<30).map { ("2026-08-\($0 + 1)", Double($0) * 137.4) },
+            byHour: (0..<24).map { (Date().addingTimeInterval(Double($0 - 23) * 3600),
+                                    Double(($0 * 7) % 13) * 12.5) },
+            tokens: (999_999_999, 888_888_888, 777_777_777, 6_666_666_666))
+
+        let store = Store()
+        store.injectForTesting(snap)
+        for dark in [true, false] {
+            let tag = dark ? "dark" : "light"
+            Prefs.shared.panelMode = .full
+            shoot(AnyView(PanelView(store: store, onTrophy: {}, onSettings: {},
+                                    onOpen: { _ in }, onEnableQuota: {})),
+                  width: Theme.panelWidth, dark: dark, to: dir + "/stress-panel-\(tag).png")
+            shoot(AnyView(TrophyView(trophy: snap.trophy)),
+                  width: 460, dark: dark, to: dir + "/stress-trophy-\(tag).png")
+        }
+        for mode in MenuBarMode.allCases {
+            let image = StatusIcon.render(snap, mode: mode, dark: true)
+            write(image, to: dir + "/stress-icon-\(mode.rawValue)-dark.png")
+            print("  stress-icon-\(mode.rawValue)-dark.png  \(Int(image.size.width))×\(Int(image.size.height))")
+        }
+    }
+
     static func run() {
         let sem = DispatchSemaphore(value: 0)
         let t0 = Date()

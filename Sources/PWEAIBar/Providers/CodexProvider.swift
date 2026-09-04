@@ -114,14 +114,14 @@ actor CodexProvider {
 
     /// The last `rate_limits` in the file — records are appended as the session runs, so the
     /// final one is that session's most recent reading.
+    ///
+    /// Byte-scanned like everything else that reads these logs: a dozen Codex rollouts came to
+    /// about fifty megabytes here, and reading them as Swift strings to look for one marker is
+    /// the same mistake that cost three seconds a refresh on the Claude side.
     private static func lastRateLimits(in url: URL) -> [String: Any]? {
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        for line in text.split(separator: "\n").reversed() where line.contains("rate_limits") {
-            guard let data = line.data(using: .utf8),
-                  let o = try? JSONSerialization.jsonObject(with: data) else { continue }
-            if let hit = dig(o, for: "rate_limits") { return hit }
-        }
-        return nil
+        guard let line = LineScanner.lastMatch(url, marker: "rate_limits"),
+              let o = try? JSONSerialization.jsonObject(with: line) else { return nil }
+        return dig(o, for: "rate_limits")
     }
 
     private static func dig(_ any: Any, for key: String) -> [String: Any]? {

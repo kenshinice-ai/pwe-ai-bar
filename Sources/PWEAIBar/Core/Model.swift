@@ -15,10 +15,16 @@ enum Severity: String, Comparable {
         }
     }
     var health: Health { self == .critical ? .hot : self == .warning ? .warm : .calm }
-    static func < (a: Severity, b: Severity) -> Bool {
-        let o: [Severity: Int] = [.normal: 0, .warning: 1, .critical: 2]
-        return o[a]! < o[b]!
+    /// Ordered by a stored rank rather than a dictionary lookup: a new case added later would
+    /// have made the old version trap on its first comparison.
+    private var rank: Int {
+        switch self {
+        case .normal: return 0
+        case .warning: return 1
+        case .critical: return 2
+        }
     }
+    static func < (a: Severity, b: Severity) -> Bool { a.rank < b.rank }
 }
 
 /// One quota window, whatever the provider calls it.
@@ -134,8 +140,15 @@ struct Snapshot {
         let usable = windows.filter { ($0.percent != nil || $0.severity == .critical) && isActionable($0) }
         return (usable.isEmpty ? windows.filter { $0.percent != nil } : usable)
             .max { a, b in
-                if a.isActive != b.isActive { return b.isActive }
-                return a.strain < b.strain
+                // Strain first, `is_active` only to break a tie.
+                //
+                // The other way round — which this was — let a window the endpoint had flagged
+                // active outrank one that was actually full: a session at 3 % beat a weekly at
+                // 100 %, and the panel led with the number that was not about to stop you.
+                // `is_active` says "this is the window being charged right now", not "this is
+                // the one closest to its limit".
+                if abs(a.strain - b.strain) > 0.001 { return a.strain < b.strain }
+                return b.isActive
             }
     }
 

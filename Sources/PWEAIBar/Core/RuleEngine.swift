@@ -29,8 +29,19 @@ final class RuleEngine {
     private let awayAfter: TimeInterval = 5 * 60
 
     var isAway: Bool {
-        let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState,
-                                                           eventType: .init(rawValue: ~0)!)
+        // `~0` is kCGAnyInputEventType. It is not a declared case, and the only reason the
+        // force-unwrap that used to be here never crashed is that the imported enum happens to
+        // accept undeclared raw values — which is not a promise. Falling back to the union of
+        // three concrete event types costs one extra call and cannot trap.
+        let any = CGEventType(rawValue: ~0)
+        let idle: CFTimeInterval
+        if let any {
+            idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: any)
+        } else {
+            idle = [CGEventType.mouseMoved, .keyDown, .scrollWheel]
+                .map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }
+                .min() ?? 0
+        }
         return idle > awayAfter
     }
 

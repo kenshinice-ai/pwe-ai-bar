@@ -92,6 +92,7 @@ struct PanelView: View {
                         .frame(width: 10, height: 10)
                     Text("\(p.provider.name) · \(p.title) · \(prefs.showRemaining ? Readout.label.remaining : Readout.label.used)")
                         .font(Theme.sans(11)).foregroundStyle(Theme.text2)
+                        .lineLimit(1).truncationMode(.tail)
                 }
                 .padding(.top, Theme.s2)
             } else {
@@ -146,7 +147,8 @@ struct PanelView: View {
                     ProviderMarkView(provider: p, tint: Theme.health(bandOf(p), dark: isDark))
                         .frame(width: 13, height: 13)
                     Text(p.name).font(Theme.sans(12, 600)).foregroundStyle(Theme.text)
-                    Spacer()
+                        .lineLimit(1)
+                    Spacer(minLength: Theme.s1)
                     // Claude's numbers come live from an endpoint; Codex's come out of a session
                     // log and are exactly as old as its last run. Saying so is the difference
                     // between a stale number and a lie.
@@ -171,6 +173,7 @@ struct PanelView: View {
                 HStack(spacing: Theme.s2) {
                     Text(cta.text).font(Theme.sans(11)).foregroundStyle(Theme.text2)
                         .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(2)
                     Spacer(minLength: Theme.s1)
                     if let title = cta.button {
                         Button(title) { onEnableQuota() }
@@ -202,11 +205,15 @@ struct PanelView: View {
     /// panel, so the eye runs straight down instead of re-finding them on every line.
     private func windowRow(_ w: QuotaWindow) -> some View {
         HStack(spacing: Theme.s2) {
+            // Fixed columns keep the four baselines aligned down the whole panel; truncation
+            // is what stops an unexpectedly long name from pushing the number off the edge.
             Text(w.title).font(Theme.sans(11)).foregroundStyle(Theme.text2)
+                .lineLimit(1).truncationMode(.tail)
                 .frame(width: 66, alignment: .leading)
             track(w).frame(maxWidth: .infinity)
             Text(Readout.text(w, remaining: prefs.showRemaining)).font(Theme.figures(11.5, 600))
                 .foregroundStyle(Theme.health(w.band, dark: isDark))
+                .lineLimit(1).minimumScaleFactor(0.8)
                 .frame(width: 52, alignment: .trailing)
             Text(shortReset(w) ?? "").font(Theme.sans(10))
                 .foregroundStyle(Theme.text2)
@@ -363,6 +370,9 @@ struct PanelView: View {
         guard let at = w.resetsAt else { return nil }
         let s = Int(at.timeIntervalSinceNow)
         guard s > 0 else { return nil }
+        // Integer division turned the last minute before a reset into "0 分钟后重置", which
+        // reads as broken rather than imminent.
+        if s < 60 { return "不到 1 分钟" }
         if s < 3600 { return "\(s / 60) 分钟后重置" }
         if s < 86400 {
             let f = DateFormatter(); f.dateFormat = "HH:mm"
@@ -375,6 +385,7 @@ struct PanelView: View {
         guard let at = w.resetsAt else { return nil }
         let s = Int(at.timeIntervalSinceNow)
         guard s > 0 else { return nil }
+        if s < 60 { return "<1 分" }
         if s < 3600 { return "\(s / 60) 分" }
         if s < 86400 {
             let f = DateFormatter(); f.dateFormat = "HH:mm"
@@ -390,7 +401,19 @@ struct PanelView: View {
         return "\(s / 3600) 小时前"
     }
 
+    /// Grouped, like the trophy page. Six figures with no separator — "$987654" — is a string
+    /// of digits, not a number you can read at a glance.
+    private static let grouped: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 0
+        return f
+    }()
+
     private func money(_ v: Double) -> String {
-        v >= 1000 ? String(format: "$%.0f", v) : String(format: "$%.2f", v)
+        if v >= 1000 {
+            return "$" + (Self.grouped.string(from: NSNumber(value: v)) ?? String(Int(v)))
+        }
+        return String(format: "$%.2f", v)
     }
 }
