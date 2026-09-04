@@ -10,6 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private let store = Store()
     private var appearanceObserver: NSKeyValueObservation?
+    private var outsideMonitor: Any?
+    private var localMonitor: Any?
 
     func applicationDidFinishLaunching(_ n: Notification) {
         // The faces have to be in the process font list before the first view is laid out, or
@@ -81,9 +83,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Panel
 
+    /// Built once and reused. Rebuilding the hosting controller on every open threw away
+    /// SwiftUI's state each time and made opening the panel visibly slow.
+    ///
+    /// `.applicationDefined` rather than `.transient` on purpose. A transient popover closes
+    /// itself on any click outside — including the click on our own status item — and then our
+    /// action fires and reopens it. The two cancel out and the icon reads as dead. Owning the
+    /// dismissal means one click is one toggle.
     private func buildPopover() {
         popover = NSPopover()
-        popover.behavior = .transient
+        popover.behavior = .applicationDefined
+        popover.animates = false
         popover.contentViewController = NSHostingController(rootView: panel)
     }
 
@@ -96,14 +106,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func togglePopover() {
         guard let button = statusItem.button else { return }
-        if popover.isShown { popover.performClose(nil); return }
+        if popover.isShown { closePopover(); return }
+
         store.refresh()
-        popover.contentViewController = NSHostingController(rootView: panel)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
+        button.highlight(true)
+
+        // Dismiss on the next click anywhere else — including in another app, which a local
+        // monitor alone would miss.
+        outsideMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+                Task { @MainActor in self?.closePopover() }
+            }
+        localMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+                // A click inside the popover is not a dismissal; a click anywhere else is.
+                if let self, event.window !== self.popover.contentViewController?.view.window,
+                   event.window !== self.statusItem.button?.window {
+                    Task { @MainActor in self.closePopover() }
+                }
+                return event
+            }
+    }
+
+    private func closePopover() {
+        popover.performClose(nil)
+        statusItem.button?.highlight(false)
+        if let m = outsideMonitor { NSEvent.removeMonitor(m); outsideMonitor = nil }
+        if let m = localMonitor { NSEvent.removeMonitor(m); localMonitor = nil }
     }
 
     private func showMenu() {
+        closePopover()
         let menu = NSMenu()
         let refresh = menu.addItem(withTitle: "立即刷新", action: #selector(refreshNow), keyEquivalent: "r")
         refresh.target = self
@@ -124,7 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Windows
 
     @objc private func showTrophy() {
-        popover.performClose(nil)
+        closePopover()
         let view = TrophyView(trophy: store.snapshot.trophy)
         if let w = trophyWindow {
             w.contentView = NSHostingView(rootView: view)
@@ -137,7 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showSettings() {
-        popover.performClose(nil)
+        closePopover()
         let view = SettingsView(installHooks: { [weak self] in self?.installHooks() ?? false })
         if let w = settingsWindow {
             w.contentView = NSHostingView(rootView: view)

@@ -1,122 +1,170 @@
 import Foundation
 
-/// Reads Claude Code's own session logs — the source that needs no credentials at all.
+/// Claude Code's own session logs — the source that needs no credentials at all.
 ///
-/// Two jobs: the trophy figures (every turn ever, priced at API list) and the live context
-/// reading (the newest turn's input + cache tokens against the model's window). Scanning
-/// thousands of files on every refresh would be wasteful, so the full sweep is cached against
-/// the newest modification date in the tree and only redone when something actually changed.
-enum Transcript {
+/// Two jobs: the trophy figures (every turn ever, priced at list) and the live context reading.
+///
+/// **This must never touch the main thread.** The tree here is 159 MB across thousands of files,
+/// and while you are actually using Claude Code its newest file changes every few seconds. A
+/// full re-read on the main actor every refresh is what made the menu bar stop responding to
+/// clicks — the icon was drawing fine, the app just was not listening. So the whole thing is an
+/// actor off the main thread, and it re-parses only the files whose modification date or size
+/// actually moved, keeping per-file aggregates for everything else.
+actor Transcript {
 
-    static let root = FileManager.default.homeDirectoryForCurrentUser
+    static let shared = Transcript()
+
+    private static let root = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".claude/projects")
 
-    private struct Turn {
+    struct Turn: Sendable {
         let at: Date, model: String
         let input, output, cacheWrite, cacheRead: Int
     }
 
-    private static var cachedTrophy: Trophy?
-    private static var cachedStamp: Date?
-    private static var cachedContext: Double?
-
-    /// Newest mtime anywhere in the tree — the cheap way to ask "did anything change".
-    private static func stamp() -> Date? {
-        guard let e = FileManager.default.enumerator(
-            at: root, includingPropertiesForKeys: [.contentModificationDateKey],
-            options: [.skipsHiddenFiles]) else { return nil }
-        var newest: Date?
-        for case let url as URL in e where url.pathExtension == "jsonl" {
-            let d = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
-                .contentModificationDate
-            if let d, newest == nil || d > newest! { newest = d }
-        }
-        return newest
+    /// What one file contributed, remembered so an unchanged file is never read twice.
+    private struct FileCache {
+        let modified: Date
+        let size: Int
+        let turns: [Turn]
     }
 
-    /// Context window per model. Values the Models API would confirm; `CLAUDE_CONTEXT_WINDOW`
-    /// overrides for anything unusual.
-    private static func window(for model: String) -> Double {
-        if let s = ProcessInfo.processInfo.environment["CLAUDE_CONTEXT_WINDOW"],
-           let v = Double(s) { return v }
-        return model.contains("haiku") ? 200_000 : 1_000_000
+    private var cache: [String: FileCache] = [:]
+
+    struct Result: Sendable {
+        var trophy: Trophy
+        var context: Double?
     }
 
-    static func refresh(pricing: Pricing) -> (trophy: Trophy, context: Double?) {
-        let now = stamp()
-        if let c = cachedTrophy, cachedStamp == now { return (c, cachedContext) }
+    func refresh(pricing: Pricing) -> Result {
+        let fm = FileManager.default
+        var seen = Set<String>()
+        var all: [Turn] = []
 
-        var turns: [Turn] = []
-        var latest: (Date, String, Int)?     // when, model, input+cache — the live context
-
-        if let e = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil,
-                                                  options: [.skipsHiddenFiles]) {
+        if let e = fm.enumerator(at: Self.root,
+                                 includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+                                 options: [.skipsHiddenFiles]) {
             for case let url as URL in e where url.pathExtension == "jsonl" {
-                guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
-                for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-                    guard line.contains("\"usage\""),
-                          let data = line.data(using: .utf8),
-                          let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                          o["type"] as? String == "assistant",
-                          let msg = o["message"] as? [String: Any],
-                          let model = msg["model"] as? String, model != "<synthetic>",
-                          let u = msg["usage"] as? [String: Any],
-                          let ts = o["timestamp"] as? String,
-                          let at = ISO8601DateFormatter.parse(ts)
-                    else { continue }
+                let key = url.path
+                seen.insert(key)
+                let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+                let modified = rv?.contentModificationDate ?? .distantPast
+                let size = rv?.fileSize ?? 0
 
-                    let i  = u["input_tokens"] as? Int ?? 0
-                    let ou = u["output_tokens"] as? Int ?? 0
-                    let cw = u["cache_creation_input_tokens"] as? Int ?? 0
-                    let cr = u["cache_read_input_tokens"] as? Int ?? 0
-                    turns.append(Turn(at: at, model: model, input: i, output: ou,
-                                      cacheWrite: cw, cacheRead: cr))
-                    if latest == nil || at > latest!.0 { latest = (at, model, i + cw + cr) }
+                if let hit = cache[key], hit.modified == modified, hit.size == size {
+                    all += hit.turns                      // untouched since last sweep
+                    continue
                 }
+                let turns = Self.parse(url)
+                cache[key] = FileCache(modified: modified, size: size, turns: turns)
+                all += turns
             }
         }
+        // Drop files that have gone away, so the cache cannot grow forever.
+        for key in cache.keys where !seen.contains(key) { cache.removeValue(forKey: key) }
 
+        return Self.summarise(all, pricing: pricing)
+    }
+
+    // MARK: Parsing
+
+    private static func parse(_ url: URL) -> [Turn] {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        var out: [Turn] = []
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            // Cheap reject first: JSON-decoding every line of a large log costs far more than
+            // scanning it for a substring that only appears on the lines we want.
+            guard line.contains("\"usage\""), line.contains("\"assistant\""),
+                  let data = line.data(using: .utf8),
+                  let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  o["type"] as? String == "assistant",
+                  let msg = o["message"] as? [String: Any],
+                  let model = msg["model"] as? String, model != "<synthetic>",
+                  let u = msg["usage"] as? [String: Any],
+                  let ts = o["timestamp"] as? String,
+                  let at = ISO8601DateFormatter.parse(ts)
+            else { continue }
+            out.append(Turn(at: at, model: model,
+                            input: u["input_tokens"] as? Int ?? 0,
+                            output: u["output_tokens"] as? Int ?? 0,
+                            cacheWrite: u["cache_creation_input_tokens"] as? Int ?? 0,
+                            cacheRead: u["cache_read_input_tokens"] as? Int ?? 0))
+        }
+        return out
+    }
+
+    private static func summarise(_ turns: [Turn], pricing: Pricing) -> Result {
         var t = Trophy()
         t.turns = turns.count
-        t.days = Set(turns.map { dayKey($0.at) }).count
 
+        let cal = Calendar.current
         var perModel: [String: (Int, Double)] = [:]
         var perDay: [String: Double] = [:]
+        var perHour: [Date: Double] = [:]
+        var days = Set<String>()
+
+        let topOfHour = cal.dateInterval(of: .hour, for: Date())?.start ?? Date()
+        let dayFmt = DateFormatter(); dayFmt.dateFormat = "yyyy-MM-dd"
+
+        var latest: (Date, String, Int)?
         for turn in turns {
             let c = pricing.cost(model: turn.model, input: turn.input, output: turn.output,
                                  cacheWrite: turn.cacheWrite, cacheRead: turn.cacheRead)
             t.equivalentUSD += c
             t.tokens.input += turn.input; t.tokens.output += turn.output
             t.tokens.cacheWrite += turn.cacheWrite; t.tokens.cacheRead += turn.cacheRead
+
             var m = perModel[turn.model] ?? (0, 0); m.0 += 1; m.1 += c; perModel[turn.model] = m
-            perDay[dayKey(turn.at), default: 0] += c
+            let day = dayFmt.string(from: turn.at)
+            days.insert(day); perDay[day, default: 0] += c
+            if turn.at > topOfHour.addingTimeInterval(-23 * 3600),
+               let h = cal.dateInterval(of: .hour, for: turn.at)?.start {
+                perHour[h, default: 0] += c
+            }
+            if latest == nil || turn.at > latest!.0 {
+                latest = (turn.at, turn.model, turn.input + turn.cacheWrite + turn.cacheRead)
+            }
         }
+
+        t.days = days.count
         t.byModel = perModel.map { ($0.key, $0.value.0, $0.value.1) }.sorted { $0.usd > $1.usd }
         t.byDay = perDay.map { ($0.key, $0.value) }.sorted { $0.day < $1.day }
-        // Subscription cost over the same span, so the multiple compares like with like.
+        // Empty hours keep their slot: a gap is information, and closing it up would make a
+        // quiet night look busy.
+        t.byHour = (0..<24).reversed().map { back in
+            let h = topOfHour.addingTimeInterval(-Double(back) * 3600)
+            return (h, perHour[h] ?? 0)
+        }
         t.subscriptionUSD = pricing.subscriptionMonthlyUSD * Double(max(t.days, 1)) / 30.0
 
         var ctx: Double?
         if let l = latest, Date().timeIntervalSince(l.0) < 6 * 3600 {
-            ctx = min(100, Double(l.2) / window(for: l.1) * 100)
+            ctx = min(100, Double(l.2) / contextWindow(for: l.1) * 100)
         }
-
-        cachedTrophy = t; cachedStamp = now; cachedContext = ctx
-        return (t, ctx)
+        return Result(trophy: t, context: ctx)
     }
 
-    private static func dayKey(_ d: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = .current
-        return f.string(from: d)
+    private static func contextWindow(for model: String) -> Double {
+        if let s = ProcessInfo.processInfo.environment["CLAUDE_CONTEXT_WINDOW"],
+           let v = Double(s) { return v }
+        return model.contains("haiku") ? 200_000 : 1_000_000
     }
 
-    /// The most recent 429, if any — the only place Claude Code records a real reset time
-    /// locally. Used as the offline fallback when the usage endpoint is unreachable.
+    /// The most recent 429 — the only place a real reset time is recorded locally, and the
+    /// offline fallback when the usage endpoint is unreachable. Scans only recently-touched
+    /// files: an old rate limit is not news.
     static func lastRateLimit() -> (resetsAt: Date, kind: String)? {
-        guard let e = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil,
-                                                     options: [.skipsHiddenFiles]) else { return nil }
-        var best: (Date, String)?
+        guard let e = FileManager.default.enumerator(
+            at: root, includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]) else { return nil }
+        var recent: [(URL, Date)] = []
         for case let url as URL in e where url.pathExtension == "jsonl" {
+            let d = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            recent.append((url, d))
+        }
+        var best: (Date, String)?
+        for (url, _) in recent.sorted(by: { $0.1 > $1.1 }).prefix(8) {
             guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
             for line in text.split(separator: "\n") where line.contains("quotaLimits") {
                 guard let data = line.data(using: .utf8),

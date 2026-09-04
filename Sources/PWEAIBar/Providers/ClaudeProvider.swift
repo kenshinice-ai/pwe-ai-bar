@@ -145,7 +145,8 @@ actor ClaudeProvider {
                     percent: pct,
                     severity: Severity(word: l["severity"] as? String),
                     resetsAt: (l["resets_at"] as? String).flatMap(ISO8601DateFormatter.parse),
-                    isActive: (l["is_active"] as? Bool) ?? false
+                    isActive: (l["is_active"] as? Bool) ?? false,
+                    gradedBy: (l["severity"] as? String) != nil ? .server : .local
                 ))
             }
         }

@@ -37,6 +37,19 @@ struct QuotaWindow: Identifiable {
     var isActive: Bool = false  // the endpoint's own word for "this is the one biting"
     var note: String?           // shown instead of a percentage when percent is nil
 
+    /// When this reading was taken. Claude's comes from a live endpoint, so it is now. Codex's
+    /// comes out of a session log, so it is as old as the last time Codex ran — the number is
+    /// still correct while its window is open (nothing can consume Codex quota without writing
+    /// to that log), but the panel says how old it is rather than implying it is live.
+    var observedAt: Date = .init()
+
+    /// Who decided this is a warning. The Claude endpoint grades itself and its word is used
+    /// as-is; Codex reports a bare percentage that we grade against our own thresholds. Two
+    /// providers' "warning" therefore do not mean the same thing, and the panel should not
+    /// pretend otherwise.
+    enum Grader { case server, local }
+    var gradedBy: Grader = .local
+
     var display: String { percent.map { "\(Int($0.rounded()))%" } ?? (note ?? "—") }
 
     /// Strain for the wing. A window with no ratio but a critical state pins the feather.
@@ -89,7 +102,16 @@ struct Snapshot {
     var stale: Bool = false          // last fetch failed or was rate-limited; showing old numbers
     var updatedAt: Date = .init()
 
-    func window(_ ch: Channel) -> QuotaWindow? { windows.first { $0.channel == ch } }
+    /// The tightest window on that feather. A provider can own several — Codex reports a
+    /// five-hour and a weekly window on the same one — and the feather has to show the one
+    /// closest to stopping you, not whichever happened to be parsed first.
+    func window(_ ch: Channel) -> QuotaWindow? {
+        windows.filter { $0.channel == ch }.max { $0.strain < $1.strain }
+    }
+
+    func windows(_ ch: Channel) -> [QuotaWindow] { windows.filter { $0.channel == ch } }
+
+    func windows(of p: Provider) -> [QuotaWindow] { windows.filter { $0.provider == p } }
 
     /// The reading that gets to be the big number. Not a fixed window: whichever one is
     /// actually closest to stopping you, with the endpoint's `is_active` breaking ties.
@@ -145,6 +167,10 @@ struct Trophy {
     var subscriptionUSD: Double = 0
     var byModel: [(model: String, turns: Int, usd: Double)] = []
     var byDay: [(day: String, usd: Double)] = []
+    /// The last 24 hours, one bucket an hour, oldest first. Comes from the transcripts
+    /// rather than a sampled history file, so it is complete on first launch instead of
+    /// filling in over the following day.
+    var byHour: [(hour: Date, usd: Double)] = []
     var tokens: (input: Int, output: Int, cacheWrite: Int, cacheRead: Int) = (0, 0, 0, 0)
 
     var multiple: Double { subscriptionUSD > 0 ? equivalentUSD / subscriptionUSD : 0 }

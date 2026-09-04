@@ -20,6 +20,7 @@ final class Store: ObservableObject {
     private let rules = RuleEngine()
     private var pricing = Pricing.load()
     private var timer: Timer?
+    private var inFlight = false
     private var lastActivity = Date()
 
     /// Live, idle, and asleep are three different jobs. 20 s keeps the bar honest while you work;
@@ -49,7 +50,12 @@ final class Store: ObservableObject {
     }
 
     func refresh() {
+        // One sweep at a time. Clicking the icon asks for a refresh, and a burst of clicks
+        // used to stack sweeps that each re-read the whole log tree.
+        guard !inFlight else { return }
+        inFlight = true
         Task { @MainActor in
+            defer { inFlight = false }
             var snap = Snapshot()
 
             if Prefs.shared.trackClaude {
@@ -58,11 +64,14 @@ final class Store: ObservableObject {
                 snap.stale = stale
                 loggedIn = await claude.loggedIn
             }
-            if Prefs.shared.trackCodex, let w = CodexProvider.window() {
-                snap.windows.append(w)
+            if Prefs.shared.trackCodex {
+                snap.windows += await CodexProvider.shared.windows()
             }
 
-            let local = Transcript.refresh(pricing: pricing)
+            // Both of these read hundreds of megabytes of session logs. They are actors on
+            // purpose: doing this work on the main thread is what made the menu bar stop
+            // answering clicks while Claude Code was running.
+            let local = await Transcript.shared.refresh(pricing: pricing)
             snap.trophy = local.trophy
             snap.contextPercent = local.context
             snap.events = HookProvider.events()

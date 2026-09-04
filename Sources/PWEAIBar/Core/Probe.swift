@@ -80,8 +80,19 @@ enum Probe {
     /// while iterating — and impossible to diff against the design sheet.
     static func panels(into dir: String) async {
         let store = Store()
-        store.refresh()
-        try? await Task.sleep(for: .seconds(22))   // transcript sweep + quota fetch
+        store.start()
+        // Wait for data rather than a fixed sleep. The first run of a freshly built binary can
+        // sit on a keychain dialog — an ad-hoc signature changes on every build, so macOS treats
+        // each one as a new app — and a fixed sleep silently renders an empty panel.
+        let deadline = Date().addingTimeInterval(75)
+        while Date() < deadline {
+            if !store.snapshot.windows.isEmpty || store.snapshot.trophy.turns > 0 { break }
+            try? await Task.sleep(for: .milliseconds(400))
+        }
+        if store.snapshot.windows.isEmpty && store.snapshot.trophy.turns == 0 {
+            print("  ⚠ 没等到数据——钥匙串授权框可能还开着")
+        }
+        try? await Task.sleep(for: .seconds(2))    // let the last fields settle
 
         for dark in [true, false] {
             for mode in PanelMode.allCases {
@@ -113,8 +124,8 @@ enum Probe {
 
             var snap = Snapshot()
             snap.windows = windows
-            if let c = CodexProvider.window() { snap.windows.append(c) }
-            let local = Transcript.refresh(pricing: pricing)
+            snap.windows += await CodexProvider.shared.windows()
+            let local = await Transcript.shared.refresh(pricing: pricing)
             snap.trophy = local.trophy
             snap.contextPercent = local.context
             snap.events = HookProvider.events()

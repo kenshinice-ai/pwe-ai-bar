@@ -64,5 +64,17 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --deep --sign - "$APP" 2>/dev/null || true
+# Sign with a real identity when the keychain has one, ad-hoc only as a fallback.
+#
+# This is not about distribution — Developer ID signing happens on the release machine. It is
+# about the keychain: macOS grants access to a *signature*, so an ad-hoc build gets a fresh
+# identity on every compile and re-asks for permission to read the Claude Code credential every
+# single time. A stable Apple Development identity makes that grant stick across rebuilds.
+IDENTITY="$(security find-identity -v -p codesigning \
+  | grep -E "Developer ID Application|Apple Development" | grep -v CSSMERR | head -1 \
+  | sed -E 's/.*"(.*)".*/\1/' || true)"
+[[ -z "$IDENTITY" ]] && IDENTITY="-"
+codesign --force --deep --sign "$IDENTITY" "$APP" 2>/dev/null || \
+  codesign --force --deep --sign - "$APP" 2>/dev/null || true
+echo "▸ Signed with: $IDENTITY"
 echo "▸ Done: $APP"
