@@ -119,7 +119,7 @@ actor CodexProvider {
     /// about fifty megabytes here, and reading them as Swift strings to look for one marker is
     /// the same mistake that cost three seconds a refresh on the Claude side.
     private static func lastRateLimits(in url: URL) -> [String: Any]? {
-        guard let line = LineScanner.lastMatch(url, marker: "rate_limits"),
+        guard let line = LineScanner.lastMatch(url, marker: "rate_limits", tailBytes: 4 << 20),
               let o = try? JSONSerialization.jsonObject(with: line) else { return nil }
         return dig(o, for: "rate_limits")
     }

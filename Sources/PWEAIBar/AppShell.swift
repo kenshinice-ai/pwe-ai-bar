@@ -6,7 +6,7 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem!
-    private var popover: NSPopover!
+    private var popover: NSPopover?
     private var trophyWindow: NSWindow?
     private var settingsWindow: NSWindow?
     private let store = Store()
@@ -22,7 +22,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)   // menu bar only, no Dock icon
 
         buildStatusItem()
-        buildPopover()
         buildMainMenu()
 
         Notifier.shared.start()
@@ -98,18 +97,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Panel
 
-    /// Built once and reused. Rebuilding the hosting controller on every open threw away
-    /// SwiftUI's state each time and made opening the panel visibly slow.
+    /// Built on first open, then reused.
+    ///
+    /// Two things here. Building the SwiftUI graph at launch costs real memory for a panel most
+    /// launches never show — deferring it is most of the difference between a menu-bar app that
+    /// sits at ninety megabytes and one that sits well below. And it is built *once*: rebuilding
+    /// the hosting controller on every open threw away SwiftUI's state each time and made the
+    /// panel visibly slow to appear.
     ///
     /// `.applicationDefined` rather than `.transient` on purpose. A transient popover closes
     /// itself on any click outside — including the click on our own status item — and then our
     /// action fires and reopens it. The two cancel out and the icon reads as dead. Owning the
     /// dismissal means one click is one toggle.
-    private func buildPopover() {
-        popover = NSPopover()
-        popover.behavior = .applicationDefined
-        popover.animates = false
-        popover.contentViewController = NSHostingController(rootView: panel)
+    private func makePopover() -> NSPopover {
+        if let popover { return popover }
+        let p = NSPopover()
+        p.behavior = .applicationDefined
+        p.animates = false
+        p.contentViewController = NSHostingController(rootView: panel)
+        popover = p
+        return p
     }
 
     private var panel: some View {
@@ -122,9 +129,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func togglePopover() {
         guard let button = statusItem.button else { return }
-        if popover.isShown { closePopover(); return }
+        if popover?.isShown == true { closePopover(); return }
 
         store.refresh()
+        let popover = makePopover()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
         button.highlight(true)
@@ -138,7 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         localMonitor = NSEvent.addLocalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
                 // A click inside the popover is not a dismissal; a click anywhere else is.
-                if let self, event.window !== self.popover.contentViewController?.view.window,
+                if let self, event.window !== self.popover?.contentViewController?.view.window,
                    event.window !== self.statusItem.button?.window {
                     Task { @MainActor in self.closePopover() }
                 }
@@ -147,7 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func closePopover() {
-        popover.performClose(nil)
+        popover?.performClose(nil)
         statusItem.button?.highlight(false)
         if let m = outsideMonitor { NSEvent.removeMonitor(m); outsideMonitor = nil }
         if let m = localMonitor { NSEvent.removeMonitor(m); localMonitor = nil }

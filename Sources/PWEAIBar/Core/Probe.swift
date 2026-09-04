@@ -234,10 +234,15 @@ enum Probe {
         let t0 = Date()
         func mark(_ what: String) {
             FileHandle.standardError.write(
-                Data(String(format: "  [%6.2fs] %@\n", Date().timeIntervalSince(t0), what).utf8))
+                Data(String(format: "  [%6.2fs] %6.1f MB  %@\n",
+                            Date().timeIntervalSince(t0), residentMB(), what).utf8))
         }
         Task { @MainActor in
             mark("start")
+            _ = Credentials.ownToken()
+            mark("keychain")
+            _ = Transcript.lastRateLimit()
+            mark("lastRateLimit")
             let pricing = Pricing.load()
             mark("pricing loaded")
             let claude = ClaudeProvider()
@@ -323,6 +328,19 @@ enum Probe {
     private static func pad(_ s: String, _ width: Int) -> String {
         let cells = s.unicodeScalars.reduce(0) { $0 + ($1.value > 0x2E80 ? 2 : 1) }
         return s + String(repeating: " ", count: max(1, width - cells))
+    }
+
+    /// Current resident size. Stage timings alone cannot tell you which stage is the one
+    /// holding memory, and guessing at that wasted more than one round here.
+    static func residentMB() -> Double {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size)
+        let ok = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+            }
+        }
+        return ok == KERN_SUCCESS ? Double(info.resident_size) / 1_048_576 : 0
     }
 
     private static func f(_ d: Date) -> String {
