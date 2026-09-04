@@ -79,12 +79,20 @@ struct SettingsView: View {
                     }
 
                     HStack(spacing: Theme.s2) {
-                        Text("想彻底不再弹框：终端运行 claude setup-token，把结果粘进来。")
+                        // Telling someone how to get a token they already have is noise; the
+                        // useful thing to say at that point is where it lives and how to remove it.
+                        Text(Credentials.hasOwnToken
+                             ? "令牌存在本 app 自己的钥匙串条目里，不会过期。清空输入框再点「清除」即可删除。"
+                             : "想彻底不再弹框：终端运行 claude setup-token，把结果粘进来。")
                             .font(Theme.sans(10.5)).foregroundStyle(Theme.text2)
                             .fixedSize(horizontal: false, vertical: true)
-                        Spacer()
-                        Button("授权钥匙串") { enableRealQuota() }
-                            .font(Theme.sans(11))
+                        Spacer(minLength: Theme.s1)
+                        // Only offered when it would change anything. With a token in hand the
+                        // shared keychain is never read, so the button would be a no-op.
+                        if !Credentials.hasOwnToken {
+                            Button("授权钥匙串") { enableRealQuota() }
+                                .font(Theme.sans(11))
+                        }
                     }
                     if !tokenState.isEmpty {
                         Text(tokenState).font(Theme.sans(10.5)).foregroundStyle(Theme.accent)

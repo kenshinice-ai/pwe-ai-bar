@@ -21,8 +21,24 @@ final class RuleEngine {
 
     private var bands: [String: Health] = [:]        // last band seen, per window id
     private var lastFired: [String: Date] = [:]      // quiet period, per topic
-    private var pendingResets: [String: Date] = [:]  // windows we owe a "you're clear" for
     private var seenEvents: Set<String> = []
+
+    /// Windows we owe a "you're clear" for, kept across launches.
+    ///
+    /// This is the one alert nobody else sends, and the gap between hitting a limit and it
+    /// resetting is measured in hours — plenty of time to quit the app, reboot, or have it
+    /// relaunch at login. Holding the promise only in memory meant the app would routinely
+    /// forget the very thing it exists to tell you.
+    private var pendingResets: [String: Date] {
+        get {
+            (UserDefaults.standard.dictionary(forKey: "pendingResets") as? [String: Double] ?? [:])
+                .mapValues { Date(timeIntervalSince1970: $0) }
+        }
+        set {
+            UserDefaults.standard.set(newValue.mapValues { $0.timeIntervalSince1970 },
+                                      forKey: "pendingResets")
+        }
+    }
 
     private let quiet: TimeInterval = 15 * 60
     /// No keyboard or mouse for this long and we treat you as away from the desk.
@@ -61,7 +77,9 @@ final class RuleEngine {
             // Remember to come back when this window rolls over — the one alert nobody else
             // sends, and the one that actually gives you time back.
             if band >= .warm, let reset = w.resetsAt, reset > now {
-                pendingResets[w.id] = reset
+                var p = pendingResets
+                p[w.id] = reset
+                pendingResets = p
             }
 
             guard let previous else { continue }        // first sight is not a crossing
@@ -85,16 +103,25 @@ final class RuleEngine {
             }
         }
 
-        // Reset arrivals.
-        for (id, at) in pendingResets where at <= now {
-            pendingResets.removeValue(forKey: id)
-            let w = snap.windows.first { $0.id == id }
-            if (w?.band ?? .calm) == .calm {
+        // Reset arrivals — the alert nobody else sends, and the one that actually gives time
+        // back. Only acted on when we can see the window it was promised about: with no data at
+        // all we cannot tell "reset" from "cannot reach the endpoint", and the promise is worth
+        // keeping until we can.
+        if !snap.windows.isEmpty {
+            var pending = pendingResets
+            for (id, at) in pending where at <= now {
+                pending.removeValue(forKey: id)
+                guard let w = snap.windows.first(where: { $0.id == id }) else { continue }
+                guard w.band == .calm else { continue }        // reset, and genuinely clear
                 out.append(Alert(kind: .reset,
                                  title: "额度已重置",
-                                 body: "\(w?.title ?? "窗口")已重置，可以继续了",
-                                 provider: w?.provider ?? .claude, urgent: false))
+                                 body: "\(w.provider.name) \(w.title)已重置，可以继续了",
+                                 provider: w.provider, urgent: false))
             }
+            // Anything promised about a window that no longer exists is dropped after a day,
+            // so the list cannot accumulate forever.
+            pending = pending.filter { now.timeIntervalSince($0.value) < 86400 }
+            pendingResets = pending
         }
 
         // Session events. Keyed by session id + kind so a re-fired hook stays silent.
