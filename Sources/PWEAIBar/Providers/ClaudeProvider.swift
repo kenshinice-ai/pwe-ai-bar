@@ -74,7 +74,22 @@ actor ClaudeProvider {
         guard let data = try? JSONSerialization.data(withJSONObject: root) else { return }
         try? data.write(to: Self.diskCache, options: .atomic)
     }
-    private var retryAfter: Date?
+    /// Persisted, because a 429 from this endpoint can last the better part of an hour and a
+    /// relaunch would otherwise walk straight back into it — which is how a fifty-three minute
+    /// block got earned in the first place. Kept in defaults rather than the cache file so it
+    /// survives someone clearing the cache to force a refresh.
+    private var retryAfter: Date? {
+        get {
+            let t = UserDefaults.standard.double(forKey: "quotaRetryAfter")
+            guard t > 0 else { return nil }
+            let d = Date(timeIntervalSince1970: t)
+            return d > Date() ? d : nil
+        }
+        set {
+            UserDefaults.standard.set(newValue?.timeIntervalSince1970 ?? 0,
+                                      forKey: "quotaRetryAfter")
+        }
+    }
     /// Why we have no Claude numbers, when we have none. The panel needs to tell the
     /// difference: "log in" and "grant keychain access" are different problems with different
     /// fixes, and "读不到额度" helps with neither.
@@ -207,7 +222,10 @@ actor ClaudeProvider {
         if let at = fetchedAt, Date().timeIntervalSince(at) < ttl, !cache.isEmpty {
             return (cache, false)
         }
-        if let r = retryAfter, Date() < r { return (cache, true) }
+        if let r = retryAfter {
+            blocker = .rateLimited(r)
+            return (cache, true)
+        }
 
         guard let cred = await token() else {
             loggedIn = false
@@ -233,8 +251,9 @@ actor ClaudeProvider {
 
             if http.statusCode == 429 {
                 let after = Double(http.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 60
-                retryAfter = Date().addingTimeInterval(after)
-                blocker = .rateLimited(retryAfter!)
+                let until = Date().addingTimeInterval(after)
+                retryAfter = until
+                blocker = .rateLimited(until)
                 return (cache.isEmpty ? offline() : cache, true)
             }
             guard http.statusCode == 200,
