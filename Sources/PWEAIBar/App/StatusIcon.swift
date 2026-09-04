@@ -75,12 +75,8 @@ enum StatusIcon {
         let image = NSImage(size: NSSize(width: ceil(total), height: height), flipped: false) { rect in
             let box = CGRect(x: lead, y: rect.midY - wingHeight / 2,
                              width: wingWidth, height: wingHeight)
-            // The bar takes the actionable band, not the worst feather — see `Snapshot.overall`.
-            let bar = [ChannelHealth(channel: .session, band: snap.overall,
-                                     fill: snap.channels()
-                                        .filter { $0.band <= snap.overall }
-                                        .map(\.fill).max() ?? 0)]
-            WingGauge.barImage(bar, size: box.size, calmInk: label, dark: dark).draw(in: box)
+            WingGauge.barImage(snap.channels(), size: box.size, calmInk: label, dark: dark)
+                .draw(in: box)
 
             var x = lead + wingWidth + gap
             for (i, seg) in segments.enumerated() {

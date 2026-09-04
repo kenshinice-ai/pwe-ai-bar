@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import os
 
 /// Claude Code's quota, read from the same OAuth endpoint the `/usage` command uses.
 ///
@@ -30,20 +31,36 @@ actor ClaudeProvider {
     /// would re-ask every refresh, which turns one dialog into a dialog every sixty seconds.
     private var keychainDenied = false
 
-    /// The keychain read blocks the calling thread while macOS shows its access dialog — the
-    /// first launch of any new binary triggers one, and an ad-hoc signature means every rebuild
-    /// counts as new. Run it off the actor with a ceiling so a dialog nobody answers degrades
-    /// into the local fallback instead of wedging every future refresh.
+    /// The keychain read blocks its thread for as long as macOS shows the access dialog, and
+    /// a newly-signed binary always gets one. If nobody is at the machine, that is forever.
+    ///
+    /// Two earlier attempts at a timeout both hung, and the second failure is the instructive
+    /// one. Racing the read against a sleep in a `withTaskGroup` looks right and cannot work:
+    /// the group does not return until *every* child finishes, `cancelAll()` has no effect on a
+    /// synchronous `SecItemCopyMatching` already in flight, and so the group sits waiting on the
+    /// loser it was supposed to abandon. (The first attempt was worse — both children shared
+    /// this actor's executor, so the blocking read owned it and the timer never even ran.)
+    ///
+    /// So: no task group. Two queues race to resume one continuation, a lock decides who got
+    /// there first, and the loser is simply never waited on.
     private func credentialWithTimeout() async -> Credential?? {
-        await withTaskGroup(of: Credential??.self) { group in
-            group.addTask { .some(Self.readKeychain()) }
-            group.addTask {
-                try? await Task.sleep(for: .seconds(20))
-                return Credential??.none        // outer nil: never answered
+        await withCheckedContinuation { (cont: CheckedContinuation<Credential??, Never>) in
+            let resumed = OSAllocatedUnfairLock(initialState: false)
+            func claim() -> Bool {
+                resumed.withLock { done in
+                    if done { return false }
+                    done = true
+                    return true
+                }
             }
-            let first = await group.next() ?? .some(nil)
-            group.cancelAll()
-            return first
+            DispatchQueue.global(qos: .userInitiated).async {
+                let c = Self.readKeychain()
+                if claim() { cont.resume(returning: .some(c)) }
+            }
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 8) {
+                // Outer nil: the dialog was never answered.
+                if claim() { cont.resume(returning: Credential??.none) }
+            }
         }
     }
 

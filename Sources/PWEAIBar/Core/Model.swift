@@ -102,25 +102,44 @@ struct Snapshot {
     var stale: Bool = false          // last fetch failed or was rate-limited; showing old numbers
     var updatedAt: Date = .init()
 
-    /// The tightest window on that feather. A provider can own several — Codex reports a
-    /// five-hour and a weekly window on the same one — and the feather has to show the one
-    /// closest to stopping you, not whichever happened to be parsed first.
+    /// The reading that represents that feather.
+    ///
+    /// A provider can own several windows on one feather — Codex reports a five-hour, a weekly
+    /// and a credit pool on the same one — so this takes the tightest. But it takes the
+    /// tightest *actionable* one: the gauge is for things you can still do something about, and
+    /// a spent add-on pool would otherwise hold that feather at full red for weeks and drown
+    /// out the weekly window filling up behind it. The standing fact is not hidden; it keeps
+    /// its own row in the panel, which is where a fact belongs.
     func window(_ ch: Channel) -> QuotaWindow? {
-        windows.filter { $0.channel == ch }.max { $0.strain < $1.strain }
+        let mine = windows.filter { $0.channel == ch }
+        let live = mine.filter(isActionable)
+        return (live.isEmpty ? mine : live).max { $0.strain < $1.strain }
     }
 
     func windows(_ ch: Channel) -> [QuotaWindow] { windows.filter { $0.channel == ch } }
 
     func windows(of p: Provider) -> [QuotaWindow] { windows.filter { $0.provider == p } }
 
+    /// A window you can do something about: it has a ratio, or a reset to wait for. An add-on
+    /// credit pool that is simply spent has neither — it is a standing fact about the account,
+    /// not a window that is about to stop you, and it must not speak for the whole app.
+    var isActionable: (QuotaWindow) -> Bool {
+        { !($0.severity == .critical && $0.percent == nil && $0.resetsAt == nil) }
+    }
+
     /// The reading that gets to be the big number. Not a fixed window: whichever one is
     /// actually closest to stopping you, with the endpoint's `is_active` breaking ties.
+    ///
+    /// Standing conditions are excluded for the same reason they are kept out of the menu-bar
+    /// colour — a headline that reads "附加额度 已用尽" for three weeks running tells you
+    /// nothing you did not already know, and hides the window that is genuinely filling up.
     var protagonist: QuotaWindow? {
-        windows.filter { $0.percent != nil || $0.severity == .critical }
-               .max { a, b in
-                   if a.isActive != b.isActive { return b.isActive }
-                   return a.strain < b.strain
-               }
+        let usable = windows.filter { ($0.percent != nil || $0.severity == .critical) && isActionable($0) }
+        return (usable.isEmpty ? windows.filter { $0.percent != nil } : usable)
+            .max { a, b in
+                if a.isActive != b.isActive { return b.isActive }
+                return a.strain < b.strain
+            }
     }
 
     var attention: AgentEvent? { events.first { $0.isAttention } }
@@ -148,14 +167,9 @@ struct Snapshot {
     /// mark red permanently — and a gauge that is always red has stopped being a gauge. Those
     /// windows keep their own feather in the panel, where five colours can say "this one is a
     /// background fact"; they just do not get to speak for the whole mark.
-    var overall: Health {
-        let actionable = Channel.allCases.filter { ch in
-            guard let w = window(ch) else { return true }
-            return !(w.severity == .critical && w.percent == nil && w.resetsAt == nil)
-        }
-        return channels().filter { actionable.contains($0.channel) }
-            .map(\.band).max() ?? .calm
-    }
+    /// One colour for the menu bar. `channels()` already reports only actionable readings, so
+    /// nothing here needs a special case: a permanently spent credit pool cannot reach this.
+    var overall: Health { channels().map(\.band).max() ?? .calm }
 }
 
 /// The trophy figures. On a subscription the interesting number is not what you spent — you

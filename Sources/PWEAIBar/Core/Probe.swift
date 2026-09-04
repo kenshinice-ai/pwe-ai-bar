@@ -116,16 +116,26 @@ enum Probe {
 
     static func run() {
         let sem = DispatchSemaphore(value: 0)
+        let t0 = Date()
+        func mark(_ what: String) {
+            FileHandle.standardError.write(
+                Data(String(format: "  [%6.2fs] %@\n", Date().timeIntervalSince(t0), what).utf8))
+        }
         Task { @MainActor in
+            mark("start")
             let pricing = Pricing.load()
+            mark("pricing loaded")
             let claude = ClaudeProvider()
             let (windows, stale) = await claude.windows()
+            mark("claude windows: \(windows.count)")
             let loggedIn = await claude.loggedIn
 
             var snap = Snapshot()
             snap.windows = windows
             snap.windows += await CodexProvider.shared.windows()
+            mark("codex done")
             let local = await Transcript.shared.refresh(pricing: pricing)
+            mark("transcript done: \(local.trophy.turns) turns")
             snap.trophy = local.trophy
             snap.contextPercent = local.context
             snap.events = HookProvider.events()

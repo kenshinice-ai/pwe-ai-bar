@@ -68,29 +68,71 @@ actor Transcript {
 
     // MARK: Parsing
 
+    /// Byte-level, on purpose.
+    ///
+    /// The obvious version — read the file as a `String`, `split` on newlines, test each line
+    /// with `contains` — takes minutes across a 159 MB tree. Swift's `String` comparison is
+    /// Unicode-correct, which means grapheme-cluster work on every one of several million
+    /// lines, and almost all of that work is spent rejecting lines we do not want. Scanning
+    /// raw bytes for an ASCII marker and only decoding the survivors turns the same sweep into
+    /// a couple of seconds. The file is memory-mapped so a big log is never fully resident.
     private static func parse(_ url: URL) -> [Turn] {
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return [] }
         var out: [Turn] = []
-        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-            // Cheap reject first: JSON-decoding every line of a large log costs far more than
-            // scanning it for a substring that only appears on the lines we want.
-            guard line.contains("\"usage\""), line.contains("\"assistant\""),
-                  let data = line.data(using: .utf8),
-                  let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  o["type"] as? String == "assistant",
-                  let msg = o["message"] as? [String: Any],
-                  let model = msg["model"] as? String, model != "<synthetic>",
-                  let u = msg["usage"] as? [String: Any],
-                  let ts = o["timestamp"] as? String,
-                  let at = ISO8601DateFormatter.parse(ts)
-            else { continue }
-            out.append(Turn(at: at, model: model,
-                            input: u["input_tokens"] as? Int ?? 0,
-                            output: u["output_tokens"] as? Int ?? 0,
-                            cacheWrite: u["cache_creation_input_tokens"] as? Int ?? 0,
-                            cacheRead: u["cache_read_input_tokens"] as? Int ?? 0))
+
+        data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+            guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
+            let count = raw.count
+            let usage = Array("\"usage\"".utf8)
+            var lineStart = 0
+            var i = 0
+
+            while i <= count {
+                guard i == count || base[i] == 0x0A else { i += 1; continue }
+                let length = i - lineStart
+                if length > 40, contains(base + lineStart, length, usage) {
+                    let slice = Data(bytes: base + lineStart, count: length)
+                    if let turn = decode(slice) { out.append(turn) }
+                }
+                i += 1
+                lineStart = i
+            }
         }
         return out
+    }
+
+    /// Naive substring search over bytes. The needle is seven bytes and the haystack is one
+    /// line, so anything cleverer would cost more to set up than it saves.
+    private static func contains(_ hay: UnsafePointer<UInt8>, _ n: Int, _ needle: [UInt8]) -> Bool {
+        let m = needle.count
+        guard m <= n else { return false }
+        let first = needle[0]
+        var i = 0
+        while i <= n - m {
+            if hay[i] == first {
+                var k = 1
+                while k < m, hay[i + k] == needle[k] { k += 1 }
+                if k == m { return true }
+            }
+            i += 1
+        }
+        return false
+    }
+
+    private static func decode(_ line: Data) -> Turn? {
+        guard let o = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+              o["type"] as? String == "assistant",
+              let msg = o["message"] as? [String: Any],
+              let model = msg["model"] as? String, model != "<synthetic>",
+              let u = msg["usage"] as? [String: Any],
+              let ts = o["timestamp"] as? String,
+              let at = ISO8601DateFormatter.parse(ts)
+        else { return nil }
+        return Turn(at: at, model: model,
+                    input: u["input_tokens"] as? Int ?? 0,
+                    output: u["output_tokens"] as? Int ?? 0,
+                    cacheWrite: u["cache_creation_input_tokens"] as? Int ?? 0,
+                    cacheRead: u["cache_read_input_tokens"] as? Int ?? 0)
     }
 
     private static func summarise(_ turns: [Turn], pricing: Pricing) -> Result {
