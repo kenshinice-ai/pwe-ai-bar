@@ -30,29 +30,48 @@ enum ProviderMark {
         }
     }
 
-    /// Claude — a radial burst of tapered rays, unequal in length. Spiky, asymmetric, and
-    /// nothing else in a menu bar looks like it.
+    /// Claude — a radial burst of tapered blades.
+    ///
+    /// Three things make it read as this mark rather than a generic star. The blades are
+    /// lenses, not spikes: widest around their middle and coming to a point at both ends, so
+    /// the mark has weight without a heavy centre. They stop short of the origin, leaving a
+    /// small open eye where a filled hub would otherwise turn the whole thing into a sun. And
+    /// their lengths vary on a short irregular cycle, which is what separates a drawn burst
+    /// from a compass rose.
     private static func burst(in rect: CGRect) -> NSBezierPath {
         let c = CGPoint(x: rect.midX, y: rect.midY)
         let r = min(rect.width, rect.height) / 2
         let path = NSBezierPath()
-        // Ray lengths repeat in a short irregular cycle so the burst reads as drawn rather
-        // than generated — an even star is a different mark entirely.
-        let lengths: [CGFloat] = [1.0, 0.62, 0.86, 0.70, 1.0, 0.66, 0.90, 0.62, 0.96, 0.72]
-        let half = CGFloat.pi / CGFloat(lengths.count) * 0.30   // ray half-width at the root
+
+        let lengths: [CGFloat] = [1.0, 0.80, 0.93, 0.78, 1.0, 0.83, 0.96, 0.76, 0.99, 0.86]
+        let n = lengths.count
+        let rIn = r * 0.17                  // the open eye
+        // Narrow enough that ten blades stay separate at 13 pt: any fatter and the burst
+        // closes up into a daisy, which is a different mark and the wrong one.
+        let width = r * 0.088
+
         for (i, len) in lengths.enumerated() {
-            let a = CGFloat(i) * 2 * .pi / CGFloat(lengths.count) - .pi / 2
-            let tip = CGPoint(x: c.x + cos(a) * r * len, y: c.y + sin(a) * r * len)
-            let l = CGPoint(x: c.x + cos(a - half) * r * 0.20, y: c.y + sin(a - half) * r * 0.20)
-            let rr = CGPoint(x: c.x + cos(a + half) * r * 0.20, y: c.y + sin(a + half) * r * 0.20)
-            path.move(to: l)
-            path.curve(to: tip, controlPoint1: l, controlPoint2: tip)
-            path.curve(to: rr, controlPoint1: tip, controlPoint2: rr)
+            // Half a step of rotation so no blade sits dead vertical — a mark that lines up
+            // with the pixel grid reads as a widget, not a logo.
+            let a = (CGFloat(i) + 0.5) * 2 * .pi / CGFloat(n) - .pi / 2
+            let dir = CGPoint(x: cos(a), y: sin(a))
+            let perp = CGPoint(x: -dir.y, y: dir.x)
+            let rOut = r * len
+            let span = rOut - rIn
+
+            func at(_ t: CGFloat, _ side: CGFloat) -> CGPoint {
+                CGPoint(x: c.x + dir.x * (rIn + span * t) + perp.x * width * side,
+                        y: c.y + dir.y * (rIn + span * t) + perp.y * width * side)
+            }
+            let inner = at(0, 0), outer = at(1, 0)
+
+            path.move(to: inner)
+            // Fullest in the inner third, so the blades read as radiating outward and taper
+            // to needle tips rather than bulging into petals.
+            path.curve(to: outer, controlPoint1: at(0.22, 1), controlPoint2: at(0.60, 1))
+            path.curve(to: inner, controlPoint1: at(0.60, -1), controlPoint2: at(0.22, -1))
             path.close()
         }
-        // A small hub keeps the rays from reading as loose specks when the icon is scaled down.
-        path.appendOval(in: CGRect(x: c.x - r * 0.17, y: c.y - r * 0.17,
-                                   width: r * 0.34, height: r * 0.34))
         return path
     }
 
