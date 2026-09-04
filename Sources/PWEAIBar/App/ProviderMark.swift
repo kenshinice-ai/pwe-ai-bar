@@ -86,7 +86,7 @@ enum ProviderMark {
         let r = min(rect.width, rect.height) / 2
         let ring = CGMutablePath()
         for i in 0..<6 {
-            var t = CGAffineTransform(translationX: c.x, y: c.y)
+            let t = CGAffineTransform(translationX: c.x, y: c.y)
                 .rotated(by: CGFloat(i) * .pi / 3)
                 .translatedBy(x: -c.x, y: -c.y)
             ring.addEllipse(in: CGRect(x: c.x - r * 0.92, y: c.y - r * 0.36,

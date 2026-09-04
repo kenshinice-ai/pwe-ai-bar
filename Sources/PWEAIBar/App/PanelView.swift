@@ -13,6 +13,7 @@ import SwiftUI
 struct PanelView: View {
     @ObservedObject var store: Store
     @ObservedObject var prefs = Prefs.shared
+    @Environment(\.colorScheme) private var colorScheme
     var onTrophy: () -> Void
     var onSettings: () -> Void
     var onOpen: (Provider) -> Void
@@ -162,8 +163,39 @@ struct PanelView: View {
             ForEach(rows(for: p)) { w in
                 windowRow(w)
             }
+
+            // The call to action has to live here, not only in the empty state. As soon as any
+            // other provider reports a number the panel is no longer empty, and the one thing
+            // the user needs to press disappears with it.
+            if p == .claude, let cta = claudeCallToAction {
+                HStack(spacing: Theme.s2) {
+                    Text(cta.text).font(Theme.sans(11)).foregroundStyle(Theme.text2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: Theme.s1)
+                    if let title = cta.button {
+                        Button(title) { onEnableQuota() }
+                            .font(Theme.sans(11))
+                            .help("会弹一次 macOS 钥匙串授权，选「始终允许」后不再询问")
+                    }
+                }
+                .padding(.top, 2)
+            }
         }
         .padding(.horizontal, Theme.s3).padding(.vertical, 11)
+    }
+
+    /// Nil once real quota is flowing.
+    private var claudeCallToAction: (text: String, button: String?)? {
+        guard snap.windows(of: .claude).isEmpty else { return nil }
+        switch store.blocker {
+        case .needsSetup:      return ("只有本地估算，还没接上真实额度", "启用")
+        case .keychainRefused: return ("钥匙串授权被拒过", "重新授权")
+        case .notLoggedIn:     return ("先在终端运行 claude auth login", nil)
+        case .expired:         return ("登录已过期，打开一次 Claude Code 即可", nil)
+        case .rateLimited(let until):
+            return ("接口限流中，\(max(1, Int(until.timeIntervalSinceNow / 60))) 分钟后重试", nil)
+        case .none:            return nil
+        }
     }
 
     /// Label, bar, figure, reset — four columns that keep their x positions down the whole
@@ -281,12 +313,20 @@ struct PanelView: View {
         }
     }
 
-    private var isDark: Bool {
-        NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-    }
+    /// The appearance of *this view*, not of the application.
+    ///
+    /// Reading `NSApp.effectiveAppearance` here painted near-white figures onto a white panel:
+    /// the app object and the view can disagree, and only the view knows what ground its text
+    /// is actually landing on. Same class of mistake as reading the app's appearance to decide
+    /// the menu-bar glyph's colour — twice now, so it is worth naming.
+    private var isDark: Bool { colorScheme == .dark }
 
+    /// Claude always gets a section, even with nothing to report — that section is where the
+    /// "turn this on" row lives, and hiding it would hide the only way forward.
     private var activeProviders: [Provider] {
-        Provider.allCases.filter { !rows(for: $0).isEmpty }
+        Provider.allCases.filter {
+            !rows(for: $0).isEmpty || ($0 == .claude && claudeCallToAction != nil)
+        }
     }
 
     private func bandOf(_ p: Provider) -> Health {

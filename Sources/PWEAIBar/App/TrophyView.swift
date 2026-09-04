@@ -8,7 +8,20 @@ import SwiftUI
 /// around the menu bar all day.
 struct TrophyView: View {
     let trophy: Trophy
-    @State private var progress: Double = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Entrance flourish only — nothing sized or valued depends on it.
+    ///
+    /// Two versions of this got it wrong before settling here. The first counted the money up
+    /// from zero: any moment the animation had not finished, the page read "$0.00 · 0×" as if
+    /// you had never used the thing. Moving the animation to the bar heights only relocated the
+    /// bug — a chart flattened to a hairline lies about the data exactly as loudly, just more
+    /// quietly. And both failed the same way for the same reason: `onAppear` never fires for a
+    /// view that is not in a window, and animations do not run without a display to drive them.
+    ///
+    /// So geometry and figures are always true, and the only thing that moves is a scale nobody
+    /// can misread. Worst case, the page opens at 97 % size and stays there.
+    @State private var appeared = false
 
     private var t: Trophy { trophy }
 
@@ -30,8 +43,10 @@ struct TrophyView: View {
         }
         .frame(width: 460)
         .background(Theme.canvas)
+        .scaleEffect(appeared || reduceMotion ? 1 : 0.97)
+        .opacity(appeared || reduceMotion ? 1 : 0.9)
         .onAppear {
-            withAnimation(.easeOut(duration: 1.1)) { progress = 1 }
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { appeared = true }
         }
     }
 
@@ -40,7 +55,7 @@ struct TrophyView: View {
             VStack(alignment: .leading, spacing: Theme.s1) {
                 Text("\(t.days) 天等效 API 成本".uppercased()).brandLabel()
                     .foregroundStyle(Theme.hex(Theme.textDark2))
-                Text(money(t.equivalentUSD * progress))
+                Text(money(t.equivalentUSD))
                     .font(Theme.figures(44)).foregroundStyle(Theme.hex(Theme.amber))
             }
             VStack(alignment: .leading, spacing: Theme.s1) {
@@ -51,7 +66,7 @@ struct TrophyView: View {
             }
             VStack(alignment: .leading, spacing: Theme.s1) {
                 Text("回本".uppercased()).brandLabel().foregroundStyle(Theme.hex(Theme.textDark2))
-                Text(t.multiple >= 1 ? "\(Int((t.multiple * progress).rounded()))×" : "—")
+                Text(t.multiple >= 1 ? "\(Int(t.multiple.rounded()))×" : "—")
                     .font(Theme.figures(20)).foregroundStyle(Theme.hex(Theme.amber))
             }
             Spacer(minLength: 0)
@@ -68,7 +83,7 @@ struct TrophyView: View {
                 HStack(spacing: 0) {
                     ForEach(Array(t.byModel.enumerated()), id: \.offset) { i, m in
                         Rectangle().fill(modelColour(i))
-                            .frame(width: g.size.width * share(m.usd) * progress)
+                            .frame(width: g.size.width * share(m.usd))
                     }
                 }
             }
@@ -96,7 +111,7 @@ struct TrophyView: View {
             HStack(alignment: .bottom, spacing: 3) {
                 ForEach(Array(t.byDay.enumerated()), id: \.offset) { _, d in
                     RoundedRectangle(cornerRadius: 2).fill(Theme.accent.opacity(0.85))
-                        .frame(height: max(2, 48 * d.usd / peak * progress))
+                        .frame(height: max(2, 48 * d.usd / peak))
                 }
             }
             .frame(height: 48)
@@ -143,9 +158,21 @@ struct TrophyView: View {
          .replacingOccurrences(of: "-", with: " ")
     }
 
+    /// `%,.0f` is not a thing in Swift — that is Python's and Java's grouping flag, and here it
+    /// printed the literal string `$,.0f` where the largest figure on the page should have been.
+    /// Grouping comes from a formatter or not at all.
+    private static let grouped: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 0
+        return f
+    }()
+
     private func money(_ v: Double) -> String {
-        v >= 1000 ? String(format: "$%,.0f", v).replacingOccurrences(of: ",", with: ",")
-                  : String(format: "$%.2f", v)
+        if v >= 1000 {
+            return "$" + (Self.grouped.string(from: NSNumber(value: v)) ?? String(Int(v)))
+        }
+        return String(format: "$%.2f", v)
     }
 
     private func big(_ v: Int) -> String {

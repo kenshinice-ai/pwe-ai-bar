@@ -43,7 +43,9 @@ final class Prefs: ObservableObject {
         // the recoverable mistake; starting quiet means most people never learn there is more.
         menuBarMode = MenuBarMode(rawValue: d.string(forKey: "menuBarMode") ?? "") ?? .full
         panelMode   = PanelMode(rawValue: d.string(forKey: "panelMode") ?? "") ?? .standard
-        placement   = AlertPlacement(rawValue: d.string(forKey: "placement") ?? "") ?? .menubar
+        let saved = AlertPlacement(rawValue: d.string(forKey: "placement") ?? "") ?? .menubar
+        // A setting carried over from a Mac that had a notch would silently deliver nothing here.
+        placement = (saved == .notch && !Prefs.hasNotch) ? .menubar : saved
         trackClaude = d.object(forKey: "trackClaude") as? Bool ?? true
         trackCodex  = d.object(forKey: "trackCodex")  as? Bool ?? true
         sound       = d.object(forKey: "sound")       as? Bool ?? true

@@ -26,14 +26,19 @@ struct SettingsView: View {
             }
             row("提醒落点") {
                 VStack(alignment: .leading, spacing: 5) {
+                    // The notch choice is removed, not greyed. A segmented control cannot show
+                    // a disabled item convincingly — it looks identical to a live one until you
+                    // press it — and an option that can never work on this hardware is not a
+                    // choice, it is a dead end with a label on it.
                     Picker("", selection: $prefs.placement) {
-                        ForEach(AlertPlacement.allCases) { p in
-                            Text(p.label).tag(p)
-                                .disabled(p == .notch && !Prefs.hasNotch)
+                        ForEach(AlertPlacement.allCases.filter { $0 != .notch || Prefs.hasNotch }) {
+                            Text($0.label).tag($0)
                         }
-                    }.pickerStyle(.segmented).labelsHidden()
+                    }
+                    .pickerStyle(.segmented).labelsHidden()
+
                     if !Prefs.hasNotch {
-                        Text("这台机器没有刘海，该选项不可用。")
+                        Text("这台机器没有刘海，所以没有那个选项。")
                             .font(Theme.sans(10.5)).foregroundStyle(Theme.text2)
                     }
                 }
@@ -107,6 +112,9 @@ struct SettingsView: View {
         }
         .frame(width: 380)
         .background(Theme.surface)
+        // System blue on a navy-and-amber panel reads as someone else's app. One tint at the
+        // root covers every switch, picker and button below it.
+        .tint(Theme.accent)
     }
 
     private func row<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {

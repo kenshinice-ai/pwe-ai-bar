@@ -56,6 +56,23 @@ enum Probe {
         }
     }
 
+    /// Renders any view at a fixed width, in a chosen appearance, to a PNG.
+    private static func shoot(_ view: AnyView, width: CGFloat, dark: Bool, to path: String) {
+        let host = NSHostingView(rootView: view.environment(\.colorScheme, dark ? .dark : .light))
+        host.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        host.frame = NSRect(x: 0, y: 0, width: width, height: host.fittingSize.height)
+        host.layoutSubtreeIfNeeded()
+        // Let any entrance animation settle, or the snapshot catches the first frame and every
+        // bar comes out flat.
+        RunLoop.main.run(until: Date().addingTimeInterval(1.4))
+        host.layoutSubtreeIfNeeded()
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else { return }
+        try? png.write(to: URL(fileURLWithPath: path))
+        print("  \((path as NSString).lastPathComponent)  \(Int(width))×\(Int(host.frame.height))")
+    }
+
     private static func write(_ image: NSImage, to path: String) {
         // Composite onto a menu-bar-ish ground: a transparent PNG of white glyphs is
         // indistinguishable from an empty one.
@@ -93,6 +110,17 @@ enum Probe {
             print("  ⚠ 没等到数据——钥匙串授权框可能还开着")
         }
         try? await Task.sleep(for: .seconds(2))    // let the last fields settle
+
+        // The other two surfaces get rendered too. Settings and the trophy page are each two
+        // clicks deep, which is exactly why they rot: nobody looks at them while iterating.
+        for dark in [true, false] {
+            let suffix = dark ? "dark" : "light"
+            shoot(AnyView(TrophyView(trophy: store.snapshot.trophy)),
+                  width: 460, dark: dark, to: dir + "/trophy-\(suffix).png")
+            shoot(AnyView(SettingsView(installHooks: { false }, saveToken: { _ in },
+                                       enableRealQuota: {})),
+                  width: 380, dark: dark, to: dir + "/settings-\(suffix).png")
+        }
 
         for dark in [true, false] {
             for mode in PanelMode.allCases {

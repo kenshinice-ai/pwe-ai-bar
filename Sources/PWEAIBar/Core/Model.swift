@@ -69,7 +69,6 @@ struct QuotaWindow: Identifiable {
 enum Provider: String, CaseIterable {
     case claude, codex, gemini
 
-    var chip: String { ["claude": "C", "codex": "X", "gemini": "G"][rawValue] ?? "?" }
     var name: String { ["claude": "Claude Code", "codex": "Codex", "gemini": "Gemini"][rawValue] ?? rawValue }
     /// Bundle ids tried in order when the user clicks through to the app.
     var bundleIDs: [String] {
@@ -115,8 +114,6 @@ struct Snapshot {
         let live = mine.filter(isActionable)
         return (live.isEmpty ? mine : live).max { $0.strain < $1.strain }
     }
-
-    func windows(_ ch: Channel) -> [QuotaWindow] { windows.filter { $0.channel == ch } }
 
     func windows(of p: Provider) -> [QuotaWindow] { windows.filter { $0.provider == p } }
 
