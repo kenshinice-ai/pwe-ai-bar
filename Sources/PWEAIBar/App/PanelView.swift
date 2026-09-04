@@ -93,11 +93,39 @@ struct PanelView: View {
                 }
                 .padding(.top, Theme.s2)
             } else {
-                Text(store.loggedIn ? "读不到额度" : "未登录 · 先运行 claude auth login")
-                    .font(Theme.sans(12)).foregroundStyle(Theme.text2)
+                emptyState
             }
         }
         .padding(.horizontal, 16).padding(.top, 13).padding(.bottom, 13)
+    }
+
+    /// What to say when there is nothing to show. "读不到额度" is true and useless — each of
+    /// these has a different fix, and the panel is the only place the fix can be stated.
+    private var emptyState: some View {
+        let (headline, fix): (String, String?) = {
+            switch store.blocker {
+            case .notLoggedIn:
+                return ("还没登录", "在终端运行 claude auth login")
+            case .keychainRefused:
+                // Re-logging in rewrites the keychain item with a fresh access list, which is
+                // one command; editing the existing item's ACL by hand is four dialogs deep.
+                return ("钥匙串拒绝了访问", "重新运行 claude auth login 即可重建授权")
+            case .expired:
+                return ("登录已过期", "打开一次 Claude Code 就会自动续期")
+            case .rateLimited(let until):
+                let m = max(1, Int(until.timeIntervalSinceNow / 60))
+                return ("接口限流中", "\(m) 分钟后自动重试")
+            case .none:
+                return ("暂时读不到额度", nil)
+            }
+        }()
+        return VStack(alignment: .leading, spacing: 5) {
+            Text(headline).font(Theme.sans(13, 600)).foregroundStyle(Theme.text)
+            if let fix {
+                Text(fix).font(Theme.sans(11)).foregroundStyle(Theme.text2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     // MARK: One section per provider

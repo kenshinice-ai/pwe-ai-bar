@@ -13,6 +13,7 @@ final class Store: ObservableObject {
 
     @Published private(set) var snapshot = Snapshot()
     @Published private(set) var loggedIn = true
+    @Published private(set) var blocker: ClaudeProvider.Blocker = .none
 
     var onSnapshot: ((Snapshot) -> Void)?
 
@@ -63,6 +64,7 @@ final class Store: ObservableObject {
                 snap.windows += windows
                 snap.stale = stale
                 loggedIn = await claude.loggedIn
+                blocker = await claude.blocker
             }
             if Prefs.shared.trackCodex {
                 snap.windows += await CodexProvider.shared.windows()

@@ -19,7 +19,19 @@ actor ClaudeProvider {
     private var cache: [QuotaWindow] = []
     private var fetchedAt: Date?
     private var retryAfter: Date?
+    /// Why we have no Claude numbers, when we have none. The panel needs to tell the
+    /// difference: "log in" and "grant keychain access" are different problems with different
+    /// fixes, and "读不到额度" helps with neither.
+    enum Blocker: Equatable {
+        case none
+        case notLoggedIn          // no credential in the keychain at all
+        case keychainRefused      // the item is there, macOS will not let us read it
+        case expired              // token past its expiry; opening Claude Code refreshes it
+        case rateLimited(Date)    // 429; showing the last good numbers until then
+    }
+
     private(set) var loggedIn = false
+    private(set) var blocker: Blocker = .none
 
     private let ttl: TimeInterval = 60
 
@@ -64,6 +76,20 @@ actor ClaudeProvider {
         }
     }
 
+    /// Does the item exist at all? Asking for the attributes rather than the data does not
+    /// trip the access dialog, which is what separates "you never logged in" from "macOS is
+    /// refusing this build".
+    private static func credentialExists() -> Bool {
+        let q: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "Claude Code-credentials",
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        return SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess
+    }
+
     private static func readKeychain() -> Credential? {
         let q: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -93,16 +119,22 @@ actor ClaudeProvider {
 
         let attempt = await credentialWithTimeout()
         guard let inner = attempt else {
-            // The dialog was never answered. Stop asking; the panel explains how to re-enable.
+            // Nobody answered the dialog. Stop asking — one prompt an hour is a nuisance, one
+            // every sixty seconds is a reason to delete the app.
             keychainDenied = true
             loggedIn = false
+            blocker = .keychainRefused
             return (offline(), true)
         }
         guard let cred = inner else {
             loggedIn = false
+            // The item exists for the `claude` CLI but we could not read it: macOS is refusing
+            // this binary's signature, which is a different fix from logging in.
+            blocker = Self.credentialExists() ? .keychainRefused : .notLoggedIn
             return (offline(), true)
         }
         if let e = cred.expiresAt, e < Date() {
+            blocker = .expired
             // Expired: opening Claude Code refreshes it. Say so by going stale rather than
             // sending a token we already know will bounce.
             loggedIn = false
@@ -122,6 +154,7 @@ actor ClaudeProvider {
             if http.statusCode == 429 {
                 let after = Double(http.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 60
                 retryAfter = Date().addingTimeInterval(after)
+                blocker = .rateLimited(retryAfter!)
                 return (cache.isEmpty ? offline() : cache, true)
             }
             guard http.statusCode == 200,
@@ -129,6 +162,7 @@ actor ClaudeProvider {
             else { return (cache.isEmpty ? offline() : cache, true) }
 
             retryAfter = nil
+            blocker = .none
             cache = parse(root)
             fetchedAt = Date()
             return (cache, false)

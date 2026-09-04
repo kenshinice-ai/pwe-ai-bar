@@ -142,7 +142,16 @@ enum Probe {
             snap.stale = stale
 
             print("PWE AI Bar — probe\n" + String(repeating: "─", count: 58))
+            let why: String
+            switch await claude.blocker {
+            case .none: why = "—"
+            case .notLoggedIn: why = "未登录（运行 claude auth login）"
+            case .keychainRefused: why = "钥匙串拒绝（重新运行 claude auth login 即可重建授权）"
+            case .expired: why = "登录过期（打开一次 Claude Code）"
+            case .rateLimited(let d): why = "限流至 \(f(d))"
+            }
             print("登录        \(loggedIn ? "是" : "否")     数据陈旧  \(stale ? "是" : "否")")
+            print("阻塞        \(why)")
             print("hooks       \(HookProvider.isInstalled ? "已安装" : "未安装")     刘海      \(Prefs.hasNotch ? "有" : "无")")
             print("\n窗口")
             if snap.windows.isEmpty { print("  （无）") }
