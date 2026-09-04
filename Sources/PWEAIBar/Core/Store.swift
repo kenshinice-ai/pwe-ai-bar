@@ -36,6 +36,12 @@ final class Store: ObservableObject {
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in self?.refresh() }
             }
+        // The cache save is throttled to five minutes, so without this the last stretch of a
+        // session is re-parsed on next launch. Quitting is exactly when it is free to write.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
+                Task { await Transcript.shared.flush() }
+            }
         refresh()
         schedule()
     }

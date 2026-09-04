@@ -37,6 +37,7 @@ actor Transcript {
 
     private var cache: [String: FileCache] = [:]
     private var loadedFromDisk = false
+    private var lastSaved = Date.distantPast
 
     /// Where the parsed aggregate lives between launches.
     ///
@@ -79,6 +80,16 @@ actor Transcript {
                                     parsedUpTo: entry["p"] as? Int ?? 0,
                                     turns: turns)
         }
+    }
+
+    /// Throttled hard. The live session file changes on every sweep, so an unconditional save
+    /// rewrites four hundred kilobytes every twenty seconds — eighty megabytes a day of disk
+    /// churn for a cache whose only job is to make the *next launch* fast. Five minutes is far
+    /// more often than launches happen.
+    private func saveDiskThrottled(force: Bool = false) {
+        guard force || Date().timeIntervalSince(lastSaved) > 300 else { return }
+        lastSaved = Date()
+        saveDisk()
     }
 
     private func saveDisk() {
@@ -153,10 +164,13 @@ actor Transcript {
             cache.removeValue(forKey: key)
             changed = true
         }
-        if changed { saveDisk() }
+        if changed { saveDiskThrottled() }
 
         return Self.summarise(all, pricing: pricing)
     }
+
+    /// Write the cache out now, throttle or no throttle. Called on quit.
+    func flush() { saveDiskThrottled(force: true) }
 
     // MARK: Parsing
 
