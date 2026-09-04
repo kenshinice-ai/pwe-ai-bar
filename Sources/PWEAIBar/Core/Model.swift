@@ -76,12 +76,23 @@ enum Provider: String, CaseIterable {
     case claude, codex, gemini
 
     var name: String { ["claude": "Claude Code", "codex": "Codex", "gemini": "Gemini"][rawValue] ?? rawValue }
-    /// Bundle ids tried in order when the user clicks through to the app.
+    /// Bundle ids tried in order when the user clicks through to the app. ChatGPT.app ships
+    /// with `com.openai.codex` as its identifier, which is why that one is first.
     var bundleIDs: [String] {
         switch self {
         case .claude: return ["com.anthropic.claudefordesktop", "com.anthropic.claude"]
         case .codex:  return ["com.openai.codex", "com.openai.chat"]
         case .gemini: return ["com.google.GeminiMacOS"]
+        }
+    }
+
+    /// Where to go when the app is not installed. Clicking a row and having nothing happen is
+    /// worse than opening the wrong thing.
+    var fallbackURL: URL? {
+        switch self {
+        case .claude: return URL(string: "https://claude.ai/code")
+        case .codex:  return URL(string: "https://chatgpt.com/codex")
+        case .gemini: return URL(string: "https://gemini.google.com")
         }
     }
 }

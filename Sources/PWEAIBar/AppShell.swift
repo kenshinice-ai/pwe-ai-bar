@@ -254,9 +254,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
         }
-        if p == .claude, let u = URL(string: "https://claude.ai/code") {
-            NSWorkspace.shared.open(u)
-        }
+        if let u = p.fallbackURL { NSWorkspace.shared.open(u) }
     }
 
     /// An accessory app shows no menu bar, but a main menu is still what wires up ⌘C / ⌘V / ⌘W
