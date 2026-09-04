@@ -28,9 +28,24 @@ struct PanelView: View {
             stage
             rule
 
-            ForEach(activeProviders, id: \.self) { p in
-                providerSection(p)
+            // Lean means lean. Showing the same provider sections with two rows instead of
+            // three made it 440 points against standard's 469 — a mode that promises less and
+            // delivers the same thing is just a mode nobody picks. It gets one line instead.
+            if prefs.panelMode == .lean {
+                minorRow
                 rule
+                // The way to turn real quota on cannot live only in the modes that show
+                // provider sections, or picking the compact one hides the single button the
+                // app needs you to press.
+                if let cta = claudeCallToAction {
+                    ctaRow(cta)
+                    rule
+                }
+            } else {
+                ForEach(activeProviders, id: \.self) { p in
+                    providerSection(p)
+                    rule
+                }
             }
 
             if prefs.panelMode == .full {
@@ -173,19 +188,50 @@ struct PanelView: View {
             // other provider reports a number the panel is no longer empty, and the one thing
             // the user needs to press disappears with it.
             if p == .claude, let cta = claudeCallToAction {
-                HStack(spacing: Theme.s2) {
-                    Text(cta.text).font(Theme.sans(11)).foregroundStyle(Theme.text2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .lineLimit(2)
-                    Spacer(minLength: Theme.s1)
-                    if let title = cta.button {
-                        Button(title) { onEnableQuota() }
-                            .font(Theme.sans(11))
-                            .help("会弹一次 macOS 钥匙串授权，选「始终允许」后不再询问")
-                    }
-                }
-                .padding(.top, 2)
+                ctaRow(cta).padding(.top, 2)
             }
+        }
+        .padding(.horizontal, Theme.s3).padding(.vertical, 11)
+    }
+
+    private func ctaRow(_ cta: (text: String, button: String?)) -> some View {
+        HStack(spacing: Theme.s2) {
+            Text(cta.text).font(Theme.sans(11)).foregroundStyle(Theme.text2)
+                .fixedSize(horizontal: false, vertical: true).lineLimit(2)
+            Spacer(minLength: Theme.s1)
+            if let title = cta.button {
+                Button(title) { onEnableQuota() }
+                    .font(Theme.sans(11))
+                    .help("会弹一次 macOS 钥匙串授权，选「始终允许」后不再询问")
+            }
+        }
+    }
+
+    /// Everything that is not the headline, on one line, each with its provider's silhouette
+    /// so a glance still says whose number it is.
+    private var minorRow: some View {
+        let others = snap.windows
+            .filter { $0.id != snap.protagonist?.id }
+            .sorted { $0.strain > $1.strain }
+            .prefix(3)
+        return HStack(spacing: Theme.s3) {
+            ForEach(Array(others.enumerated()), id: \.offset) { _, w in
+                HStack(spacing: 4) {
+                    ProviderMarkView(provider: w.provider, tint: Theme.text2)
+                        .frame(width: 10, height: 10)
+                    Text(Readout.text(w, remaining: prefs.showRemaining))
+                        .font(Theme.figures(11.5, 500))
+                        .foregroundStyle(Theme.health(w.band, dark: isDark))
+                }
+            }
+            if let c = snap.contextPercent {
+                HStack(spacing: 4) {
+                    Text("上下文").font(Theme.sans(10)).foregroundStyle(Theme.text2)
+                    Text("\(Int((prefs.showRemaining ? 100 - c : c).rounded()))%")
+                        .font(Theme.figures(11.5, 500)).foregroundStyle(Theme.text)
+                }
+            }
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, Theme.s3).padding(.vertical, 11)
     }
