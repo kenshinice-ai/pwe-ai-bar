@@ -229,6 +229,11 @@ enum Probe {
                   width: Theme.panelWidth, dark: dark, to: dir + "/stress-panel-\(tag).png")
             shoot(AnyView(TrophyView(trophy: snap.trophy)),
                   width: 460, dark: dark, to: dir + "/stress-trophy-\(tag).png")
+            // Settings is two clicks deep, which is exactly why it rots — and it is now the
+            // one surface every provider has to fit on.
+            shoot(AnyView(SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
+                                       enableRealQuota: {})),
+                  width: 380, dark: dark, to: dir + "/stress-settings-\(tag).png")
         }
         for mode in MenuBarMode.allCases {
             let image = StatusIcon.render(snap, mode: mode, dark: true)

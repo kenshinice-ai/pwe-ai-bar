@@ -27,6 +27,23 @@ struct SettingsView: View {
     }
 
     var body: some View {
+        // Eight providers pushed this past 960 pt. Without a scroller the rows below the fold
+        // are not merely awkward to reach, they are unreachable — and one of them is the only
+        // switch that turns a provider on.
+        ScrollView {
+            content
+        }
+        .frame(width: 380)
+        .frame(maxHeight: 620)
+        .background(Theme.surface)
+        .tint(Theme.accent)
+        .task {
+            let found = await Task.detached(priority: .userInitiated) { Self.detect() }.value
+            states = found
+        }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
             row("菜单栏") {
                 Picker("", selection: $prefs.menuBarMode) {
@@ -154,24 +171,23 @@ struct SettingsView: View {
             }
         }
         .frame(width: 380)
-        .background(Theme.surface)
-        // System blue on a navy-and-amber panel reads as someone else's app. One tint at the
-        // root covers every switch, picker and button below it.
-        .tint(Theme.accent)
-        .task {
-            let found = await Task.detached(priority: .userInitiated) { Self.detect() }.value
-            states = found
-        }
     }
 
+    /// This has to describe what the app actually does, in the order it actually does it. It
+    /// used to lead with the saved token because that used to be the preferred source; it is
+    /// now the fallback, and a settings page that says otherwise is telling a small lie about
+    /// where someone's credential is being read from.
     private var sourceLine: String {
+        if states[.claude] == "已登录" {
+            return "正在直接读 Claude Code 自己的凭据，不需要授权，也不会弹框。"
+        }
         if tokenEditor.hasToken {
-            return "已选择使用保存的令牌读取额度。"
+            return "读不到 Claude Code 的凭据，改用下面保存的令牌。"
         }
         if prefs.sharedKeychainOptIn {
-            return "已选择共享钥匙串，连接结果请查看额度面板。"
+            return "已选择钥匙串授权，连接结果请查看额度面板。"
         }
-        return "还没接真实额度，只有本地估算——而且不会有任何弹框。"
+        return "还没找到 Claude Code 的登录信息，只有本地估算。"
     }
 
     /// One line per provider, whether or not it is here. A tool that is installed but signed

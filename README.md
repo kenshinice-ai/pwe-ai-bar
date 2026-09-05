@@ -155,17 +155,42 @@ Claude 的接口给的是 `utilization`——同一个窗口的两头，两个�
 统一，可切换，默认剩余：那才是你真正在问的问题，也是一条会排空的进度条不用标签就能读懂的原因。
 翼形仪表不跟着翻面——羽毛长度是离出事有多远，翻了就会跟旁边的数字打架。
 
-## 三家为什么不一样
+## 八家为什么不一样
 
-| | 要授权吗 | 为什么 |
+| | 怎么读 | 要授权吗 |
 |---|---|---|
-| **Codex** | 不要 | 它把 `rate_limits` 明文写进自己的会话日志。我们只是读一个已经在磁盘上的文件 |
-| **Claude Code** | 不要 | transcript 里 `rateLimits` 字段留着但**从不填**（57 处全是 null），唯一来源是 API。但凭据可以静默拿到——按 CLI 写进去的方式读回来即可，见上 |
-| **Gemini** | 读不到 | 桌面版 `com.google.GeminiMacOS` 只有 settings 数据库，没有任何额度字段。CLI 有 `gemini_cli.token.usage`，那是 **token 计数不是额度**，而且遥测要手动开 |
+| **Claude Code** | `api.anthropic.com/api/oauth/usage`，凭据按 CLI 写进去的方式从钥匙串读回来 | 不要 |
+| **Codex** | `codex app-server` 的 `account/rateLimits/read`，私有管道上的 JSON-RPC；读不到就退回 rollout 日志 | 不要 |
+| **Cursor** | 编辑器自己的 `state.vscdb`，Connect RPC 问 `api2.cursor.sh` | 不要 |
+| **GitHub Copilot** | 插件配置 → `gh` 的 hosts.yml → `gh` 的钥匙串条目，问 `copilot_internal/user` | 不要 |
+| **Devin** | `~/.local/share/devin/credentials.toml`，问 `server.codeium.com` | 不要 |
+| **Grok** | `~/.grok/auth.json`，问 `cli-chat-proxy.grok.com` | 不要 |
+| **Antigravity** | 钥匙串里 Google 的 OAuth 文档，问 Cloud Code | 不要 |
+| **Gemini** | **读不到。** 桌面版只有 settings 数据库，没有任何额度字段；CLI 那个 `gemini_cli.token.usage` 是 token 计数不是额度，遥测还要手动开 | — |
 
-不是我们对三家用了三种办法，是三家各自决定了往本地写什么。
+不是我们对八家用了八种办法，是八家各自决定了往本地写什么。
 
-实现参考了 [ai-usage-menubar](https://github.com/burakgon/ai-usage-menubar) 的 provider 契约。
+三条规矩对所有 provider 一致：
+
+- **只读。** 不刷新任何令牌、不写任何凭据文件。别人的登录状态归他们自己管，
+  这个 app 能做的最糟的事就是把某人的 session 转到一半，让他在正干活的工具里被登出。
+- **不请自来的事一件不做。** 找不到凭据就是没装，不发请求。钥匙串更严：
+  只有这台机器上装了那个 app 才会去问它的条目——`security` 只在条目也是它写的时候才静默，
+  去问一个没装的工具等于凭空制造一次密码提示。
+- **有界。** 每个子进程有截止时间，每个请求有超时，一家慢不拖累其余的（并行，不是排队）。
+
+**默认只开 Claude Code 和 Codex。** 另外五家在设置里列着、显示检测到没有，
+但要你自己打开——打开就等于把本机找到的凭据发给一个你没让我们联系的厂商，
+这个 app 别的权限都是等人给而不是默认拿，出站请求带着令牌不该是那个例外。
+
+### 验过的和没验过的
+
+Claude 和 Codex 在这台机器上对着真实账户验过。另外五家一个都没有——
+本机一个都没装，所以全部是照各自的契约实现的，从没和真实面板比对过。
+是「实现了」，不是「确认了」。
+
+三处口径是反的，接反柱子就会朝错方向走：Devin 和 Antigravity 报**剩余**，
+Cursor 和 Grok 报**已用**，测试专门盯这一条。
 
 ## 自检
 
