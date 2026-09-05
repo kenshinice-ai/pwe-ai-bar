@@ -188,6 +188,52 @@ enum Probe {
     ///
     /// Real data is always tidy — two windows, short names, sane numbers — so layout that only
     /// ever meets real data has never actually been tested.
+    /// `--endurance DIR` draws the forecast instrument on its own, across every state it can
+    /// reach. Real data is tidy: it will show one or two of these and never the other seven, so
+    /// the branches that only appear on a bad day would never be looked at.
+    static func endurance(into dir: String) {
+        let hour: TimeInterval = 3600
+        func window(_ label: String, percent: Double?, resetIn: TimeInterval,
+                    length: TimeInterval?, stale: Bool = false, spent: Bool = false,
+                    samples: [History.Sample] = []) -> (String, QuotaWindow) {
+            var w = QuotaWindow(id: "five_hour", provider: .claude, channel: .session,
+                                title: "五小时窗口", percent: percent,
+                                resetsAt: resetIn == 0 ? nil : Date().addingTimeInterval(resetIn),
+                                observedAt: Date(), isStale: stale,
+                                confirmedExhausted: spent, windowLength: length)
+            w.samples = samples
+            return (label, w)
+        }
+        // A measured rate needs readings; these are synthetic but shaped like real ones.
+        let measured = (0...6).map {
+            History.Sample(at: Date().addingTimeInterval(-Double(6 - $0) * 300),
+                           percent: 60 + Double($0) * 1.6)
+        }
+        let cases = [
+            window("short", percent: 70, resetIn: 2 * hour, length: 5 * hour),
+            window("measured", percent: 70, resetIn: 2 * hour, length: 5 * hour, samples: measured),
+            window("comfortable", percent: 18, resetIn: 2 * hour, length: 5 * hour),
+            window("offscale", percent: 6, resetIn: 2 * hour, length: 5 * hour),
+            window("touching", percent: 60, resetIn: 2 * hour, length: 5 * hour),
+            window("spent", percent: 100, resetIn: 90 * 60, length: 5 * hour, spent: true),
+            window("stale", percent: 55, resetIn: 2 * hour, length: 5 * hour, stale: true),
+            window("nolength", percent: 55, resetIn: 2 * hour, length: nil),
+            window("noratio", percent: nil, resetIn: 2 * hour, length: 5 * hour),
+            window("noreset", percent: 55, resetIn: 0, length: 5 * hour),
+            window("weekly", percent: 44, resetIn: 5 * 86400, length: 7 * 86400),
+        ]
+        for dark in [true, false] {
+            let tag = dark ? "dark" : "light"
+            for (label, w) in cases {
+                shoot(AnyView(EnduranceView(window: w, now: Date())
+                                .padding(.horizontal, 16).padding(.vertical, 10)
+                                .background(Theme.surface)),
+                      width: Theme.panelWidth, dark: dark,
+                      to: dir + "/endurance-\(label)-\(tag).png")
+            }
+        }
+    }
+
     static func stress(into dir: String) {
         var snap = Snapshot()
         snap.windows = [

@@ -26,6 +26,7 @@ final class Store: ObservableObject {
     private let tracks: () -> (claude: Bool, codex: Bool)
     private let tracksExtra: (Provider) -> Bool
     private let readExtras: ([Provider]) async -> ExtraStore.Result
+    private let observe: ([QuotaWindow]) async -> [QuotaWindow]
     private func tracks(extra p: Provider) -> Bool { tracksExtra(p) }
     private let eventInterval: TimeInterval
     private var eventTimer: Timer?
@@ -41,6 +42,7 @@ final class Store: ObservableObject {
          tracks: (() -> (claude: Bool, codex: Bool))? = nil,
          tracksExtra: ((Provider) -> Bool)? = nil,
          readExtras: (([Provider]) async -> ExtraStore.Result)? = nil,
+         observe: (([QuotaWindow]) async -> [QuotaWindow])? = nil,
          eventInterval: TimeInterval = 1,
          lastActivity: Date = Date()) {
         self.claude = claude; self.rules = rules ?? RuleEngine()
@@ -58,6 +60,8 @@ final class Store: ObservableObject {
         self.tracks = tracks ?? { (Prefs.shared.trackClaude, Prefs.shared.trackCodex) }
         self.tracksExtra = tracksExtra ?? { p in MainActor.assumeIsolated { Prefs.shared.tracks(p) } }
         self.readExtras = readExtras ?? { await ExtraStore.shared.read($0) }
+        // Injectable so a test never writes to the real cache directory.
+        self.observe = observe ?? { await History.shared.observe($0) }
         self.eventInterval = eventInterval
         self.lastActivity = lastActivity
     }
@@ -86,6 +90,7 @@ final class Store: ObservableObject {
             NotificationCenter.default.addObserver(
                 forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
                     Task { await Transcript.shared.flush() }
+                    Task { await History.shared.flush(force: true) }
                 }
         }
         pollEvents()
@@ -149,6 +154,9 @@ final class Store: ObservableObject {
             // Both of these read hundreds of megabytes of session logs. They are actors on
             // purpose: doing this work on the main thread is what made the menu bar stop
             // answering clicks while Claude Code was running.
+            // Record what every window reads before anything downstream looks at them, so the
+            // pace they report is measured rather than averaged over the whole window.
+            snap.windows = await observe(snap.windows)
             let local = await readLocal()
             snap.trophy = local.trophy
             snap.contextPercent = local.context

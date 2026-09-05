@@ -156,7 +156,8 @@ final class QuotaTests: XCTestCase {
         // Three hours into a five-hour window with 70% gone: 23.3%/h, and the line crosses 100%
         // about 43 minutes before the window would have rolled over.
         let racing = window(percent: 70, resetIn: 2 * 3600, length: 5 * 3600)
-        XCTAssertEqual(racing.burnPerHour(at: now) ?? 0, 23.33, accuracy: 0.01)
+        XCTAssertEqual(racing.burn(at: now)?.perHour ?? 0, 23.33, accuracy: 0.01)
+        XCTAssertEqual(racing.burn(at: now)?.measured, false, "no samples yet: this is the average")
         XCTAssertEqual(racing.projectedPercentAtReset(at: now) ?? 0, 116.67, accuracy: 0.01)
         // Started 3 h ago, 70 % gone, so 100 % lands at start + 3 h × 100/70 ≈ now + 77 min —
         // about 43 minutes before the window would have rolled over on its own.
@@ -166,7 +167,7 @@ final class QuotaTests: XCTestCase {
 
         // Comfortably inside the window: there is a rate, but "you will not run out" is not news.
         let easy = window(percent: 20, resetIn: 2 * 3600, length: 5 * 3600)
-        XCTAssertNotNil(easy.burnPerHour(at: now))
+        XCTAssertNotNil(easy.burn(at: now))
         XCTAssertEqual(easy.projectedPercentAtReset(at: now) ?? 0, 33.33, accuracy: 0.01)
         XCTAssertNil(easy.projectedExhaustion(at: now))
 
@@ -180,7 +181,7 @@ final class QuotaTests: XCTestCase {
             ("already reset", window(percent: 70, resetIn: -60, length: 5 * 3600)),
         ] {
             XCTAssertNil(w.projectedExhaustion(at: now), label)
-            XCTAssertNil(w.burnPerHour(at: now), label)
+            XCTAssertNil(w.burn(at: now), label)
         }
     }
 

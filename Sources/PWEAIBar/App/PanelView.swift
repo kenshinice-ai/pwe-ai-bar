@@ -19,11 +19,6 @@ struct PanelView: View {
     var onOpen: (Provider) -> Void
     var onEnableQuota: () -> Void
 
-    /// Which feather the pointer is over, and which one has been clicked to stay. Hovering is
-    /// exploring; clicking is deciding, and clicking the same one again lets go.
-    @State private var hovered: Channel?
-    @State private var pinned: Channel?
-
     private var snap: Snapshot { store.snapshot }
 
     var body: some View {
@@ -95,24 +90,21 @@ struct PanelView: View {
 
     private var stage: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack { Spacer(); gauge(124); Spacer() }
-                .padding(.bottom, Theme.s2)
 
             if let a = snap.attention {
                 waitingStage(a)
             } else if let p = focused {
+                // Two halves, in the order they are asked: where you are, then where you are
+                // heading. The reset time used to sit beside the figure; the instrument's own
+                // axis now says it, and saying it twice on one screen made the panel look like
+                // it was arguing with itself.
                 HStack(alignment: .firstTextBaseline, spacing: Theme.s2) {
                     Text(Readout.text(p, remaining: prefs.showRemaining)).font(Theme.figures(36))
                         .foregroundStyle(Theme.health(p.band, dark: isDark))
                     Spacer()
-                    // Pinning is easy to do by accident and impossible to undo if the panel
-                    // never admits it happened. Clicking the same feather also releases it.
-                    if pinned != nil {
-                        Button("自动") { pinned = nil }
-                            .buttonStyle(.plain).font(Theme.sans(10.5))
-                            .foregroundStyle(Theme.accent)
+                    if p.resetsAt == nil, let note = resetText(p) {
+                        Text(note).font(Theme.sans(11)).foregroundStyle(Theme.text2)
                     }
-                    Text(resetText(p) ?? "").font(Theme.sans(11)).foregroundStyle(Theme.text2)
                 }
                 track(p).padding(.top, 11)
                 HStack(spacing: 5) {
@@ -129,7 +121,7 @@ struct PanelView: View {
                         .lineLimit(1).truncationMode(.tail)
                 }
                 .padding(.top, Theme.s2)
-                paceLine(p)
+                EnduranceView(window: p, now: Date()).padding(.top, 13)
             } else {
                 emptyState
             }
@@ -164,42 +156,6 @@ struct PanelView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(snap.waiting > 1 ? "\(snap.waiting) 个会话在等你回话" : "\(e.provider.name) 在等你回话")
-    }
-
-    /// The pace, and where it lands.
-    ///
-    /// Two numbers you would otherwise work out in your head: how fast this window is going, and
-    /// whether that rate gets you to the reset. It needs no history — the window's own length
-    /// says when it opened, and the percentage says how much has gone since — and it moves on
-    /// its own as you work, which is the only kind of live number worth putting here. Every
-    /// animated figure this app has tried told a lie at some point in its entrance.
-    ///
-    /// Straight-line, and it says so. A burst of Opus in the last ten minutes is not the same
-    /// as the same total spread evenly over four hours, and the wording never pretends it is.
-    @ViewBuilder
-    private func paceLine(_ w: QuotaWindow) -> some View {
-        if let rate = w.burnPerHour(at: Date()), let landing = w.projectedPercentAtReset(at: Date()) {
-            HStack(spacing: 4) {
-                Text("每小时 \(rate < 1 ? String(format: "%.1f", rate) : String(Int(rate.rounded())))%")
-                    .font(Theme.figures(11, 500)).foregroundStyle(Theme.text)
-                Text("·").foregroundStyle(Theme.text2)
-                if let out = w.projectedExhaustion(at: Date()) {
-                    Text("按这个节奏 \(clock(out)) 见底")
-                        .font(Theme.sans(11)).foregroundStyle(Theme.health(.hot, dark: isDark))
-                    if let reset = w.resetsAt {
-                        Text("早 \(span(reset.timeIntervalSince(out)))")
-                            .font(Theme.sans(11)).foregroundStyle(Theme.text2)
-                    }
-                } else {
-                    Text("到重置约 \(Int(min(100, landing).rounded()))%，用不完")
-                        .font(Theme.sans(11)).foregroundStyle(Theme.text2)
-                }
-                Spacer(minLength: 0)
-            }
-            .lineLimit(1)
-            .padding(.top, 5)
-            .accessibilityElement(children: .combine)
-        }
     }
 
     private func clock(_ d: Date) -> String {
@@ -436,28 +392,13 @@ struct PanelView: View {
 
     // MARK: Pieces
 
-    private func gauge(_ w: CGFloat) -> some View {
-        WingView(channels: snap.channels(), perFeather: true,
-                 highlight: pinned ?? hovered,
-                 onHover: { hovered = $0 },
-                 onPick: { pinned = pinned == $0 ? nil : $0 },
-                 spoken: snap.spoken(remaining: prefs.showRemaining))
-            .frame(width: w, height: w / BrandMark.aspect)
-    }
-
-    /// The reading the big number is showing: whichever feather you are pointing at or have
-    /// pinned, and otherwise whichever window is closest to stopping you.
+    /// The reading the hero is showing: whichever window is closest to stopping you.
     ///
-    /// This is what the gauge is for. It was a hundred and twenty points of the panel that could
-    /// not be asked anything — five feathers standing for five channels, none of them reachable.
-    /// Now each one answers, and the space it takes is the price of the panel's navigation
-    /// rather than of its decoration.
-    private var focused: QuotaWindow? {
-        guard let channel = pinned ?? hovered else { return snap.protagonist }
-        if channel == .context { return contextWindow }
-        let mine = snap.windows.filter { $0.channel == channel }
-        return mine.max { $0.strain < $1.strain } ?? snap.protagonist
-    }
+    /// This used to also honour a feather picked on the wing gauge. That gauge is gone from the
+    /// hero — 124pt that could not be asked anything, and the per-feather hover that was meant
+    /// to fix it turned out fiddly to operate. The mark stays in the header as identity, where
+    /// it is a signature rather than an instrument.
+    private var focused: QuotaWindow? { snap.protagonist }
 
     private var contextWindow: QuotaWindow? {
         guard let c = snap.contextPercent else { return nil }

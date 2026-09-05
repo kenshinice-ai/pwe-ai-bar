@@ -53,6 +53,12 @@ enum PWEAIBarMain {
                                 : (ok ? "已保存令牌，额度有效性将在应用中验证" : "保存失败"))
             return
         }
+        if let i = CommandLine.arguments.firstIndex(of: "--endurance"),
+           i + 1 < CommandLine.arguments.count {
+            Theme.registerFonts()
+            Probe.endurance(into: CommandLine.arguments[i + 1])
+            return
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--stress"),
            i + 1 < CommandLine.arguments.count {
             Theme.registerFonts()

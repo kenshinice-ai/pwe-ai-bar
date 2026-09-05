@@ -170,10 +170,11 @@ final class RuleEngine {
             // An expected reset is a claim about the clock, and the clock has already passed it.
             guard alert.kind == .reset else { return true }
             // A delayed delivery must still be true when retried. Missing data keeps it queued.
-            return snap.windows.contains {
-                "\($0.provider.rawValue):\($0.id)" == alert.subject && $0.band == .calm
-                    && $0.percent != nil && $0.canNotify(at: date)
-                    && !($0.provider == .claude && snap.stale)
+            return snap.windows.contains { w -> Bool in
+                let key: String = "\(w.provider.rawValue):\(w.id)"
+                guard key == alert.subject, w.percent != nil, w.band == .calm else { return false }
+                guard w.canNotify(at: date) else { return false }
+                return !(w.provider == .claude && snap.stale)
             }
         }.sorted { $0.createdAt == $1.createdAt ? $0.id < $1.id : $0.createdAt < $1.createdAt }
     }

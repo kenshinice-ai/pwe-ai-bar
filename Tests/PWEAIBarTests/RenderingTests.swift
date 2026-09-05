@@ -50,31 +50,6 @@ final class RenderingTests: XCTestCase {
         XCTAssertGreaterThan(png.count, 1000)
         try png.write(to: output)
     }
-    /// The gauge is now the panel's navigation, so the hit-testing is load-bearing.
-    ///
-    /// The obvious implementation — hit-test the feather outlines — leaves most of the mark
-    /// belonging to nobody: the shapes are slivers that fan apart, and the pointer falls through
-    /// the gaps between them. Nearest-axis has no dead zones, and this checks that each feather
-    /// actually claims its own.
-    @MainActor func testEveryFeatherClaimsItsOwnAxisAndTheMarkHasNoDeadZones() {
-        let view = WingNSView(frame: NSRect(x: 0, y: 0, width: 240, height: 240 / BrandMark.aspect))
-        view.onPick = { _ in }
-        for k in 0..<BrandMark.count {
-            let axis = BrandMark.axis(k, in: view.bounds)
-            for t in [0.25, 0.5, 0.75] {
-                let point = CGPoint(x: axis.root.x + (axis.tip.x - axis.root.x) * t,
-                                    y: axis.root.y + (axis.tip.y - axis.root.y) * t)
-                XCTAssertEqual(view.feather(at: point), Channel(rawValue: k),
-                               "feather \(k) at \(t) of its own axis")
-            }
-        }
-        // Well outside the mark answers nothing rather than the nearest thing to it.
-        XCTAssertNil(view.feather(at: CGPoint(x: -400, y: -400)))
-        // Without a handler wired up the mark is inert, exactly as it is in the menu bar.
-        let inert = WingNSView(frame: view.bounds)
-        inert.updateTrackingAreas()
-        XCTAssertTrue(inert.trackingAreas.isEmpty)
-    }
 
     func testLargeFiguresDoNotRoundPastTheirOwnUnit() {
         XCTAssertEqual(TrophyView.big(999_999_999), "1.00 B", "under a billion, but not once rounded")
