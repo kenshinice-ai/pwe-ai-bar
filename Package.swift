@@ -10,6 +10,7 @@ let package = Package(
             path: "Sources/PWEAIBar",
             resources: [.process("Resources")],
             swiftSettings: [.unsafeFlags(["-parse-as-library"])]
-        )
+        ),
+        .testTarget(name: "PWEAIBarTests", dependencies: ["PWEAIBar"], path: "Tests/PWEAIBarTests")
     ]
 )

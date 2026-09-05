@@ -25,7 +25,8 @@ enum AlertPlacement: String, CaseIterable, Identifiable {
 @MainActor
 final class Prefs: ObservableObject {
     static let shared = Prefs()
-    private let d = UserDefaults.standard
+    private let d: UserDefaults
+    var sharedKeychainOptIn: Bool { d.bool(forKey: "sharedKeychainOptIn") }
 
     @Published var menuBarMode: MenuBarMode { didSet { d.set(menuBarMode.rawValue, forKey: "menuBarMode") } }
     @Published var panelMode: PanelMode      { didSet { d.set(panelMode.rawValue, forKey: "panelMode") } }
@@ -41,7 +42,8 @@ final class Prefs: ObservableObject {
         didSet { d.set(launchAtLogin, forKey: "launchAtLogin"); applyLoginItem() }
     }
 
-    private init() {
+    init(defaults: UserDefaults = .standard) {
+        d = defaults
         // Default to the dense bar. Giving everything up front and letting people dial back is
         // the recoverable mistake; starting quiet means most people never learn there is more.
         menuBarMode = MenuBarMode(rawValue: d.string(forKey: "menuBarMode") ?? "") ?? .full

@@ -13,41 +13,39 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = Notifier()
     var onOpen: ((Provider) -> Void)?
 
-    private var authorised = false
-    private var asked = false
+    private var authorizationTask: Task<Permission, Never>?
+    private var refusedAt: Date?
+    private var auxiliaryAttempts: [String: Date] = [:]
 
-    /// Notification permission is asked for the first time we actually have something to say,
-    /// not at launch.
-    ///
-    /// The same reasoning as the keychain: a permission sheet that appears seconds after first
-    /// run, before the app has shown you anything, is asking you to trust a program you have not
-    /// seen work yet. Waiting costs nothing — the first alert is delivered from the completion
-    /// handler, so nothing is lost while the sheet is up.
-    private func ensureAuthorised() async -> Bool {
-        if authorised { return true }
-        if asked { return false }
-        asked = true
-        return await withCheckedContinuation { cont in
-            UNUserNotificationCenter.current()
-                .requestAuthorization(options: [.alert, .sound]) { ok, _ in
-                    Task { @MainActor in
-                        self.authorised = ok
-                        cont.resume(returning: ok)
-                    }
-                }
+    /// Refused is not the same as failed. Notification permission is asked for the first time we
+    /// actually have something to say — not at launch, when the app has not yet shown anyone that
+    /// it is worth trusting — and once someone has said no, asking again is not on the table.
+    enum Permission { case granted, refused, unavailable }
+
+    private func ensureAuthorised() async -> Permission {
+        if let refused = refusedAt, Date().timeIntervalSince(refused) < 3600 { return .refused }
+        if let task = authorizationTask { return await task.value }
+        let task = Task { @MainActor () -> Permission in
+            let center = UNUserNotificationCenter.current()
+            let settings = await center.notificationSettings()
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral: return .granted
+            case .denied: return .refused
+            default:
+                return (try? await center.requestAuthorization(options: [.alert, .sound])) == true
+                    ? .granted : .refused
+            }
         }
+        authorizationTask = task
+        let result = await task.value
+        authorizationTask = nil
+        if result == .refused { refusedAt = Date() }
+        return result
     }
 
     func start() {
         let c = UNUserNotificationCenter.current()
         c.delegate = self
-        // Only find out whether we already have permission; do not ask for it.
-        c.getNotificationSettings { s in
-            Task { @MainActor in
-                self.authorised = s.authorizationStatus == .authorized
-                self.asked = s.authorizationStatus != .notDetermined
-            }
-        }
         c.setNotificationCategories([
             UNNotificationCategory(identifier: "attention",
                                    actions: [UNNotificationAction(identifier: "open",
@@ -57,30 +55,36 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         ])
     }
 
-    func deliver(_ a: RuleEngine.Alert, away: Bool) {
+    /// Returning false leaves the alert queued. A stable identifier makes retries idempotent.
+    func deliver(_ a: RuleEngine.Alert, away: Bool) async -> Bool {
         let p = Prefs.shared
-
-        // The notch only earns an interruption when something is genuinely waiting on a human.
-        if p.placement == .notch, Prefs.hasNotch, a.kind == .waiting {
-            NotchWindow.shared.flash(title: a.title, body: a.body)
+        // These surfaces remain independent of Notification Center permission. Retrying the
+        // OS delivery must not repeatedly flash the notch or resend the same webhook.
+        auxiliaryAttempts = auxiliaryAttempts.filter { Date().timeIntervalSince($0.value) < 86400 }
+        if auxiliaryAttempts[a.id] == nil {
+            auxiliaryAttempts[a.id] = Date()
+            if p.placement == .notch, Prefs.hasNotch, a.kind == .waiting {
+                NotchWindow.shared.flash(title: a.title, body: a.body)
+            }
+            if away, !p.pushURL.isEmpty { push(a) }
         }
-
-        Task { @MainActor in
-            guard await self.ensureAuthorised() else { return }
-            let n = UNMutableNotificationContent()
-            n.title = a.title
-            n.body = a.body
-            n.categoryIdentifier = a.kind == .waiting ? "attention" : ""
-            n.userInfo = ["provider": a.provider.rawValue]
-            if p.sound && a.urgent { n.sound = .default }
-            // In an async context this resolves to the throwing overload; a failed delivery is
-            // not worth interrupting anything over.
-            try? await UNUserNotificationCenter.current().add(
-                UNNotificationRequest(identifier: UUID().uuidString, content: n, trigger: nil))
+        switch await ensureAuthorised() {
+        case .granted: break
+        // Nothing will ever accept this one. Keeping it queued for a day of one-minute retries
+        // buys nothing; the notch and the push above are what this person actually gets.
+        case .refused: return true
+        case .unavailable: return false
         }
-
-        // Away from the desk: the Mac's own notification is not going to reach you.
-        if away, !p.pushURL.isEmpty { push(a) }
+        let n = UNMutableNotificationContent()
+        n.title = a.title; n.body = a.body
+        n.categoryIdentifier = a.kind == .waiting ? "attention" : ""
+        n.userInfo = ["provider": a.provider.rawValue]
+        if p.sound && a.urgent { n.sound = .default }
+        do {
+            try await UNUserNotificationCenter.current().add(
+                UNNotificationRequest(identifier: a.id, content: n, trigger: nil))
+        } catch { return false }
+        return true
     }
 
     /// A plain POST to whatever endpoint the user configured — ntfy, Bark, a webhook. No account

@@ -1,111 +1,212 @@
 import Foundation
 
-/// Session events, delivered by Claude Code's own hooks.
-///
-/// This is the half of the product that quota polling cannot do. A percentage tells you the
-/// state of the world; a hook tells you that something just happened and is now waiting on you.
-/// The bridge is a shell script that appends one JSON line per firing, which keeps the hook
-/// itself incapable of breaking a coding session — it does no network, holds no lock, and
-/// always exits 0.
+/// Configuration installation is deliberately separate from event consumption.
 enum HookProvider {
+    static let directory = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".cache/pwe-ai-bar")
+    static let log = directory.appendingPathComponent("events.jsonl")
+    static let settingsURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".claude/settings.json")
+    static let required = [("Notification", "waiting"), ("UserPromptSubmit", "answered"), ("Stop", "finished")]
 
-    static let log = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".cache/pwe-ai-bar/events.jsonl")
-
-    /// How long a "waiting" event stays interesting. Claude Code does not fire a matching
-    /// "resolved" hook, so an unanswered prompt is inferred to be answered once the session
-    /// produces anything newer.
-    private static let waitingTTL: TimeInterval = 30 * 60
-
-    static func events() -> [AgentEvent] {
-        guard let text = try? String(contentsOf: log, encoding: .utf8) else { return [] }
-
-        var newestPerSession: [String: (Date, AgentEvent.Kind)] = [:]
-        var out: [AgentEvent] = []
-
-        for line in text.split(separator: "\n") {
-            guard let data = line.data(using: .utf8),
-                  let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let kindWord = o["kind"] as? String,
-                  let kind = AgentEvent.Kind(rawValue: kindWord),
-                  let secs = (o["at"] as? NSNumber)?.doubleValue else { continue }
-            let at = Date(timeIntervalSince1970: secs)
-            let session = o["session"] as? String ?? ""
-            if let prev = newestPerSession[session], prev.0 > at { continue }
-            newestPerSession[session] = (at, kind)
-
-            let cwd = (o["cwd"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent } ?? ""
-            let raw = (o["text"] as? String) ?? ""
-            out.removeAll { $0.id == session }
-            out.append(AgentEvent(
-                id: session.isEmpty ? UUID().uuidString : session,
-                provider: .claude,
-                kind: kind,
-                text: raw.isEmpty ? defaultText(kind, project: cwd) : raw,
-                at: at))
-        }
-
-        let now = Date()
-        return out
-            .filter { $0.kind != .waiting || now.timeIntervalSince($0.at) < waitingTTL }
-            .sorted { $0.at > $1.at }
+    static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    private static func defaultText(_ kind: AgentEvent.Kind, project: String) -> String {
-        let where_ = project.isEmpty ? "" : " · \(project)"
-        switch kind {
-        case .waiting:  return "Claude 在等你回话\(where_)"
-        case .finished: return "任务完成\(where_)"
-        case .failed:   return "会话出错\(where_)"
-        case .answered: return "已回复\(where_)"
+    private static func command(_ path: String, _ kind: String) -> String {
+        "\(shellQuote(path)) \(kind)"
+    }
+
+    private static func isOurCommand(_ value: String?, path: String, kind: String) -> Bool {
+        // Exact legacy command compatibility; never claim ownership by substring alone.
+        value == command(path, kind)
+            || value == "\(path.replacingOccurrences(of: " ", with: "\\ ")) \(kind)"
+    }
+
+    private static func configuration(_ data: Data) throws -> [String: Any] {
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw CocoaError(.propertyListReadCorrupt)
         }
+        if let raw = root["hooks"] {
+            guard let hooks = raw as? [String: Any] else { throw CocoaError(.propertyListReadCorrupt) }
+            for (event, _) in required where hooks[event] != nil {
+                guard let matchers = hooks[event] as? [[String: Any]],
+                      matchers.allSatisfy({ $0["hooks"] is [[String: Any]] }) else {
+                    throw CocoaError(.propertyListReadCorrupt)
+                }
+            }
+        }
+        return root
     }
 
     static var isInstalled: Bool {
-        FileManager.default.fileExists(atPath: settingsURL.path) &&
-        ((try? String(contentsOf: settingsURL, encoding: .utf8))?
-            .contains("pwe-ai-bar-hook") ?? false)
+        isInstalled(settings: settingsURL, script: directory.appendingPathComponent("pwe-ai-bar-hook.sh"))
     }
 
-    private static var settingsURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/settings.json")
-    }
-
-    /// Merges our two hooks into the user's settings without touching anything else there.
-    /// Their file is theirs: we read it, add what is missing, and write it back — never
-    /// overwrite it with a template.
-    @discardableResult
-    static func install(scriptPath: String) -> Bool {
-        let fm = FileManager.default
-        var root: [String: Any] = [:]
-        if let data = try? Data(contentsOf: settingsURL),
-           let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { root = o }
-
-        var hooks = root["hooks"] as? [String: Any] ?? [:]
-        // Three hooks. `UserPromptSubmit` is the one that makes "waiting" accurate: without it
-        // the state only clears when the turn ends, so the menu bar keeps saying Claude is
-        // waiting for minutes after you have already answered.
-        for (event, kind) in [("Notification", "waiting"),
-                              ("UserPromptSubmit", "answered"),
-                              ("Stop", "finished")] {
-            var matchers = hooks[event] as? [[String: Any]] ?? []
-            let command = "\(scriptPath.replacingOccurrences(of: " ", with: "\\ ")) \(kind)"
-            let already = matchers.contains { m in
-                ((m["hooks"] as? [[String: Any]]) ?? []).contains {
-                    ($0["command"] as? String)?.contains("pwe-ai-bar-hook") == true
-                }
+    static func isInstalled(settings: URL, script: URL) -> Bool {
+        guard FileManager.default.isExecutableFile(atPath: script.path),
+              let data = try? Data(contentsOf: settings), let root = try? configuration(data),
+              let hooks = root["hooks"] as? [String: Any] else { return false }
+        return required.allSatisfy { event, kind in
+            (hooks[event] as? [[String: Any]] ?? []).contains { matcher in
+                // A restricted matcher does not cover all sessions.
+                let match = matcher["matcher"] as? String ?? ""
+                return (match.isEmpty || match == "*") &&
+                    (matcher["hooks"] as? [[String: Any]] ?? []).contains {
+                        $0["type"] as? String == "command"
+                            && isOurCommand($0["command"] as? String, path: script.path, kind: kind)
+                    }
             }
-            guard !already else { continue }
-            matchers.append(["hooks": [["type": "command", "command": command]]])
-            hooks[event] = matchers
         }
-        root["hooks"] = hooks
+    }
 
-        guard let out = try? JSONSerialization.data(withJSONObject: root,
-                                                    options: [.prettyPrinted, .sortedKeys])
-        else { return false }
-        try? fm.createDirectory(at: settingsURL.deletingLastPathComponent(),
-                                withIntermediateDirectories: true)
-        return (try? out.write(to: settingsURL, options: .atomic)) != nil
+    /// Fail closed on unreadable/invalid existing configuration. Backup bytes before mutation.
+    @discardableResult
+    static func install(scriptPath: String, settings: URL = settingsURL, source: URL? = nil) -> Bool {
+        let fm = FileManager.default
+        do {
+            // Atomic replacement would replace the link itself, losing the user's indirection.
+            if (try? settings.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true { return false }
+            let original: Data?
+            do { original = try Data(contentsOf: settings) }
+            catch let error as CocoaError where error.code == .fileReadNoSuchFile { original = nil }
+            var root = try original.map(configuration) ?? [:]
+            var hooks = root["hooks"] as? [String: Any] ?? [:]
+            for (event, kind) in required {
+                var matchers = hooks[event] as? [[String: Any]] ?? []
+                let exists = matchers.contains { matcher in
+                    let match = matcher["matcher"] as? String ?? ""
+                    return (match.isEmpty || match == "*") &&
+                        (matcher["hooks"] as? [[String: Any]] ?? []).contains {
+                            $0["type"] as? String == "command"
+                                && isOurCommand($0["command"] as? String, path: scriptPath, kind: kind)
+                        }
+                }
+                if !exists { matchers.append(["hooks": [["type": "command", "command": command(scriptPath, kind)]]]) }
+                hooks[event] = matchers
+            }
+            root["hooks"] = hooks
+            let output = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+            let script = URL(fileURLWithPath: scriptPath)
+            if let source {
+                let bytes = try Data(contentsOf: source)
+                try fm.createDirectory(at: script.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try bytes.write(to: script, options: .atomic)
+                try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+            }
+            guard fm.isExecutableFile(atPath: scriptPath) else { return false }
+            // Repeated installs should not rewrite valid settings or create redundant backups.
+            if isInstalled(settings: settings, script: script) { return true }
+            try fm.createDirectory(at: settings.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if let original {
+                guard try Data(contentsOf: settings) == original else { return false }
+                let backup = settings.appendingPathExtension("pwe-backup-\(UUID().uuidString)")
+                try original.write(to: backup, options: .atomic)
+                try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backup.path)
+            } else if fm.fileExists(atPath: settings.path) { return false }
+            try output.write(to: settings, options: .atomic)
+            try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: settings.path)
+            return isInstalled(settings: settings, script: script)
+        } catch { return false }
+    }
+
+    static func decode(_ data: Data) -> AgentEvent? {
+        guard let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let kind = (o["kind"] as? String).flatMap(AgentEvent.Kind.init),
+              let secs = (o["at"] as? NSNumber)?.doubleValue, secs.isFinite else { return nil }
+        let eventID = o["event_id"] as? String
+        let session = o["session"] as? String ?? ""
+        let project = (o["cwd"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent } ?? ""
+        let raw = kind == .answered ? "" : String((o["text"] as? String ?? "").prefix(200))
+        let text: String
+        switch kind {
+        case .waiting: text = "Claude 在等你回话"
+        case .finished: text = "任务完成"
+        case .failed: text = "会话出错"
+        case .answered: text = "已回复"
+        }
+        return AgentEvent(id: session.isEmpty ? (eventID ?? "legacy-\(secs)") : session,
+                          provider: .claude, kind: kind,
+                          text: raw.isEmpty ? text + (project.isEmpty ? "" : " · \(project)") : raw,
+                          at: Date(timeIntervalSince1970: secs), eventID: eventID)
+    }
+}
+
+/// Consume immutable per-event files. Only delete a file after its state is durably saved.
+/// Unread files have no count-based eviction, including when the application is not running.
+actor HookEventReader {
+    static let shared = HookEventReader()
+    private let directory: URL
+    private let now: () -> Date
+    private var latest: [String: AgentEvent] = [:]
+    private var loaded = false
+    private var legacyModified: Date?
+    private var dirty = false
+
+    init(directory: URL = HookProvider.directory, now: @escaping () -> Date = Date.init) {
+        self.directory = directory; self.now = now
+    }
+
+    func events() -> [AgentEvent] {
+        let fm = FileManager.default
+        let state = directory.appendingPathComponent("event-state.json")
+        if !loaded {
+            loaded = true
+            if let data = try? Data(contentsOf: state),
+               let saved = try? JSONDecoder().decode([String: AgentEvent].self, from: data) { latest = saved }
+        }
+        let before = latest.mapValues(\.key)
+        let spool = directory.appendingPathComponent("events")
+        let files = ((try? fm.contentsOfDirectory(at: spool, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+        var consumed: [URL] = []
+        for file in files.prefix(256) {
+            guard let data = try? Data(contentsOf: file) else { continue }
+            // A timestamp in the future is either a corrupt record or a clock that moved; either
+            // way, skipping it would re-read the same file every second until the date caught up.
+            guard let event = HookProvider.decode(data), event.at <= now().addingTimeInterval(300) else {
+                // Retain corrupt bytes for inspection without letting them block the next batch.
+                try? fm.moveItem(at: file, to: file.appendingPathExtension("invalid"))
+                continue
+            }
+            guard event.at <= now() else { continue }
+            merge(event)
+            consumed.append(file)
+        }
+        // Quarantined bytes are for a person to look at, not an archive to keep forever.
+        for stray in ((try? fm.contentsOfDirectory(at: spool, includingPropertiesForKeys: [.contentModificationDateKey]))
+            ?? []).filter({ $0.pathExtension == "invalid" }) {
+            let at = (try? stray.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            if now().timeIntervalSince(at ?? now()) > 7 * 86400 { try? fm.removeItem(at: stray) }
+        }
+        // Read legacy ring files until the user updates their installed hook script.
+        let legacy = directory.appendingPathComponent("events.jsonl")
+        let modified = (try? legacy.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        if let modified, modified != legacyModified, let data = try? Data(contentsOf: legacy) {
+            for line in data.split(separator: 10) {
+                if let event = HookProvider.decode(Data(line)), event.at <= now() { merge(event) }
+            }
+            legacyModified = modified
+        }
+        latest = latest.filter { now().timeIntervalSince($0.value.at) < 86400 }
+        dirty = dirty || !consumed.isEmpty || before != latest.mapValues(\.key)
+        if dirty {
+            do {
+                let data = try JSONEncoder().encode(latest)
+                try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+                try data.write(to: state, options: .atomic)
+                try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: state.path)
+                for file in consumed { try? fm.removeItem(at: file) }
+                dirty = false
+            } catch { /* Leave the spool intact for the next read. */ }
+        }
+        return latest.values.filter { $0.kind != .waiting || now().timeIntervalSince($0.at) < 1800 }
+            .sorted { $0.at == $1.at ? $0.key > $1.key : $0.at > $1.at }
+    }
+
+    private func merge(_ event: AgentEvent) {
+        if let previous = latest[event.id], previous.at > event.at
+            || (previous.at == event.at && previous.key >= event.key) { return }
+        latest[event.id] = event
     }
 }

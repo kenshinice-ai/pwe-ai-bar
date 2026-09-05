@@ -110,6 +110,9 @@ enum Probe {
             print("  ⚠ 没等到数据——钥匙串授权框可能还开着")
         }
         try? await Task.sleep(for: .seconds(2))    // let the last fields settle
+        // Offscreen rendering and a live store both want the main actor, and the store wins
+        // every second forever. Nothing below needs new data; freeze what we have and draw it.
+        store.stop()
 
         // The other two surfaces get rendered too. Settings and the trophy page are each two
         // clicks deep, which is exactly why they rot: nobody looks at them while iterating.
@@ -117,7 +120,7 @@ enum Probe {
             let suffix = dark ? "dark" : "light"
             shoot(AnyView(TrophyView(trophy: store.snapshot.trophy)),
                   width: 460, dark: dark, to: dir + "/trophy-\(suffix).png")
-            shoot(AnyView(SettingsView(installHooks: { false }, saveToken: { _ in },
+            shoot(AnyView(SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
                                        enableRealQuota: {})),
                   width: 380, dark: dark, to: dir + "/settings-\(suffix).png")
         }
@@ -239,8 +242,8 @@ enum Probe {
         }
         Task { @MainActor in
             mark("start")
-            _ = Credentials.ownToken()
-            mark("keychain")
+            _ = Credentials.claudeCodeCredential()
+            mark("credential")
             _ = Transcript.lastRateLimit()
             mark("lastRateLimit")
             let pricing = Pricing.load()
@@ -258,20 +261,23 @@ enum Probe {
             mark("transcript done: \(local.trophy.turns) turns")
             snap.trophy = local.trophy
             snap.contextPercent = local.context
-            snap.events = HookProvider.events()
+            snap.events = await HookEventReader.shared.events()
             snap.stale = stale
 
             print("PWE AI Bar — probe\n" + String(repeating: "─", count: 58))
             let why: String
-            switch await claude.blocker {
+            let blocker = await claude.blocker
+            switch blocker {
             case .none: why = "—"
             case .needsSetup: why = "未授权（面板点「启用真实额度」，或用 --token 设长期令牌）"
             case .notLoggedIn: why = "未登录（运行 claude auth login）"
             case .keychainRefused: why = "钥匙串拒绝（重新运行 claude auth login 即可重建授权）"
+            case .unauthorized, .forbidden, .network: why = blocker.message
             case .expired: why = "登录过期（打开一次 Claude Code）"
             case .rateLimited(let d): why = "限流至 \(f(d))"
             }
             print("登录        \(loggedIn ? "是" : "否")     数据陈旧  \(stale ? "是" : "否")")
+            print("凭据        \(await claude.source.rawValue)     UA  \(ClaudeProvider.userAgent)")
             print("阻塞        \(why)")
             print("hooks       \(HookProvider.isInstalled ? "已安装" : "未安装")     刘海      \(Prefs.hasNotch ? "有" : "无")")
             print("\n窗口")

@@ -1,179 +1,156 @@
 import Foundation
 import os
 
-/// Claude Code's quota, read from the same OAuth endpoint the `/usage` command uses.
-///
-/// Two things shape this file. First, the token: it comes from `Credentials`, is sent only to
-/// `api.anthropic.com`, and never reaches a log or a plain file — a long-lived token is stored,
-/// but in a keychain item this app owns, never on disk. Second, the endpoint is rate-limited
-/// hard, so the cache and a strict `Retry-After` are not optimisations here; they are the
-/// difference between working and being locked out for the next hour.
-///
-/// Parsing is driven by the response's `limits[]` array rather than its named fields. The
-/// payload already carries a row of buckets that are null today — per-model weeklies, extra
-/// usage, several unlaunched names. Reading the array means the interface grows a line the day
-/// one of them starts reporting, with no code change; reading `five_hour` and `seven_day` by
-/// name would mean shipping a build for each.
+/// OAuth usage, with explicit credential, observation, and retry states.
 actor ClaudeProvider {
+    typealias Reading = (windows: [QuotaWindow], stale: Bool)
+    struct Access {
+        var own: () -> Credentials.Token?
+        var claudeCode: () -> Credentials.Token?
+        var sharedExists: () -> Bool
+        var shared: () -> Credentials.Token?
+        var save: (String) -> Credentials.SaveResult
+        static let live = Access(own: Credentials.ownToken,
+                                 claudeCode: { Credentials.claudeCodeCredential() },
+                                 sharedExists: Credentials.sharedItemExists,
+                                 shared: Credentials.readShared, save: { Credentials.storeOwnToken($0) })
+    }
+    enum Blocker: Equatable {
+        case none, needsSetup, notLoggedIn, keychainRefused, expired, unauthorized, forbidden, network
+        case rateLimited(Date)
+        var message: String {
+            switch self {
+            case .none: return "已验证，额度连接正常"
+            case .needsSetup: return "请启用真实额度"
+            case .notLoggedIn: return "未找到凭据，请登录 Claude Code"
+            case .keychainRefused: return "钥匙串访问失败，请重新授权"
+            case .expired, .unauthorized: return "凭据已失效，请在设置中更换令牌或重新登录 Claude Code"
+            case .forbidden: return "凭据无权读取额度，请检查账户权限或更换令牌"
+            case .network: return "暂时无法验证，请检查网络，稍后自动重试"
+            case .rateLimited: return "接口限流中，将按服务端时间重试"
+            }
+        }
+    }
+    enum TokenUpdate: Equatable {
+        case saved(Blocker), cleared, failed(Int32)
+        var stored: Bool { if case .saved = self { return true }; return false }
+        var succeeded: Bool { if case .failed = self { return false }; return true }
+        var message: String {
+            switch self {
+            case .saved(let state): return "已保存 · " + state.message
+            case .cleared: return "已清除令牌"
+            case .failed(let code): return "钥匙串操作失败（\(code)），请重试"
+            }
+        }
+    }
 
+    private let defaults: UserDefaults
+    private let cacheURL: URL
+    private let access: Access
+    private let request: (URLRequest) async throws -> (Data, URLResponse)
+    private let now: () -> Date
+    private let fallback: () -> (resetsAt: Date, kind: String)?
     private var cache: [QuotaWindow] = []
     private var fetchedAt: Date?
-    private var loadedFromDisk = false
+    private var loaded = false
+    private var revision = 0
+    private var requestTask: Task<Reading, Never>?
+    private var rejectedValue: String?
+    private var retryNetworkAt: Date?
+    private(set) var lastSource: Credentials.Source = .none
 
-    /// The last good response, kept between launches.
-    ///
-    /// Without it every fresh process starts with an empty cache and fires a request
-    /// immediately — which is exactly how a few relaunches in a row earn a 429 from an endpoint
-    /// that is rate-limited hard. It also means the panel shows real figures the instant it
-    /// opens rather than after a round trip.
-    private static var diskCache: URL {
-        // `.first` rather than `[0]`: the array is never empty in practice, but a cache path
-        // is not worth a trap if it ever is.
-        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        let dir = base.appendingPathComponent("PWE AI Bar", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("quota-cache.json")
-    }
-
-    private func loadCache() {
-        guard !loadedFromDisk else { return }
-        loadedFromDisk = true
-        guard let data = try? Data(contentsOf: Self.diskCache),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let at = root["at"] as? Double,
-              let rows = root["windows"] as? [[String: Any]] else { return }
-        fetchedAt = Date(timeIntervalSince1970: at)
-        cache = rows.compactMap { r in
-            guard let id = r["id"] as? String, let ch = r["channel"] as? Int,
-                  let channel = Channel(rawValue: ch) else { return nil }
-            return QuotaWindow(
-                id: id, provider: .claude, channel: channel,
-                title: r["title"] as? String ?? "",
-                percent: r["percent"] as? Double,
-                severity: Severity(word: r["severity"] as? String),
-                resetsAt: (r["resetsAt"] as? Double).map { Date(timeIntervalSince1970: $0) },
-                isActive: r["isActive"] as? Bool ?? false,
-                observedAt: Date(timeIntervalSince1970: at),
-                gradedBy: .server)
-        }
-        // A window whose reset has already passed is not news, it is yesterday's high.
-        cache.removeAll { w in w.resetsAt.map { $0 < Date() } ?? false }
-    }
-
-    private func saveCache() {
-        let rows: [[String: Any]] = cache.map { w in
-            var r: [String: Any] = ["id": w.id, "channel": w.channel.rawValue,
-                                    "title": w.title, "severity": w.severity.rawValue,
-                                    "isActive": w.isActive]
-            if let p = w.percent { r["percent"] = p }
-            if let d = w.resetsAt { r["resetsAt"] = d.timeIntervalSince1970 }
-            return r
-        }
-        let root: [String: Any] = ["at": Date().timeIntervalSince1970, "windows": rows]
-        guard let data = try? JSONSerialization.data(withJSONObject: root) else { return }
-        try? data.write(to: Self.diskCache, options: .atomic)
-    }
-    /// Persisted, because a 429 from this endpoint can last the better part of an hour and a
-    /// relaunch would otherwise walk straight back into it — which is how a fifty-three minute
-    /// block got earned in the first place. Kept in defaults rather than the cache file so it
-    /// survives someone clearing the cache to force a refresh.
-    private var retryAfter: Date? {
-        get {
-            let t = UserDefaults.standard.double(forKey: "quotaRetryAfter")
-            guard t > 0 else { return nil }
-            let d = Date(timeIntervalSince1970: t)
-            return d > Date() ? d : nil
-        }
-        set {
-            UserDefaults.standard.set(newValue?.timeIntervalSince1970 ?? 0,
-                                      forKey: "quotaRetryAfter")
+    /// Whether the *credential* is good — not whether the last request worked. Being throttled,
+    /// or offline, is not a reason to tell someone to log in again, and sending them to
+    /// `claude auth login` for a problem that heals itself is the worst kind of wrong advice.
+    var loggedIn: Bool {
+        switch blocker {
+        case .notLoggedIn, .needsSetup, .expired, .unauthorized, .keychainRefused: return false
+        case .none, .forbidden, .network, .rateLimited: return true
         }
     }
-    /// Why we have no Claude numbers, when we have none. The panel needs to tell the
-    /// difference: "log in" and "grant keychain access" are different problems with different
-    /// fixes, and "读不到额度" helps with neither.
-    enum Blocker: Equatable {
-        case none
-        case needsSetup           // never asked yet — we do not raise a dialog uninvited
-        case notLoggedIn          // no credential in the keychain at all
-        case keychainRefused      // the item is there, macOS will not let us read it
-        case expired              // token past its expiry; opening Claude Code refreshes it
-        case rateLimited(Date)    // 429; showing the last good numbers until then
-    }
-
-    private(set) var loggedIn = false
     private(set) var blocker: Blocker = .none
 
-    /// How long a reading stays fresh enough to reuse — and therefore how often we ask.
-    ///
-    /// Deliberately conservative. This endpoint's limit is long: a burst of debugging earned a
-    /// fifty-three minute block, and a single request the moment it expired earned another
-    /// fifty-seven. At the old flat sixty seconds an ordinary working day would have made up to
-    /// sixty requests an hour, which is on the wrong side of that. A five-hour window does not
-    /// need minute-by-minute resolution — but the last stretch before a reset does, and so does
-    /// a window already in warning, which is when the number is worth watching.
-    private func ttl(for windows: [QuotaWindow]) -> TimeInterval {
-        let tightest = windows.map(\.band).max() ?? .calm
-        let soon = windows.compactMap(\.resetsAt)
-            .map { $0.timeIntervalSinceNow }
-            .filter { $0 > 0 }
-            .min() ?? .greatestFiniteMagnitude
-
-        if tightest == .hot || soon < 15 * 60 { return 60 }
-        if tightest == .warm { return 150 }
-        return 300
+    init(defaults: UserDefaults = .standard, cacheURL: URL? = nil, access: Access = .live,
+         now: @escaping () -> Date = Date.init,
+         request: @escaping (URLRequest) async throws -> (Data, URLResponse) = { try await URLSession.shared.data(for: $0) },
+         fallback: @escaping () -> (resetsAt: Date, kind: String)? = { Transcript.lastRateLimit() }) {
+        self.defaults = defaults; self.access = access; self.now = now; self.request = request; self.fallback = fallback
+        self.cacheURL = cacheURL ?? (FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory()))
+            .appendingPathComponent("PWE AI Bar/quota-cache.json")
     }
 
-    // MARK: Credential
-
-    /// Persisted across launches. Without it, a dialog the user closed once comes back on every
-    /// launch forever — which is the single most common reason people delete a menu-bar app.
     private var refusedBefore: Bool {
-        get { UserDefaults.standard.bool(forKey: "keychainRefused") }
-        set { UserDefaults.standard.set(newValue, forKey: "keychainRefused") }
+        get { defaults.bool(forKey: "keychainRefused") }
+        set { defaults.set(newValue, forKey: "keychainRefused") }
     }
-
-    /// Whether the user has ever said yes to reading Claude Code's credential.
-    ///
-    /// The app does not touch the shared item until they do. An access dialog that appears on
-    /// its own, seconds after first launch, for reasons the user has not been told, is the most
-    /// alarming thing a small menu-bar app can do — and it arrives before anything has had a
-    /// chance to explain why it is needed. So the first run shows local figures and a button,
-    /// and the dialog only ever appears as the direct result of pressing it.
     private var sharedAllowed: Bool {
-        get { UserDefaults.standard.bool(forKey: "sharedKeychainOptIn") }
-        set { UserDefaults.standard.set(newValue, forKey: "sharedKeychainOptIn") }
+        get { defaults.bool(forKey: "sharedKeychainOptIn") }
+        set { defaults.set(newValue, forKey: "sharedKeychainOptIn") }
+    }
+    private var retryAfter: Date? {
+        get {
+            let d = Date(timeIntervalSince1970: defaults.double(forKey: "quotaRetryAfter"))
+            return d > now() ? d : nil
+        }
+        set { defaults.set(newValue?.timeIntervalSince1970 ?? 0, forKey: "quotaRetryAfter") }
     }
 
-    /// Order matters. Our own long-lived token can never raise a dialog, so it is tried first
-    /// and, when present, the shared item is never touched at all.
     private func token() async -> Credentials.Token? {
-        if let own = Credentials.ownToken() { return own }
+        // Both of these block: one on securityd, one on a subprocess. Neither may run on this
+        // actor — a refresh that waits on the keychain is a menu bar that stops answering.
+        // Claude Code's own credential comes first. It is the one the CLI keeps refreshed, and
+        // reading it costs a ~20 ms subprocess; the fallback is a static token a user pasted in
+        // months ago, read through securityd, which has been measured here at 4–84 s. A manual
+        // token is the answer for machines without Claude Code, not the preferred source.
+        let own = access.own, read = access.claudeCode
+        if let token = await offActor({ read() ?? own() }) { lastSource = token.source; return token }
+        // Everything below is the old direct-keychain path, which can put a dialog on screen.
+        // It is reached only when Claude Code's credential could not be read the quiet way.
         guard sharedAllowed else {
-            blocker = Credentials.sharedItemExists() ? .needsSetup : .notLoggedIn
-            return nil
+            blocker = access.sharedExists() ? .needsSetup : .notLoggedIn; return nil
         }
-        guard !refusedBefore else {
-            blocker = .keychainRefused        // asked, declined; say so instead of going quiet
-            return nil
-        }
+        guard !refusedBefore else { blocker = .keychainRefused; return nil }
         return await sharedWithTimeout()
     }
 
-    /// The shared read blocks its thread for as long as macOS shows the access dialog, and if
-    /// nobody is at the machine that is forever.
-    ///
-    /// Two earlier attempts at a timeout both hung, and the second is the instructive one.
-    /// Racing the read against a sleep in a `withTaskGroup` looks right and cannot work: the
-    /// group does not return until *every* child finishes, `cancelAll()` has no effect on a
-    /// synchronous `SecItemCopyMatching` already in flight, so the group sits waiting on the
-    /// loser it was meant to abandon. (The first attempt was worse still — both children shared
-    /// this actor's executor, so the blocking read owned it and the timer never ran.)
-    ///
-    /// So: no task group. Two queues race to resume one continuation, a lock decides who won,
-    /// and the loser is simply never waited on.
+    private func offActor<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
+        await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .userInitiated).async { cont.resume(returning: work()) }
+        }
+    }
+
+    /// The endpoint is Claude Code's own, undocumented and unversioned. Presenting anything else
+    /// as the client is how a perfectly good token still earns a 429: this app asked with the
+    /// URLSession default agent for a whole day and was throttled for all of it.
+    static let userAgent: String = {
+        let fm = FileManager.default
+        var roots = ["/opt/homebrew/lib/node_modules", "/usr/local/lib/node_modules",
+                     fm.homeDirectoryForCurrentUser.appendingPathComponent(".claude/local/node_modules").path]
+        // Wherever `claude` actually lives: follow the launcher and walk up out of bin/.
+        for dir in (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":") {
+            let link = String(dir) + "/claude"
+            guard fm.isExecutableFile(atPath: link) else { continue }
+            let real = (try? fm.destinationOfSymbolicLink(atPath: link)).map {
+                $0.hasPrefix("/") ? $0 : URL(fileURLWithPath: link).deletingLastPathComponent()
+                    .appendingPathComponent($0).standardized.path
+            } ?? link
+            roots.insert(URL(fileURLWithPath: real).deletingLastPathComponent()
+                .deletingLastPathComponent().deletingLastPathComponent().path, at: 0)
+        }
+        for root in roots {
+            let path = root + "/@anthropic-ai/claude-code/package.json"
+            guard let data = fm.contents(atPath: path),
+                  let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let version = o["version"] as? String,
+                  !version.isEmpty, version.count < 32 else { continue }
+            return "claude-code/" + version
+        }
+        return "claude-code/2.1.69"
+    }()
+
     private func sharedWithTimeout() async -> Credentials.Token? {
+        let version = revision
         let result: Credentials.Token?? = await withCheckedContinuation { cont in
             let resumed = OSAllocatedUnfairLock(initialState: false)
             func claim() -> Bool {
@@ -183,8 +160,9 @@ actor ClaudeProvider {
                     return true
                 }
             }
+            let access = self.access
             DispatchQueue.global(qos: .userInitiated).async {
-                let t = Credentials.readShared()
+                let t = access.shared()
                 if claim() { cont.resume(returning: .some(t)) }
             }
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 20) {
@@ -192,6 +170,7 @@ actor ClaudeProvider {
             }
         }
 
+        guard version == revision else { return nil }
         guard let inner = result else {
             // The dialog went unanswered. Remember that, so it is asked once and not once a
             // minute; Settings has a button to try again deliberately.
@@ -202,7 +181,7 @@ actor ClaudeProvider {
         guard let t = inner else {
             // The item is there for the CLI but we could not read it: macOS is refusing this
             // signature, which is a different problem from never having logged in.
-            if Credentials.sharedItemExists() {
+            if access.sharedExists() {
                 refusedBefore = true
                 blocker = .keychainRefused
             } else {
@@ -213,146 +192,174 @@ actor ClaudeProvider {
         return t
     }
 
-    /// The user has asked for the real numbers, which is the only thing that puts the access
-    /// dialog on screen. Called from the panel's button and from Settings.
+    private func invalidateCredential() {
+        revision += 1
+        requestTask?.cancel(); requestTask = nil
+        fetchedAt = nil; cache = []; loaded = true
+        rejectedValue = nil; retryNetworkAt = nil; blocker = .none; lastSource = .none
+        try? FileManager.default.removeItem(at: cacheURL)
+    }
+
     func enableSharedKeychain() {
-        sharedAllowed = true
-        refusedBefore = false
-        blocker = .none
-        fetchedAt = nil
+        sharedAllowed = true; refusedBefore = false
+        invalidateCredential()
     }
 
-    func useOwnToken(_ value: String) {
-        Credentials.storeOwnToken(value.trimmingCharacters(in: .whitespacesAndNewlines))
-        blocker = .none
-        fetchedAt = nil
+    func useOwnToken(_ raw: String) async -> TokenUpdate {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch access.save(value) {
+        case .failed(let code): return .failed(code)
+        case .cleared:
+            invalidateCredential()
+            return .cleared
+        case .saved:
+            invalidateCredential()
+            _ = await windows()
+            return .saved(blocker)
+        }
     }
 
-    var source: Credentials.Source {
-        if Credentials.hasOwnToken { return .ownToken }
-        return loggedIn ? .sharedKeychain : Credentials.Source.none
+    var source: Credentials.Source { lastSource }
+
+    func windows() async -> Reading {
+        if let task = requestTask { return await task.value }
+        let version = revision
+        let task = Task { await fetch(version: version) }
+        requestTask = task
+        let result = await task.value
+        if revision == version { requestTask = nil }
+        return result
     }
 
-    // MARK: Fetch
-
-    func windows() async -> (windows: [QuotaWindow], stale: Bool) {
+    private func fetch(version: Int) async -> Reading {
         loadCache()
-        if let at = fetchedAt, !cache.isEmpty,
-           Date().timeIntervalSince(at) < ttl(for: cache) {
+        let date = now()
+        if let until = retryAfter { blocker = .rateLimited(until); return staleReading() }
+        if let until = retryNetworkAt, until > date { return staleReading() }
+        if let at = fetchedAt, !cache.isEmpty, date.timeIntervalSince(at) < ttl(),
+           !cache.contains(where: { $0.resetsAt.map { $0 <= date } ?? false }) {
             return (cache, false)
         }
-        if let r = retryAfter {
-            // Having a credential and being temporarily blocked are different facts. Reporting
-            // "not logged in" here sent people off to re-run `claude auth login` for a problem
-            // that fixes itself.
-            loggedIn = Credentials.hasOwnToken || Credentials.sharedItemExists()
-            blocker = .rateLimited(r)
-            return (cache, true)
+        let credential = await token()
+        guard version == revision, !Task.isCancelled else { return staleReading() }
+        guard let cred = credential else { return staleReading() }
+        if let expiry = cred.expiresAt, expiry <= date {
+            blocker = .expired; return staleReading()
         }
-
-        guard let cred = await token() else {
-            loggedIn = false
-            return (cache.isEmpty ? offline() : cache, true)
-        }
-        if let e = cred.expiresAt, e < Date() {
-            // Expired: opening Claude Code refreshes it. Say so rather than sending a token we
-            // already know will bounce. A long-lived token has no expiry and never lands here.
-            blocker = .expired
-            loggedIn = false
-            return (cache.isEmpty ? offline() : cache, true)
-        }
-        loggedIn = true
-
+        if rejectedValue == cred.value { return staleReading() }
         var req = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
         req.setValue("Bearer \(cred.value)", forHTTPHeaderField: "Authorization")
         req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        req.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
         req.timeoutInterval = 12
-
         do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            guard let http = resp as? HTTPURLResponse else { return (cache, true) }
-
+            let (data, response) = try await request(req)
+            guard version == revision, !Task.isCancelled else { return staleReading() }
+            guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+            if http.statusCode == 401 || http.statusCode == 403 {
+                rejectedValue = cred.value
+                blocker = http.statusCode == 401 ? .unauthorized : .forbidden
+                return staleReading()
+            }
             if http.statusCode == 429 {
-                let after = Double(http.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 60
-                let until = Date().addingTimeInterval(after)
-                retryAfter = until
-                blocker = .rateLimited(until)
-                return (cache.isEmpty ? offline() : cache, true)
+                let until = Self.retryDate(http.value(forHTTPHeaderField: "Retry-After"), now: now())
+                retryAfter = until; blocker = .rateLimited(until)
+                return staleReading()
             }
             guard http.statusCode == 200,
-                  let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-            else { return (cache.isEmpty ? offline() : cache, true) }
-
-            retryAfter = nil
-            blocker = .none
-            cache = parse(root)
-            fetchedAt = Date()
+                  let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw URLError(.badServerResponse)
+            }
+            let parsed = parse(root)
+            guard !parsed.isEmpty else { throw URLError(.cannotParseResponse) }
+            cache = parsed; fetchedAt = now(); blocker = .none
+            rejectedValue = nil; retryAfter = nil; retryNetworkAt = nil
             saveCache()
             return (cache, false)
         } catch {
-            return (cache.isEmpty ? offline() : cache, true)
+            guard version == revision, !Task.isCancelled else { return staleReading() }
+            blocker = .network; retryNetworkAt = now().addingTimeInterval(60)
+            return staleReading()
         }
     }
 
-    // MARK: Parse
-
-    private func parse(_ root: [String: Any]) -> [QuotaWindow] {
-        var out: [QuotaWindow] = []
-
-        if let limits = root["limits"] as? [[String: Any]] {
-            for l in limits {
-                guard let kind = l["kind"] as? String else { continue }
-                let group = l["group"] as? String ?? ""
-                let channel: Channel
-                switch (kind, group) {
-                case ("session", _):     channel = .session
-                case ("weekly_all", _):  channel = .week
-                case (_, "weekly"):      channel = .other      // per-model weeklies, when they arrive
-                default:                 continue
-                }
-                let pct = (l["percent"] as? NSNumber)?.doubleValue
-                out.append(QuotaWindow(
-                    id: kind,
-                    provider: .claude,
-                    channel: channel,
-                    title: title(kind),
-                    percent: pct,
-                    severity: Severity(word: l["severity"] as? String),
-                    resetsAt: (l["resets_at"] as? String).flatMap(ISO8601DateFormatter.parse),
-                    isActive: (l["is_active"] as? Bool) ?? false,
-                    gradedBy: (l["severity"] as? String) != nil ? .server : .local
-                ))
+    /// RFC 9110 permits delay-seconds or an HTTP date. Invalid values back off conservatively.
+    nonisolated static func retryDate(_ header: String?, now: Date) -> Date {
+        if let value = header?.trimmingCharacters(in: .whitespacesAndNewlines) {
+            if !value.isEmpty, value.allSatisfy({ $0.isASCII && $0.isNumber }), let secs = Double(value), secs.isFinite {
+                return now.addingTimeInterval(max(1, secs))
+            }
+            for format in ["EEE, dd MMM yyyy HH:mm:ss zzz", "EEEE, dd-MMM-yy HH:mm:ss zzz", "EEE MMM d HH:mm:ss yyyy"] {
+                let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
+                f.timeZone = TimeZone(secondsFromGMT: 0); f.dateFormat = format
+                if let date = f.date(from: value) { return max(date, now.addingTimeInterval(1)) }
             }
         }
+        return now.addingTimeInterval(300)
+    }
 
-        // Named fields as the backstop, only for channels the array did not cover.
+    private func ttl() -> TimeInterval {
+        let soon = cache.compactMap(\.resetsAt).map { $0.timeIntervalSince(now()) }.filter { $0 > 0 }.min() ?? .infinity
+        let band = cache.map(\.band).max() ?? .calm
+        return band == .hot || soon < 900 ? 60 : band == .warm ? 150 : 300
+    }
+
+    private func staleReading() -> Reading {
+        var rows = cache
+        if rows.isEmpty, let rl = fallback(), rl.resetsAt > now() {
+            let channel: Channel = rl.kind.contains("week") ? .week : .session
+            rows = [QuotaWindow(id: channel == .week ? "seven_day" : "five_hour", provider: .claude,
+                                channel: channel, title: title(rl.kind), percent: nil, severity: .critical,
+                                resetsAt: rl.resetsAt, note: "已限流", isStale: true)]
+        }
+        rows = rows.map { row in
+            var w = row; w.isStale = true
+            if let reset = w.resetsAt, reset <= now() {
+                w.percent = nil; w.severity = .normal; w.note = "待确认"; w.confirmedExhausted = false
+            }
+            return w
+        }
+        return (rows, true)
+    }
+
+    func parse(_ root: [String: Any]) -> [QuotaWindow] {
+        var out: [QuotaWindow] = []
+        for l in root["limits"] as? [[String: Any]] ?? [] {
+            guard let kind = l["kind"] as? String else { continue }
+            let channel: Channel
+            switch (kind, l["group"] as? String ?? "") {
+            case ("session", _): channel = .session
+            case ("weekly_all", _): channel = .week
+            case (_, "weekly"): channel = .other
+            default: continue
+            }
+            let pct = (l["percent"] as? NSNumber)?.doubleValue
+            guard pct == nil || (pct!.isFinite && pct! >= 0 && pct! <= 100) else { continue }
+            let word = l["severity"] as? String
+            let recognized = ["normal", "warning", "warn", "critical", "error", "rejected", "exhausted"].contains(word?.lowercased() ?? "")
+            let id = channel == .session ? "five_hour" : channel == .week ? "seven_day" : kind
+            out.append(QuotaWindow(id: id, provider: .claude, channel: channel, title: title(kind),
+                                   percent: pct, severity: Severity(word: word),
+                                   resetsAt: (l["resets_at"] as? String).flatMap(ISO8601DateFormatter.parse),
+                                   isActive: l["is_active"] as? Bool ?? false, observedAt: now(),
+                                   gradedBy: recognized ? .server : .local,
+                                   confirmedExhausted: pct == 100 || ["exhausted", "rejected"].contains(word?.lowercased() ?? "")))
+        }
         for (key, channel) in [("five_hour", Channel.session), ("seven_day", Channel.week)]
         where !out.contains(where: { $0.channel == channel }) {
-            guard let n = root[key] as? [String: Any],
-                  let pct = (n["utilization"] as? NSNumber)?.doubleValue else { continue }
-            out.append(QuotaWindow(
-                id: key, provider: .claude, channel: channel, title: title(key),
-                percent: pct,
-                severity: Health.grade(pct, warm: channel.warm, hot: channel.hot) == .hot
-                    ? .critical : Health.grade(pct, warm: channel.warm, hot: channel.hot) == .warm
-                    ? .warning : .normal,
-                resetsAt: (n["resets_at"] as? String).flatMap(ISO8601DateFormatter.parse)
-            ))
+            guard let node = root[key] as? [String: Any], let pct = (node["utilization"] as? NSNumber)?.doubleValue,
+                  pct.isFinite, pct >= 0, pct <= 100 else { continue }
+            out.append(QuotaWindow(id: key, provider: .claude, channel: channel, title: title(key), percent: pct,
+                                   resetsAt: (node["resets_at"] as? String).flatMap(ISO8601DateFormatter.parse),
+                                   observedAt: now(), gradedBy: .local, confirmedExhausted: pct == 100))
         }
-
-        // Several per-model weeklies can share the `other` feather. Keep the tightest.
         let others = out.filter { $0.channel == .other }
         if others.count > 1, let worst = others.max(by: { $0.strain < $1.strain }) {
-            out.removeAll { $0.channel == .other }
-            out.append(worst)
+            out.removeAll { $0.channel == .other }; out.append(worst)
         }
         return out
     }
 
-    /// Known kinds get a proper name; anything new gets a readable one rather than a raw
-    /// identifier. The endpoint already ships several buckets that report nothing yet
-    /// (`seven_day_opus`, `seven_day_oauth_apps`, a few unlaunched names), and the day one of
-    /// them starts reporting, this is what the panel will call it.
     private func title(_ kind: String) -> String {
         switch kind {
         case "session", "five_hour":     return "五小时窗口"
@@ -371,13 +378,40 @@ actor ClaudeProvider {
         return t
     }
 
-    /// No token, no network, or rate-limited: fall back to what the transcripts remember. A 429
-    /// record carries a real reset time, which is the one genuinely useful thing we have offline.
-    private func offline() -> [QuotaWindow] {
-        guard let rl = Transcript.lastRateLimit(), rl.resetsAt > Date() else { return [] }
-        let channel: Channel = rl.kind.contains("week") ? .week : .session
-        return [QuotaWindow(id: rl.kind, provider: .claude, channel: channel,
-                            title: title(rl.kind), percent: 100, severity: .critical,
-                            resetsAt: rl.resetsAt, isActive: true, note: "已限流")]
+    private func loadCache() {
+        guard !loaded else { return }; loaded = true
+        guard let data = try? Data(contentsOf: cacheURL),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              root["version"] as? Int == 3, let at = root["at"] as? Double,
+              let rows = root["windows"] as? [[String: Any]] else { return }
+        fetchedAt = Date(timeIntervalSince1970: at)
+        guard fetchedAt! <= now() else { fetchedAt = nil; return }
+        cache = rows.compactMap { r in
+            guard let id = r["id"] as? String, let ch = r["channel"] as? Int,
+                  let channel = Channel(rawValue: ch), let grader = (r["grader"] as? String).flatMap(QuotaWindow.Grader.init)
+            else { return nil }
+            let pct = r["percent"] as? Double
+            guard pct == nil || (pct!.isFinite && pct! >= 0 && pct! <= 100) else { return nil }
+            return QuotaWindow(id: id, provider: .claude, channel: channel, title: r["title"] as? String ?? "",
+                               percent: pct, severity: Severity(word: r["severity"] as? String),
+                               resetsAt: (r["resetsAt"] as? Double).map { Date(timeIntervalSince1970: $0) },
+                               isActive: r["isActive"] as? Bool ?? false, observedAt: Date(timeIntervalSince1970: at),
+                               gradedBy: grader, confirmedExhausted: r["exhausted"] as? Bool ?? false)
+        }
+    }
+
+    private func saveCache() {
+        let rows: [[String: Any]] = cache.map { w in
+            var r: [String: Any] = ["id": w.id, "channel": w.channel.rawValue, "title": w.title,
+                                    "severity": w.severity.rawValue, "grader": w.gradedBy.rawValue,
+                                    "isActive": w.isActive, "exhausted": w.confirmedExhausted]
+            if let p = w.percent { r["percent"] = p }
+            if let at = w.resetsAt { r["resetsAt"] = at.timeIntervalSince1970 }
+            return r
+        }
+        guard let at = fetchedAt, let data = try? JSONSerialization.data(withJSONObject:
+            ["version": 3, "at": at.timeIntervalSince1970, "windows": rows]) else { return }
+        try? FileManager.default.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: cacheURL, options: .atomic)
     }
 }

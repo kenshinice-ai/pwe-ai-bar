@@ -8,80 +8,80 @@ import Foundation
 /// team account emits at least two kinds:
 ///
 ///   `codex`    the real quota — `primary` is the 5-hour window, `secondary` the weekly
-///   `premium`  the add-on credit pool, whose `primary` is null and whose only content is
+///   `premium`  the add-on credit pool, whose windows are null and whose only content is
 ///              `rate_limit_reached_type: workspace_member_credits_depleted`
 ///
-/// Taking whichever landed last reports "额度耗尽" while the actual quota sits at 95 % — the two
-/// records interleave, and the newest file is as likely to hold one as the other. So each kind is
-/// tracked separately: the quota comes from `codex`, and a depleted credit pool is reported as
-/// the separate fact it is.
+/// Taking whichever landed last reports "额度耗尽" while the actual quota sits at 95 %: the two
+/// interleave inside a single file, so it is not enough to pick the newest file either. Each
+/// kind is reduced separately, by the event's own timestamp rather than the file's mtime, and a
+/// spent credit pool is reported as the separate fact it is — and only while it is recent.
 actor CodexProvider {
-
     static let shared = CodexProvider()
-
-
     static let sessions = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".codex/sessions")
+    private let root: URL
+    private let now: () -> Date
+    private let tailBytes: Int
 
-    /// Two windows when the log has them, plus the credit pool when it is exhausted.
+    init(root: URL = CodexProvider.sessions, now: @escaping () -> Date = Date.init,
+         tailBytes: Int = 4 << 20) {
+        self.root = root; self.now = now; self.tailBytes = tailBytes
+    }
+
+    private struct Record {
+        let value: [String: Any]
+        let at: Date
+    }
+
     func windows() -> [QuotaWindow] {
-        var quota: [String: Any]?      // newest `limit_id: codex`
-        var quotaAt = Date.distantPast
-        var creditsAt: Date?           // when the pool was last reported spent
-
-        for (url, mtime) in Self.recentFiles(12) {
-            guard let rl = Self.lastRateLimits(in: url) else { continue }
-            let id = rl["limit_id"] as? String ?? ""
-
-            if id == "codex", quota == nil, rl["primary"] is [String: Any] {
-                quota = rl
-                quotaAt = mtime
+        let date = now()
+        var pools: [String: Record] = [:]
+        for url in recentFiles(12) {
+            LineScanner.scanTail(url, marker: "rate_limits", tailBytes: tailBytes) { line in
+                guard let o = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+                      let ts = o["timestamp"] as? String,
+                      let at = ISO8601DateFormatter.parse(ts), at <= date,
+                      let rl = (o["payload"] as? [String: Any])?["rate_limits"] as? [String: Any]
+                        ?? o["rate_limits"] as? [String: Any] else { return }
+                // Older rollouts have no limit_id. Accept them only if they contain a quota.
+                let id = rl["limit_id"] as? String ?? "codex"
+                guard id == "codex" || id == "premium" else { return }
+                if id == "codex", !["primary", "secondary"].contains(where: {
+                    Self.validWindow(rl[$0] as? [String: Any])
+                }) { return }
+                if id == "premium", rl["primary"] == nil && rl["rate_limit_reached_type"] == nil {
+                    return
+                }
+                if let old = pools[id], old.at > at { return }
+                pools[id] = Record(value: rl, at: at)
             }
-            if creditsAt == nil,
-               let reached = rl["rate_limit_reached_type"] as? String,
-               reached.contains("credits") {
-                creditsAt = mtime
-            }
-            if quota != nil && creditsAt != nil { break }
         }
-
         var out: [QuotaWindow] = []
-
-        if let rl = quota {
-            // `observed` is the age of the record the reading came from, not of the newest file
-            // we happened to open. Those differ whenever the most recent session is a `premium`
-            // record, which is exactly the case that made this worth getting right.
-            for key in ["primary", "secondary"] {
-                if let w = Self.window(rl, key: key, observed: quotaAt) { out.append(w) }
+        if let q = pools["codex"] {
+            out = ["primary", "secondary"].compactMap {
+                Self.window(q.value, key: $0, observed: q.at, now: date)
             }
         }
-
-        // The add-on credit pool is reported only while it is genuinely the current state.
-        //
-        // These records interleave with the quota ones, and a `premium` record saying the pool
-        // is spent stays on disk forever. Reporting it unconditionally kept a red "额度耗尽" row
-        // in the panel a full day after the fact — Codex's own interface showed no such thing,
-        // because to Codex it is an account attribute, not a usage window. So it has to be both
-        // the newest record we saw and recent enough to still mean something.
-        if let creditsAt, creditsAt >= quotaAt,
-           Date().timeIntervalSince(creditsAt) < 3600 {
+        if let c = pools["premium"], date.timeIntervalSince(c.at) < 3600,
+           let reached = c.value["rate_limit_reached_type"] as? String,
+           reached.contains("credits") {
             out.append(QuotaWindow(id: "codex_credits", provider: .codex, channel: .codex,
                                    title: "附加额度", percent: nil, severity: .critical,
-                                   note: "已用尽", observedAt: creditsAt))
+                                   note: "已用尽", observedAt: c.at, confirmedExhausted: true))
         }
-
         if out.isEmpty {
-            return []
+            out.append(QuotaWindow(id: "codex_unknown", provider: .codex, channel: .codex,
+                                   title: "额度", percent: nil, note: "暂无有效读数",
+                                   observedAt: date, isStale: true))
         }
         return out
     }
 
-    /// Names the window from the length the record itself reports.
-    ///
-    /// The obvious shortcut is to call `primary` the five-hour window and `secondary` the
-    /// weekly one, which is what they are today. But the record carries `window_minutes`, and
-    /// hardcoding the names means that the day OpenAI changes a window, the panel keeps
-    /// confidently printing the old one — a label that lies is worse than a vague one.
+    private static func validWindow(_ n: [String: Any]?) -> Bool {
+        guard let pct = (n?["used_percent"] as? NSNumber)?.doubleValue else { return false }
+        return pct.isFinite && pct >= 0 && pct <= 100
+    }
+
     private static func name(minutes: Int?, key: String) -> String {
         // Chinese numerals for the two everyone has, so Codex's rows read the same as Claude's;
         // digits for anything unusual, where being exact matters more than matching.
@@ -96,65 +96,32 @@ actor CodexProvider {
     }
 
     private static func window(_ rl: [String: Any], key: String,
-                               observed: Date) -> QuotaWindow? {
-        guard let n = rl[key] as? [String: Any],
+                               observed: Date, now: Date) -> QuotaWindow? {
+        guard let n = rl[key] as? [String: Any], validWindow(n),
               let pct = (n["used_percent"] as? NSNumber)?.doubleValue else { return nil }
         let minutes = (n["window_minutes"] as? NSNumber)?.intValue
-        let title = name(minutes: minutes, key: key)
-        let id = "codex_\(minutes.map(String.init) ?? key)"
-        let reset = (n["resets_at"] as? NSNumber)
-            .map { Date(timeIntervalSince1970: $0.doubleValue) }
-
-        // A window past its reset has already rolled over. The log still holds the old high,
-        // and showing it would claim you are nearly out when you are not.
-        if let r = reset, r < Date() {
-            return QuotaWindow(id: id, provider: .codex, channel: .codex, title: title,
-                               percent: 0, severity: .normal, resetsAt: nil,
-                               observedAt: observed)
+        let reset = (n["resets_at"] as? NSNumber).flatMap { v -> Date? in
+            v.doubleValue.isFinite ? Date(timeIntervalSince1970: v.doubleValue) : nil
         }
-        let band = Health.grade(pct, warm: Channel.codex.warm, hot: Channel.codex.hot)
-        // Graded locally: unlike Claude, Codex ships a bare percentage with no severity of
-        // its own, so these bands are our thresholds and not the provider's judgement.
-        return QuotaWindow(id: id, provider: .codex, channel: .codex, title: title,
-                           percent: pct,
-                           severity: band == .hot ? .critical : band == .warm ? .warning : .normal,
-                           resetsAt: reset, observedAt: observed, gradedBy: .local)
+        let expired = reset.map { $0 <= now } ?? false
+        return QuotaWindow(id: "codex_\(minutes.map(String.init) ?? key)", provider: .codex,
+                           channel: .codex, title: name(minutes: minutes, key: key),
+                           percent: expired ? nil : pct, resetsAt: reset,
+                           note: expired ? "待确认" : nil, observedAt: observed,
+                           gradedBy: .local, isStale: expired,
+                           confirmedExhausted: !expired && pct >= 100)
     }
 
-    // MARK: Reading the logs
-
-    private static func recentFiles(_ limit: Int) -> [(URL, Date)] {
-        guard let e = FileManager.default.enumerator(
-            at: sessions, includingPropertiesForKeys: [.contentModificationDateKey],
+    private func recentFiles(_ limit: Int) -> [URL] {
+        guard let e = FileManager.default.enumerator(at: root,
+            includingPropertiesForKeys: [.contentModificationDateKey],
             options: [.skipsHiddenFiles]) else { return [] }
         var files: [(URL, Date)] = []
         for case let url as URL in e where url.pathExtension == "jsonl" {
-            let d = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+            let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
                 .contentModificationDate ?? .distantPast
-            files.append((url, d))
+            files.append((url, date))
         }
-        return Array(files.sorted { $0.1 > $1.1 }.prefix(limit))
-    }
-
-    /// The last `rate_limits` in the file — records are appended as the session runs, so the
-    /// final one is that session's most recent reading.
-    ///
-    /// Byte-scanned like everything else that reads these logs: a dozen Codex rollouts came to
-    /// about fifty megabytes here, and reading them as Swift strings to look for one marker is
-    /// the same mistake that cost three seconds a refresh on the Claude side.
-    private static func lastRateLimits(in url: URL) -> [String: Any]? {
-        guard let line = LineScanner.lastMatch(url, marker: "rate_limits", tailBytes: 4 << 20),
-              let o = try? JSONSerialization.jsonObject(with: line) else { return nil }
-        return dig(o, for: "rate_limits")
-    }
-
-    private static func dig(_ any: Any, for key: String) -> [String: Any]? {
-        if let d = any as? [String: Any] {
-            if let hit = d[key] as? [String: Any] { return hit }
-            for v in d.values { if let h = dig(v, for: key) { return h } }
-        } else if let a = any as? [Any] {
-            for v in a { if let h = dig(v, for: key) { return h } }
-        }
-        return nil
+        return files.sorted { $0.1 > $1.1 }.prefix(limit).map(\.0)
     }
 }

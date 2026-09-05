@@ -201,7 +201,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         closePopover()
         let view = SettingsView(
             installHooks: { [weak self] in self?.installHooks() ?? false },
-            saveToken: { [weak self] t in self?.store.saveToken(t) },
+            saveToken: { [weak self] t in
+                guard let self else { return .failed(-1) }
+                return await self.store.saveToken(t)
+            },
             enableRealQuota: { [weak self] in self?.store.enableRealQuota() })
         if let w = settingsWindow {
             w.contentView = NSHostingView(rootView: view)
@@ -236,18 +239,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         else { return false }
         let dir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".cache/pwe-ai-bar")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let dst = dir.appendingPathComponent("pwe-ai-bar-hook.sh")
-        try? FileManager.default.removeItem(at: dst)
-        try? FileManager.default.copyItem(at: src, to: dst)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dst.path)
-        return HookProvider.install(scriptPath: dst.path)
+        return HookProvider.install(scriptPath: dst.path, source: src)
     }
 
     /// Bring the agent's own app forward. Falls back to its website when nothing is installed —
     /// clicking "go look" and having nothing happen is worse than opening the wrong thing.
     private func activate(_ p: Provider) {
-        store.clearAttention()
         for id in p.bundleIDs {
             if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
                 NSWorkspace.shared.openApplication(at: url, configuration: .init())

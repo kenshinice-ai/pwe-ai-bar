@@ -126,13 +126,15 @@ struct PanelView: View {
         let (headline, fix): (String, String?) = {
             switch store.blocker {
             case .needsSetup:
-                return ("还没接上真实额度", "下面显示的是本地估算")
+                return ("读不到 Claude Code 的凭据", "下面是本地估算；可在设置里改用钥匙串授权")
             case .notLoggedIn:
                 return ("还没登录", "在终端运行 claude auth login")
             case .keychainRefused:
-                // Re-logging in rewrites the keychain item with a fresh access list, which is
-                // one command; editing the existing item's ACL by hand is four dialogs deep.
+                // Re-logging in rewrites the keychain item through `security`, which is the one
+                // program allowed to read it back; editing an ACL by hand is four dialogs deep.
                 return ("钥匙串拒绝了访问", "重新运行 claude auth login 即可重建授权")
+            case .unauthorized, .forbidden, .network:
+                return ("额度连接需要处理", store.blocker.message)
             case .expired:
                 return ("登录已过期", "打开一次 Claude Code 就会自动续期")
             case .rateLimited(let until):
@@ -148,10 +150,13 @@ struct PanelView: View {
                 Text(fix).font(Theme.sans(11)).foregroundStyle(Theme.text2)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if store.blocker == .unauthorized || store.blocker == .forbidden || store.blocker == .expired {
+                Button("管理凭据", action: onSettings).font(Theme.sans(11.5))
+            }
             if store.blocker == .needsSetup || store.blocker == .keychainRefused {
-                Button("启用真实额度") { onEnableQuota() }
+                Button("改用钥匙串授权") { onEnableQuota() }
                     .font(Theme.sans(11.5))
-                    .help("会弹一次 macOS 钥匙串授权，选「始终允许」后不再询问")
+                    .help("正常情况下用不到。会弹一次 macOS 授权框，选「始终允许」后不再询问")
             }
         }
     }
@@ -200,9 +205,11 @@ struct PanelView: View {
                 .fixedSize(horizontal: false, vertical: true).lineLimit(2)
             Spacer(minLength: Theme.s1)
             if let title = cta.button {
-                Button(title) { onEnableQuota() }
+                Button(title) {
+                    if title == "管理凭据" { onSettings() } else { onEnableQuota() }
+                }
                     .font(Theme.sans(11))
-                    .help("会弹一次 macOS 钥匙串授权，选「始终允许」后不再询问")
+                    .help(title == "管理凭据" ? "打开设置以更换或清除令牌" : "会弹一次 macOS 钥匙串授权，选「始终允许」后不再询问")
             }
         }
     }
@@ -238,12 +245,17 @@ struct PanelView: View {
 
     /// Nil once real quota is flowing.
     private var claudeCallToAction: (text: String, button: String?)? {
+        switch store.blocker {
+        case .unauthorized, .forbidden, .expired: return (store.blocker.message, "管理凭据")
+        case .network: return (store.blocker.message, nil)
+        default: break
+        }
         guard snap.windows(of: .claude).isEmpty else { return nil }
         switch store.blocker {
-        case .needsSetup:      return ("只有本地估算，还没接上真实额度", "启用")
+        case .needsSetup:      return ("只有本地估算，读不到 Claude Code 凭据", "处理")
         case .keychainRefused: return ("钥匙串授权被拒过", "重新授权")
         case .notLoggedIn:     return ("先在终端运行 claude auth login", nil)
-        case .expired:         return ("登录已过期，打开一次 Claude Code 即可", nil)
+        case .expired, .unauthorized, .forbidden, .network: return (store.blocker.message, "管理凭据")
         case .rateLimited(let until):
             return ("接口限流中，\(max(1, Int(until.timeIntervalSinceNow / 60))) 分钟后重试", nil)
         case .none:            return nil
@@ -307,7 +319,6 @@ struct PanelView: View {
 
     private func eventRow(_ e: AgentEvent) -> some View {
         Button {
-            store.clearAttention()
             onOpen(e.provider)
         } label: {
             HStack(spacing: Theme.s2) {

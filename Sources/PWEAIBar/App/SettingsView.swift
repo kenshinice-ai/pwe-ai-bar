@@ -6,11 +6,21 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var prefs = Prefs.shared
     var installHooks: () -> Bool
-    var saveToken: (String) -> Void
+    var saveToken: (String) async -> ClaudeProvider.TokenUpdate
     var enableRealQuota: () -> Void
-    @State private var hookState: String = HookProvider.isInstalled ? "已安装" : "未安装"
+    @State private var hookState: String
     @State private var token: String = ""
-    @State private var tokenState: String = Credentials.hasOwnToken ? "已保存" : ""
+    @StateObject private var tokenEditor: TokenEditor
+
+    init(installHooks: @escaping () -> Bool,
+         saveToken: @escaping (String) async -> ClaudeProvider.TokenUpdate,
+         enableRealQuota: @escaping () -> Void, prefs: Prefs? = nil,
+         tokenEditor: TokenEditor? = nil, hookInstalled: Bool? = nil) {
+        self.installHooks = installHooks; self.saveToken = saveToken; self.enableRealQuota = enableRealQuota
+        self.prefs = prefs ?? .shared
+        _tokenEditor = StateObject(wrappedValue: tokenEditor ?? TokenEditor(hasToken: Credentials.hasOwnToken))
+        _hookState = State(initialValue: (hookInstalled ?? HookProvider.isInstalled) ? "已安装" : "未安装")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -70,32 +80,37 @@ struct SettingsView: View {
                     HStack(spacing: Theme.s1 + 1) {
                         SecureField("粘贴 claude setup-token 生成的令牌", text: $token)
                             .textFieldStyle(.roundedBorder).font(Theme.sans(11.5))
-                        Button(Credentials.hasOwnToken && token.isEmpty ? "清除" : "保存") {
-                            saveToken(token)
-                            tokenState = token.isEmpty ? "" : "已保存"
-                            token = ""
+                        Button(tokenEditor.isSaving ? "验证中…" : tokenEditor.hasToken && token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "清除" : "保存") {
+                            Task { @MainActor in
+                                if await tokenEditor.submit(token, save: saveToken) { token = "" }
+                            }
                         }
                         .font(Theme.sans(12))
+                        .disabled(tokenEditor.isSaving)
                     }
+                    .disabled(tokenEditor.isSaving)
 
                     HStack(spacing: Theme.s2) {
                         // Telling someone how to get a token they already have is noise; the
                         // useful thing to say at that point is where it lives and how to remove it.
-                        Text(Credentials.hasOwnToken
-                             ? "令牌存在本 app 自己的钥匙串条目里，不会过期。清空输入框再点「清除」即可删除。"
-                             : "想彻底不再弹框：终端运行 claude setup-token，把结果粘进来。")
+                        Text(tokenEditor.hasToken
+                             ? "令牌保存在本 app 的钥匙串中，仍可能失效或被撤销。可直接粘贴新令牌更换，或清空输入后点「清除」。"
+                             : "一般不需要填。额度直接读 Claude Code 自己的凭据，不弹框。只有这台机器没登录 Claude Code 时，才用 claude setup-token 生成一个粘进来。")
                             .font(Theme.sans(10.5)).foregroundStyle(Theme.text2)
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: Theme.s1)
-                        // Only offered when it would change anything. With a token in hand the
-                        // shared keychain is never read, so the button would be a no-op.
-                        if !Credentials.hasOwnToken {
-                            Button("授权钥匙串") { enableRealQuota() }
+                        // The prompting path is a fallback for machines where reading Claude
+                        // Code's credential the quiet way did not work. With a token in hand it
+                        // would change nothing, so it is not offered.
+                        if !tokenEditor.hasToken {
+                            Button("改用钥匙串授权") { enableRealQuota() }
                                 .font(Theme.sans(11))
+                                .help("读不到 Claude Code 凭据时的退路，会弹一次系统授权框")
                         }
                     }
-                    if !tokenState.isEmpty {
-                        Text(tokenState).font(Theme.sans(10.5)).foregroundStyle(Theme.accent)
+                    if !tokenEditor.message.isEmpty {
+                        Text(tokenEditor.message).font(Theme.sans(10.5)).foregroundStyle(Theme.accent)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
@@ -139,11 +154,11 @@ struct SettingsView: View {
     }
 
     private var sourceLine: String {
-        if Credentials.hasOwnToken {
-            return "正在用长期令牌，不会有任何授权弹框。"
+        if tokenEditor.hasToken {
+            return "已选择使用保存的令牌读取额度。"
         }
-        if UserDefaults.standard.bool(forKey: "sharedKeychainOptIn") {
-            return "正在读 Claude Code 的钥匙串凭据，已授权。"
+        if prefs.sharedKeychainOptIn {
+            return "已选择共享钥匙串，连接结果请查看额度面板。"
         }
         return "还没接真实额度，只有本地估算——而且不会有任何弹框。"
     }

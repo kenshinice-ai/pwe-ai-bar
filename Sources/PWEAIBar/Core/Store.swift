@@ -17,9 +17,39 @@ final class Store: ObservableObject {
 
     var onSnapshot: ((Snapshot) -> Void)?
 
-    private let claude = ClaudeProvider()
-    private let rules = RuleEngine()
-    private var pricing = Pricing.load()
+    private let claude: ClaudeProvider
+    private let rules: RuleEngine
+    private let readEvents: () async -> [AgentEvent]
+    private let readLocal: () async -> Transcript.Result
+    private let readCodex: () async -> [QuotaWindow]
+    private let deliver: (RuleEngine.Alert, Bool) async -> Bool
+    private let tracks: () -> (claude: Bool, codex: Bool)
+    private let eventInterval: TimeInterval
+    private var eventTimer: Timer?
+    private var eventsInFlight = false
+    private var deliveries = Set<String>()
+    private var retryDelivery: [String: Date] = [:]
+
+    init(claude: ClaudeProvider = ClaudeProvider(), rules: RuleEngine? = nil,
+         readEvents: (() async -> [AgentEvent])? = nil,
+         readLocal: (() async -> Transcript.Result)? = nil,
+         readCodex: (() async -> [QuotaWindow])? = nil,
+         deliver: ((RuleEngine.Alert, Bool) async -> Bool)? = nil,
+         tracks: (() -> (claude: Bool, codex: Bool))? = nil, eventInterval: TimeInterval = 1,
+         lastActivity: Date = Date()) {
+        self.claude = claude; self.rules = rules ?? RuleEngine()
+        self.readEvents = readEvents ?? { await HookEventReader.shared.events() }
+        self.readCodex = readCodex ?? { await CodexProvider.shared.windows() }
+        if let readLocal { self.readLocal = readLocal }
+        else {
+            let pricing = Pricing.load()
+            self.readLocal = { await Transcript.shared.refresh(pricing: pricing) }
+        }
+        self.deliver = deliver ?? { await Notifier.shared.deliver($0, away: $1) }
+        self.tracks = tracks ?? { (Prefs.shared.trackClaude, Prefs.shared.trackCodex) }
+        self.eventInterval = eventInterval
+        self.lastActivity = lastActivity
+    }
     private var timer: Timer?
     private var inFlight = false
     private var lastActivity = Date()
@@ -34,17 +64,26 @@ final class Store: ObservableObject {
         return 20
     }
 
-    func start() {
-        NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.refresh() }
-            }
-        // The cache save is throttled to five minutes, so without this the last stretch of a
-        // session is re-parsed on next launch. Quitting is exactly when it is free to write.
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
-                Task { await Transcript.shared.flush() }
-            }
+    func start(observeSystem: Bool = true) {
+        if observeSystem {
+            NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+                    Task { @MainActor in self?.refresh() }
+                }
+            // The cache save is throttled to five minutes, so without this the last stretch of a
+            // session is re-parsed on next launch. Quitting is exactly when it is free to write.
+            NotificationCenter.default.addObserver(
+                forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
+                    Task { await Transcript.shared.flush() }
+                }
+        }
+        pollEvents()
+        eventTimer?.invalidate()
+        let timer = Timer(timeInterval: eventInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.pollEvents() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        eventTimer = timer
         refresh()
         schedule()
     }
@@ -73,24 +112,24 @@ final class Store: ObservableObject {
             defer { inFlight = false }
             var snap = Snapshot()
 
-            if Prefs.shared.trackClaude {
+            if tracks().claude {
                 let (windows, stale) = await claude.windows()
                 snap.windows += windows
                 snap.stale = stale
                 loggedIn = await claude.loggedIn
                 blocker = await claude.blocker
             }
-            if Prefs.shared.trackCodex {
-                snap.windows += await CodexProvider.shared.windows()
+            if tracks().codex {
+                snap.windows += await readCodex()
             }
 
             // Both of these read hundreds of megabytes of session logs. They are actors on
             // purpose: doing this work on the main thread is what made the menu bar stop
             // answering clicks while Claude Code was running.
-            let local = await Transcript.shared.refresh(pricing: pricing)
+            let local = await readLocal()
             snap.trophy = local.trophy
             snap.contextPercent = local.context
-            snap.events = HookProvider.events()
+            snap.events = snapshot.events
             snap.updatedAt = Date()
 
             // "Something is happening" is what keeps the fast cadence alive: a session event,
@@ -100,28 +139,64 @@ final class Store: ObservableObject {
             let recentEvent = snap.events.first.map { Date().timeIntervalSince($0.at) < 300 } ?? false
             if recentTurn || recentEvent { lastActivity = Date() }
 
-            let alerts = rules.evaluate(snap)
-            let away = rules.isAway
-            for a in alerts { Notifier.shared.deliver(a, away: away) }
-
             snapshot = snap
             onSnapshot?(snap)
+            dispatchAlerts()
         }
     }
 
     /// Only used by `--stress`, which needs a snapshot that real data will never produce.
     func injectForTesting(_ s: Snapshot) {
         snapshot = s
-        timer?.invalidate()
-        timer = nil
+        stop()
     }
 
-    func saveToken(_ t: String) {
-        Task { await claude.useOwnToken(t); refresh() }
+    func stop() {
+        timer?.invalidate(); timer = nil
+        eventTimer?.invalidate(); eventTimer = nil
+    }
+
+    private func pollEvents() {
+        guard !eventsInFlight else { return }
+        eventsInFlight = true
+        Task { @MainActor in
+            defer { eventsInFlight = false }
+            let events = await readEvents()
+            if events.map(\.key) != snapshot.events.map(\.key) {
+                snapshot.events = events
+                lastActivity = Date()
+                onSnapshot?(snapshot)
+            }
+            dispatchAlerts()
+        }
+    }
+
+    private func dispatchAlerts() {
+        let alerts = rules.evaluate(snapshot)
+        let ids = Set(alerts.map(\.id))
+        retryDelivery = retryDelivery.filter { ids.contains($0.key) }
+        for alert in alerts {
+            guard !deliveries.contains(alert.id), (retryDelivery[alert.id] ?? .distantPast) <= Date() else { continue }
+            deliveries.insert(alert.id)
+            let away = rules.isAway
+            Task { @MainActor in
+                let accepted = await deliver(alert, away)
+                deliveries.remove(alert.id)
+                if accepted { rules.acknowledge(alert); retryDelivery.removeValue(forKey: alert.id) }
+                else { retryDelivery[alert.id] = Date().addingTimeInterval(60) }
+            }
+        }
+    }
+
+    func saveToken(_ t: String) async -> ClaudeProvider.TokenUpdate {
+        let result = await claude.useOwnToken(t)
+        blocker = await claude.blocker
+        loggedIn = await claude.loggedIn
+        refresh()
+        return result
     }
 
     func enableRealQuota() {
         Task { await claude.enableSharedKeychain(); refresh() }
     }
-    func clearAttention() { rules.clearAttention() }
 }

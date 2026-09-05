@@ -44,17 +44,24 @@ struct QuotaWindow: Identifiable {
     var note: String?           // shown instead of a percentage when percent is nil
 
     /// When this reading was taken. Claude's comes from a live endpoint, so it is now. Codex's
-    /// comes out of a session log, so it is as old as the last time Codex ran — the number is
-    /// still correct while its window is open (nothing can consume Codex quota without writing
-    /// to that log), but the panel says how old it is rather than implying it is live.
+    /// comes out of a session log and represents that event's time. Usage elsewhere on the
+    /// account may not be present locally, so an old observation must not imply live accuracy.
     var observedAt: Date = .init()
 
     /// Who decided this is a warning. The Claude endpoint grades itself and its word is used
     /// as-is; Codex reports a bare percentage that we grade against our own thresholds. Two
     /// providers' "warning" therefore do not mean the same thing, and the panel should not
     /// pretend otherwise.
-    enum Grader { case server, local }
+    enum Grader: String { case server, local }
     var gradedBy: Grader = .local
+    /// A stale or inferred reading is display-only and cannot confirm a recovery.
+    var isStale = false
+    var confirmedExhausted = false
+
+    func canNotify(at now: Date) -> Bool {
+        !isStale && observedAt <= now && now.timeIntervalSince(observedAt) <= 600
+            && (resetsAt.map { $0 > now } ?? true)
+    }
 
     var display: String { percent.map { "\(Int($0.rounded()))%" } ?? (note ?? "—") }
 
@@ -66,13 +73,18 @@ struct QuotaWindow: Identifiable {
         return severity == .critical ? 1.0 : 0
     }
 
+    /// Whichever of the two is more alarming wins. The server's severity is authoritative about
+    /// things we cannot see — an account-level restriction with no percentage attached — so it
+    /// can raise the band on its own. It does not get to lower it: a window sitting at 96 % that
+    /// the endpoint still calls `normal` is not a calm menu bar, and a sentinel that under-warns
+    /// has failed at the only job it has. Saying "接近上限" here is separate from claiming the
+    /// quota is spent; `confirmedExhausted` is what carries that claim.
     var band: Health {
-        // The server's own severity outranks our arithmetic wherever it gave us one.
         max(severity.health, Health.grade(percent ?? 0, warm: channel.warm, hot: channel.hot))
     }
 }
 
-enum Provider: String, CaseIterable {
+enum Provider: String, CaseIterable, Codable {
     case claude, codex, gemini
 
     var name: String { ["claude": "Claude Code", "codex": "Codex", "gemini": "Gemini"][rawValue] ?? rawValue }
@@ -98,8 +110,8 @@ enum Provider: String, CaseIterable {
 }
 
 /// Something that happened in a session, as opposed to something that is merely true.
-struct AgentEvent: Identifiable {
-    enum Kind: String {
+struct AgentEvent: Identifiable, Codable {
+    enum Kind: String, Codable {
         case waiting, finished, failed
         /// You replied. Carries no message of its own — it exists so a "waiting" state stops
         /// being true the moment you answer, instead of lingering until the turn ends.
@@ -110,6 +122,10 @@ struct AgentEvent: Identifiable {
     let kind: Kind
     let text: String
     let at: Date
+
+    /// The optional UUID is supplied by the spool writer. Legacy events retain a stable key.
+    var eventID: String? = nil
+    var key: String { eventID ?? "\(provider.rawValue):\(id):\(kind.rawValue):\(at.timeIntervalSince1970)" }
 
     var isAttention: Bool { kind == .waiting }
 }

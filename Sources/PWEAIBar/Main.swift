@@ -34,9 +34,9 @@ enum PWEAIBarMain {
                                encoding: .utf8) ?? ""
             }
             value = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            let ok = Credentials.storeOwnToken(value)
+            let ok = Credentials.storeOwnToken(value).succeeded
             print(value.isEmpty ? (ok ? "已清除令牌" : "清除失败")
-                                : (ok ? "已保存令牌，之后不会再有授权弹框" : "保存失败"))
+                                : (ok ? "已保存令牌，额度有效性将在应用中验证" : "保存失败"))
             return
         }
         if let i = CommandLine.arguments.firstIndex(of: "--stress"),

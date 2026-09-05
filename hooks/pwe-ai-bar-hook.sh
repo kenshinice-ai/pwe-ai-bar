@@ -1,51 +1,41 @@
 #!/bin/bash
-# PWE AI Bar — session event bridge.
-#
-# Claude Code pipes one JSON object per hook firing on stdin; we append a line to a log the app
-# tails. Deliberately dumb: no network, no lock beyond an atomic rename, and it exits 0 whatever
-# happens — a hook that can fail is a hook that can break a coding session.
-#
-# The payload travels in an environment variable rather than on stdin, because stdin is already
-# spoken for: the Python program itself arrives there.
+# One immutable file per event; concurrent writers never rewrite shared state.
+# The app removes consumed files after saving session state. Unread events are not evicted.
 set -u
-DIR="$HOME/.cache/pwe-ai-bar"
+umask 077
+DIR="${PWEBAR_EVENT_DIR:-$HOME/.cache/pwe-ai-bar}/events"
 mkdir -p "$DIR" 2>/dev/null || exit 0
-
-KIND="${1:-waiting}"
-PWEBAR_PAYLOAD="$(cat 2>/dev/null || true)"
-export PWEBAR_PAYLOAD
-
-PWEBAR_KIND="$KIND" PWEBAR_LOG="$DIR/events.jsonl" /usr/bin/python3 -c '
-import json, os, time
-kind = os.environ.get("PWEBAR_KIND", "waiting")
-log  = os.environ["PWEBAR_LOG"]
+PWEBAR_KIND="${1:-waiting}" PWEBAR_SPOOL="$DIR" /usr/bin/python3 -c '
+import json, os, sys, time, uuid
 try:
-    o = json.loads(os.environ.get("PWEBAR_PAYLOAD") or "{}")
+    o = json.load(sys.stdin)
+    if not isinstance(o, dict):
+        sys.exit(0)
+    kind = os.environ["PWEBAR_KIND"]
+    if kind not in ("waiting", "answered", "finished", "failed"):
+        sys.exit(0)
+    ident = uuid.uuid4().hex
+    rec = {"event_id": ident, "kind": kind, "provider": "claude", "at": time.time(),
+           "session": str(o.get("session_id") or ""), "cwd": str(o.get("cwd") or ""),
+           "text": "" if kind == "answered" else str(o.get("message") or "")[:200]}
+    path = os.path.join(os.environ["PWEBAR_SPOOL"], ident)
+    with open(path + ".tmp", "x") as f:
+        json.dump(rec, f, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(path + ".tmp", path + ".json")
+    # If the app is gone but the hooks are still installed, nothing ever drains this directory.
+    # Sweep occasionally rather than on every event: a week-old event can no longer be reported.
+    if int(ident[:2], 16) < 6:
+        cutoff = time.time() - 7 * 86400
+        with os.scandir(os.environ["PWEBAR_SPOOL"]) as it:
+            for entry in it:
+                try:
+                    if entry.is_file() and entry.stat().st_mtime < cutoff:
+                        os.unlink(entry.path)
+                except OSError:
+                    pass
 except Exception:
-    o = {}
-if not isinstance(o, dict):
-    o = {}
-# "answered" carries no text on purpose: the payload for it is whatever you just typed, and
-# none of it is needed — the event exists only to end the waiting state.
-rec = {
-    "kind": kind,
-    "provider": "claude",
-    "at": time.time(),
-    "session": o.get("session_id", ""),
-    "cwd": o.get("cwd", ""),
-    "text": "" if kind == "answered" else (o.get("message") or "")[:200],
-}
-# A ring of recent events, not an archive.
-lines = []
-if os.path.exists(log):
-    try:
-        lines = open(log).readlines()[-40:]
-    except Exception:
-        lines = []
-lines.append(json.dumps(rec, ensure_ascii=False) + "\n")
-tmp = log + ".tmp"
-with open(tmp, "w") as f:
-    f.writelines(lines)
-os.replace(tmp, log)
+    pass
 ' 2>/dev/null || true
 exit 0
