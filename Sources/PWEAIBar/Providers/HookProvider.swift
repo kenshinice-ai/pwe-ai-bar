@@ -39,8 +39,28 @@ enum HookProvider {
         return root
     }
 
-    static var isInstalled: Bool {
-        isInstalled(settings: settingsURL, script: directory.appendingPathComponent("pwe-ai-bar-hook.sh"))
+    static var script: URL { directory.appendingPathComponent("pwe-ai-bar-hook.sh") }
+
+    static var isInstalled: Bool { isInstalled(settings: settingsURL, script: script) }
+
+    /// The installed script is a copy, so an app update leaves the old one running. Nothing in
+    /// the settings file changes when we fix a bug inside it, so "已安装" would keep saying yes
+    /// to a script written weeks ago — which is exactly how a concurrency fix ships to nobody.
+    static func installedScriptIsCurrent(source: URL?) -> Bool {
+        guard let source, let want = try? Data(contentsOf: source) else { return true }
+        return (try? Data(contentsOf: script)) == want
+    }
+
+    /// Replace our own copy in place when it has fallen behind. Only ever touches a file this
+    /// app wrote, in this app's cache directory, and only when the settings file already points
+    /// at it — installing the hooks is still a decision the user makes once, by hand.
+    @discardableResult
+    static func refreshScript(source: URL?) -> Bool {
+        guard let source, isInstalled, !installedScriptIsCurrent(source: source),
+              let bytes = try? Data(contentsOf: source) else { return false }
+        guard (try? bytes.write(to: script, options: .atomic)) != nil else { return false }
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        return true
     }
 
     static func isInstalled(settings: URL, script: URL) -> Bool {

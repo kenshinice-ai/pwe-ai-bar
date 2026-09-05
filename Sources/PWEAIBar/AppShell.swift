@@ -26,6 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildMainMenu()
 
         Notifier.shared.start()
+        // An app update ships a new hook script; the copy on disk is the one that actually runs.
+        HookProvider.refreshScript(source: Self.bundledHook)
         Notifier.shared.onOpen = { [weak self] p in self?.activate(p) }
 
         store.onSnapshot = { [weak self] snap in self?.redraw(snap) }
@@ -234,9 +236,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Actions
 
+    private static var bundledHook: URL? {
+        Bundle.module.url(forResource: "pwe-ai-bar-hook", withExtension: "sh")
+    }
+
     private func installHooks() -> Bool {
-        guard let src = Bundle.module.url(forResource: "pwe-ai-bar-hook", withExtension: "sh")
-        else { return false }
+        guard let src = Self.bundledHook else { return false }
         let dir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".cache/pwe-ai-bar")
         let dst = dir.appendingPathComponent("pwe-ai-bar-hook.sh")

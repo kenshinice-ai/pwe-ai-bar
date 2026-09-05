@@ -55,10 +55,6 @@ struct PanelView: View {
                 rule
             }
 
-            if let a = snap.attention {
-                eventRow(a)
-                rule
-            }
             footer
         }
         .frame(width: Theme.panelWidth)
@@ -97,7 +93,9 @@ struct PanelView: View {
             HStack { Spacer(); gauge(124); Spacer() }
                 .padding(.bottom, Theme.s2)
 
-            if let p = snap.protagonist {
+            if let a = snap.attention {
+                waitingStage(a)
+            } else if let p = snap.protagonist {
                 HStack(alignment: .firstTextBaseline, spacing: Theme.s2) {
                     Text(Readout.text(p, remaining: prefs.showRemaining)).font(Theme.figures(36))
                         .foregroundStyle(Theme.health(p.band, dark: isDark))
@@ -118,6 +116,35 @@ struct PanelView: View {
             }
         }
         .padding(.horizontal, 16).padding(.top, 13).padding(.bottom, 13)
+    }
+
+    /// Someone is waiting on you: that outranks every measurement, so it takes the big slot
+    /// instead of sitting in a row under the charts. A percentage tells you how much room is
+    /// left; this tells you the room is not the problem right now.
+    private func waitingStage(_ e: AgentEvent) -> some View {
+        Button { onOpen(e.provider) } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .firstTextBaseline, spacing: Theme.s2) {
+                    Text(snap.waiting > 1 ? "\(snap.waiting) 个会话在等你" : "在等你回话")
+                        .font(Theme.figures(26)).foregroundStyle(Theme.accent)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                    Spacer(minLength: Theme.s1)
+                    Text(ago(e.at)).font(Theme.sans(11)).foregroundStyle(Theme.text2)
+                }
+                HStack(spacing: 5) {
+                    ProviderMarkView(provider: e.provider, tint: Theme.text2)
+                        .frame(width: 10, height: 10)
+                    Text(e.text).font(Theme.sans(11)).foregroundStyle(Theme.text2)
+                        .lineLimit(1).truncationMode(.tail)
+                    Spacer(minLength: Theme.s1)
+                    Text("去看看 ›").font(Theme.sans(11)).foregroundStyle(Theme.accent)
+                }
+                .padding(.top, Theme.s2)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(snap.waiting > 1 ? "\(snap.waiting) 个会话在等你回话" : "\(e.provider.name) 在等你回话")
     }
 
     /// What to say when there is nothing to show. "读不到额度" is true and useless — each of
@@ -315,22 +342,6 @@ struct PanelView: View {
             Text(v).font(Theme.figures(16)).foregroundStyle(Theme.accent)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func eventRow(_ e: AgentEvent) -> some View {
-        Button {
-            onOpen(e.provider)
-        } label: {
-            HStack(spacing: Theme.s2) {
-                Circle().fill(Theme.accent).frame(width: 6, height: 6)
-                Text(e.text).font(Theme.sans(12)).foregroundStyle(Theme.text).lineLimit(1)
-                Spacer(minLength: Theme.s1)
-                Text(ago(e.at)).font(Theme.sans(11)).foregroundStyle(Theme.text2)
-            }
-            .padding(.horizontal, Theme.s3).padding(.vertical, 11)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 
     private var footer: some View {

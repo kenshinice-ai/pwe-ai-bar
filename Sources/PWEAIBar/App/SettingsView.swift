@@ -19,7 +19,10 @@ struct SettingsView: View {
         self.installHooks = installHooks; self.saveToken = saveToken; self.enableRealQuota = enableRealQuota
         self.prefs = prefs ?? .shared
         _tokenEditor = StateObject(wrappedValue: tokenEditor ?? TokenEditor(hasToken: Credentials.hasOwnToken))
-        _hookState = State(initialValue: (hookInstalled ?? HookProvider.isInstalled) ? "已安装" : "未安装")
+        let installed = hookInstalled ?? HookProvider.isInstalled
+        let current = HookProvider.installedScriptIsCurrent(
+            source: Bundle.module.url(forResource: "pwe-ai-bar-hook", withExtension: "sh"))
+        _hookState = State(initialValue: !installed ? "未安装" : current ? "已安装" : "脚本待更新")
     }
 
     var body: some View {
@@ -126,8 +129,10 @@ struct SettingsView: View {
                     Text("Claude Code hooks · \(hookState)")
                         .font(Theme.sans(12)).foregroundStyle(Theme.text2)
                     Spacer()
-                    Button("安装") { hookState = installHooks() ? "已安装" : "失败" }
-                        .font(Theme.sans(12))
+                    Button(hookState == "未安装" ? "安装" : "重新安装") {
+                        hookState = installHooks() ? "已安装" : "失败"
+                    }
+                    .font(Theme.sans(12))
                 }
             }
             row("离座时推送") {

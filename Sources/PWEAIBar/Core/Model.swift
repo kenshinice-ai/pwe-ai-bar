@@ -185,6 +185,7 @@ struct Snapshot {
     }
 
     var attention: AgentEvent? { events.first { $0.isAttention } }
+    var waiting: Int { events.filter(\.isAttention).count }
 
     /// Five channels for the wing, innermost first, in `Channel` order.
     func channels(dark: Bool = true) -> [ChannelHealth] {

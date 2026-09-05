@@ -143,4 +143,33 @@ final class HookTests: XCTestCase {
         _ = await reader.events()
         XCTAssertTrue(FileManager.default.fileExists(atPath: space.root.appendingPathComponent("events/e.json").path))
     }
+    /// The installed script is a copy. Shipping a fix inside it changes nothing on a machine
+    /// that already installed the old one, and the settings file looks identical either way —
+    /// so "已安装" would keep saying yes to a script from weeks ago.
+    func testStaleInstalledScriptIsDetectedAndRefreshedInPlace() throws {
+        let space = try TestSpace()
+        let source = try space.file("bundled/pwe-ai-bar-hook.sh", "#!/bin/bash\nexit 0\n")
+        let installed = HookProvider.script
+        let backup = try? Data(contentsOf: installed)
+        defer { if let backup { try? backup.write(to: installed) } }
+
+        // Nothing to compare against is not evidence of staleness.
+        XCTAssertTrue(HookProvider.installedScriptIsCurrent(source: nil))
+
+        try FileManager.default.createDirectory(at: installed.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try Data("#!/bin/bash\n# an older build\nexit 0\n".utf8).write(to: installed)
+        XCTAssertFalse(HookProvider.installedScriptIsCurrent(source: source))
+
+        // Refresh only touches a script the settings file already points at.
+        if HookProvider.isInstalled {
+            XCTAssertTrue(HookProvider.refreshScript(source: source))
+            XCTAssertTrue(HookProvider.installedScriptIsCurrent(source: source))
+            XCTAssertTrue(FileManager.default.isExecutableFile(atPath: installed.path))
+            XCTAssertFalse(HookProvider.refreshScript(source: source), "already current")
+        } else {
+            XCTAssertFalse(HookProvider.refreshScript(source: source))
+        }
+    }
+
 }

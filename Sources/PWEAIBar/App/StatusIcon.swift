@@ -34,9 +34,11 @@ enum StatusIcon {
 
         // An event outranks every measurement. Someone is waiting on you; the numbers can wait.
         if let a = snap.attention {
-            segments = [Segment(text: "●", colour: Theme.ns(dark ? Theme.amber : Theme.amberDeep)),
-                        Segment(text: "\(a.provider.name.split(separator: " ").first ?? "Claude") 在等你",
-                                colour: Theme.ns(dark ? Theme.amber : Theme.amberDeep))]
+            let tint = Theme.ns(dark ? Theme.amber : Theme.amberDeep)
+            let who = snap.waiting > 1 ? "\(snap.waiting) 个会话"
+                : String(a.provider.name.split(separator: " ").first ?? "Claude")
+            segments = [Segment(text: "●", colour: tint),
+                        Segment(text: "\(who) 在等你", colour: tint)]
         } else {
             switch mode {
             case .icon:
