@@ -16,16 +16,57 @@ import Foundation
 /// kind is reduced separately, by the event's own timestamp rather than the file's mtime, and a
 /// spent credit pool is reported as the separate fact it is — and only while it is recent.
 actor CodexProvider {
-    static let shared = CodexProvider()
+    /// Only this one talks to the machine. The live server is opt-in rather than a default, so
+    /// a test that forgets to pass one cannot silently spawn a process and assert against
+    /// whatever the developer's own account happens to say today.
+    static let shared = CodexProvider(server: .shared)
     static let sessions = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".codex/sessions")
     private let root: URL
     private let now: () -> Date
     private let tailBytes: Int
+    private let server: CodexAppServer?
+    private var live: CodexAppServer.Reading?
+    private var liveAt: Date?
+    private(set) var plan: String?
+    private(set) var resetCredits = 0
 
     init(root: URL = CodexProvider.sessions, now: @escaping () -> Date = Date.init,
-         tailBytes: Int = 4 << 20) {
-        self.root = root; self.now = now; self.tailBytes = tailBytes
+         tailBytes: Int = 4 << 20, server: CodexAppServer? = nil) {
+        self.root = root; self.now = now; self.tailBytes = tailBytes; self.server = server
+    }
+
+    /// Ask the app server first, fall back to the logs. The logs are a record of the last time
+    /// Codex ran; the server answers for right now, and carries the plan and the reset credits
+    /// that never reach a rollout file. Spawning a process is not free, so the answer is held
+    /// for a while — shorter once a window is close enough to matter.
+    func windows() async -> [QuotaWindow] {
+        if let reading = await liveReading(), !reading.windows.isEmpty {
+            plan = reading.planType
+            resetCredits = reading.resetCredits
+            return reading.windows
+        }
+        return logWindows()
+    }
+
+    private func liveReading() async -> CodexAppServer.Reading? {
+        if let live, let at = liveAt, now().timeIntervalSince(at) < ttl(live) { return live }
+        guard let server else { return nil }
+        guard let fresh = await server.read(), !fresh.windows.isEmpty else {
+            // Remember the miss for a minute: a machine without Codex should not spawn a process
+            // it does not have on every single refresh.
+            liveAt = now(); live = live ?? CodexAppServer.Reading()
+            return live?.windows.isEmpty == true ? nil : live
+        }
+        live = fresh; liveAt = now()
+        return fresh
+    }
+
+    private func ttl(_ reading: CodexAppServer.Reading) -> TimeInterval {
+        let band = reading.windows.map(\.band).max() ?? .calm
+        let soon = reading.windows.compactMap(\.resetsAt)
+            .map { $0.timeIntervalSince(now()) }.filter { $0 > 0 }.min() ?? .infinity
+        return band == .hot || soon < 600 ? 60 : band == .warm ? 120 : 300
     }
 
     private struct Record {
@@ -33,7 +74,7 @@ actor CodexProvider {
         let at: Date
     }
 
-    func windows() -> [QuotaWindow] {
+    private func logWindows() -> [QuotaWindow] {
         let date = now()
         var pools: [String: Record] = [:]
         for url in recentFiles(12) {
@@ -82,7 +123,7 @@ actor CodexProvider {
         return pct.isFinite && pct >= 0 && pct <= 100
     }
 
-    private static func name(minutes: Int?, key: String) -> String {
+    static func windowName(minutes: Int?, key: String) -> String {
         // Chinese numerals for the two everyone has, so Codex's rows read the same as Claude's;
         // digits for anything unusual, where being exact matters more than matching.
         switch minutes {
@@ -105,7 +146,7 @@ actor CodexProvider {
         }
         let expired = reset.map { $0 <= now } ?? false
         return QuotaWindow(id: "codex_\(minutes.map(String.init) ?? key)", provider: .codex,
-                           channel: .codex, title: name(minutes: minutes, key: key),
+                           channel: .codex, title: windowName(minutes: minutes, key: key),
                            percent: expired ? nil : pct, resetsAt: reset,
                            note: expired ? "待确认" : nil, observedAt: observed,
                            gradedBy: .local, isStale: expired,

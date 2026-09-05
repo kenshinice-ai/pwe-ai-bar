@@ -198,6 +198,15 @@ struct PanelView: View {
                         .frame(width: 13, height: 13)
                     Text(p.name).font(Theme.sans(12, 600)).foregroundStyle(Theme.text)
                         .lineLimit(1)
+                    // The provider's own word for the plan, printed as given. "team" is what the
+                    // account is called; deciding it should read "团队版" is inventing product.
+                    if let plan = snap.plans[p], !plan.isEmpty {
+                        Text(plan.uppercased()).font(Theme.sans(9, 600))
+                            .foregroundStyle(Theme.text2)
+                            .padding(.horizontal, 5).padding(.vertical, 1.5)
+                            .background(Capsule().fill(Theme.hairline))
+                            .lineLimit(1)
+                    }
                     Spacer(minLength: Theme.s1)
                     // Claude's numbers come live from an endpoint; Codex's come out of a session
                     // log and are exactly as old as its last run. Saying so is the difference

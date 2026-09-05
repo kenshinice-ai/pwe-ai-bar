@@ -10,7 +10,7 @@ final class RenderingTests: XCTestCase {
         let p = provider(space, clock: clock, credential: credential, http: HTTPStub([]))
         let rules = RuleEngine(defaults: space.defaults, away: { false }, remaining: { true })
         let store = Store(claude: p, rules: rules, readEvents: { [] },
-                          readLocal: { .init(trophy: Trophy(), context: nil, lastTurnAt: nil) }, readCodex: { [] },
+                          readLocal: { .init(trophy: Trophy(), context: nil, lastTurnAt: nil) }, readCodex: { ([], nil) },
                           deliver: { _, _ in XCTFail("Rendering must not deliver notifications"); return false },
                           tracks: { (false, false) })
         var snap = Snapshot()

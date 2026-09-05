@@ -21,7 +21,7 @@ final class Store: ObservableObject {
     private let rules: RuleEngine
     private let readEvents: () async -> [AgentEvent]
     private let readLocal: () async -> Transcript.Result
-    private let readCodex: () async -> [QuotaWindow]
+    private let readCodex: () async -> ([QuotaWindow], String?)
     private let deliver: (RuleEngine.Alert, Bool) async -> Bool
     private let tracks: () -> (claude: Bool, codex: Bool)
     private let eventInterval: TimeInterval
@@ -33,13 +33,16 @@ final class Store: ObservableObject {
     init(claude: ClaudeProvider = ClaudeProvider(), rules: RuleEngine? = nil,
          readEvents: (() async -> [AgentEvent])? = nil,
          readLocal: (() async -> Transcript.Result)? = nil,
-         readCodex: (() async -> [QuotaWindow])? = nil,
+         readCodex: (() async -> ([QuotaWindow], String?))? = nil,
          deliver: ((RuleEngine.Alert, Bool) async -> Bool)? = nil,
          tracks: (() -> (claude: Bool, codex: Bool))? = nil, eventInterval: TimeInterval = 1,
          lastActivity: Date = Date()) {
         self.claude = claude; self.rules = rules ?? RuleEngine()
         self.readEvents = readEvents ?? { await HookEventReader.shared.events() }
-        self.readCodex = readCodex ?? { await CodexProvider.shared.windows() }
+        self.readCodex = readCodex ?? {
+            let rows = await CodexProvider.shared.windows()
+            return (rows, await CodexProvider.shared.plan)
+        }
         if let readLocal { self.readLocal = readLocal }
         else {
             let pricing = Pricing.load()
@@ -120,7 +123,9 @@ final class Store: ObservableObject {
                 blocker = await claude.blocker
             }
             if tracks().codex {
-                snap.windows += await readCodex()
+                let (rows, plan) = await readCodex()
+                snap.windows += rows
+                snap.plans[.codex] = plan
             }
 
             // Both of these read hundreds of megabytes of session logs. They are actors on

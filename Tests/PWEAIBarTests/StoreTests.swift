@@ -23,7 +23,7 @@ final class StoreTests: XCTestCase {
         let rules = RuleEngine(defaults: space.defaults, away: { false }, remaining: { true })
         var delivered: [RuleEngine.Alert] = []
         let store = Store(claude: p, rules: rules, readEvents: { await reader.events() },
-                          readLocal: { .init(trophy: Trophy(), context: nil, lastTurnAt: nil) }, readCodex: { [] },
+                          readLocal: { .init(trophy: Trophy(), context: nil, lastTurnAt: nil) }, readCodex: { ([], nil) },
                           deliver: { alert, _ in delivered.append(alert); return true }, tracks: { (true, false) },
                           lastActivity: Date().addingTimeInterval(-7200))
         store.start(observeSystem: false)

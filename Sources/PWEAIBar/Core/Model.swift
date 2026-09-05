@@ -184,6 +184,10 @@ struct Snapshot {
             }
     }
 
+    /// What each provider calls the plan this account is on. Shown as-is: it is their word for
+    /// their own product, and translating "team" into anything else would be inventing meaning.
+    var plans: [Provider: String] = [:]
+
     var attention: AgentEvent? { events.first { $0.isAttention } }
     var waiting: Int { events.filter(\.isAttention).count }
 

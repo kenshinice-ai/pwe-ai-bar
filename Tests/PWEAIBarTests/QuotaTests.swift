@@ -84,4 +84,61 @@ final class QuotaTests: XCTestCase {
         XCTAssertEqual(local.band, .hot)
         XCTAssertFalse(local.confirmedExhausted)
     }
+    /// The app server answers for right now, which the rollout logs cannot: they only record
+    /// what Codex saw the last time it ran. It also carries two things the logs never do.
+    func testAppServerMappingKeepsPoolsApartAndReadsPlanAndResetCredits() async {
+        let json = """
+        {"rateLimits":{"limitId":"codex","primary":{"usedPercent":83,"windowDurationMins":300,"resetsAt":1788613424}},
+         "rateLimitsByLimitId":{
+           "codex":{"limitId":"codex","planType":"team",
+                    "primary":{"usedPercent":83,"windowDurationMins":300,"resetsAt":1788613424},
+                    "secondary":{"usedPercent":44,"windowDurationMins":10080,"resetsAt":1789105851},
+                    "rateLimitReachedType":null},
+           "premium":{"limitId":"premium","primary":null,"secondary":null,
+                      "rateLimitReachedType":"workspace_member_credits_depleted"}},
+         "rateLimitResetCredits":{"availableCount":2}}
+        """
+        let object = try! JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]
+        let reading = await CodexAppServer().map(object)
+
+        XCTAssertEqual(reading.planType, "team")
+        XCTAssertEqual(reading.resetCredits, 2)
+        XCTAssertEqual(reading.windows.map(\.percent), [83, 44, nil])
+        XCTAssertEqual(reading.windows.map(\.title), ["五小时窗口", "周窗口", "附加额度"])
+        XCTAssertEqual(reading.windows.map(\.id), ["codex_300", "codex_10080", "codex_credits"])
+        // The spent add-on pool is its own row, never the quota's headline.
+        XCTAssertFalse(reading.windows[0].confirmedExhausted)
+        XCTAssertTrue(reading.windows[2].confirmedExhausted)
+        XCTAssertEqual(reading.windows[0].resetsAt, Date(timeIntervalSince1970: 1788613424))
+    }
+
+    func testAppServerIgnoresNonsenseAndSurvivesAnEmptyAnswer() async {
+        let server = CodexAppServer()
+        for body in ["{}", #"{"rateLimitsByLimitId":{}}"#,
+                     #"{"rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":"lots"}}}}"#,
+                     #"{"rateLimitsByLimitId":{"codex":{"primary":{"usedPercent":140,"windowDurationMins":300}}}}"#] {
+            let object = try! JSONSerialization.jsonObject(with: Data(body.utf8)) as! [String: Any]
+            let reading = await server.map(object)
+            XCTAssertTrue(reading.windows.isEmpty, body)
+        }
+        // No usable reply at all means fall back to the logs, not report zero usage.
+        let quiet = CodexAppServer(locate: { "/nonexistent/codex" }, exchange: { _, _ in [] })
+        let none = await quiet.read()
+        XCTAssertNil(none)
+    }
+
+    /// Unsolicited notifications interleave with replies; matching by id is what keeps them out.
+    func testRepliesAreMatchedByIdNotByArrivalOrder() async {
+        let noise: [[String: Any]] = [
+            ["method": "remoteControl/status/changed", "params": ["status": "disabled"]],
+            ["id": 1, "result": ["userAgent": "x"]],
+            ["id": 2, "result": ["rateLimitsByLimitId": ["codex": ["planType": "pro",
+                "primary": ["usedPercent": 5, "windowDurationMins": 300]]]]],
+        ]
+        let server = CodexAppServer(locate: { "/bin/echo" }, exchange: { _, _ in noise })
+        let reading = await server.read()
+        XCTAssertEqual(reading?.planType, "pro")
+        XCTAssertEqual(reading?.windows.first?.percent, 5)
+    }
+
 }
