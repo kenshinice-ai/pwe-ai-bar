@@ -191,9 +191,12 @@ enum Probe {
     static func stress(into dir: String) {
         var snap = Snapshot()
         snap.windows = [
+            // Three hours into a five-hour window with 70 % gone: the pace line overshoots and
+            // the projection lands before the reset, which is the case worth drawing.
             QuotaWindow(id: "session", provider: .claude, channel: .session,
-                        title: "五小时窗口", percent: 3, severity: .normal,
-                        resetsAt: Date().addingTimeInterval(59), isActive: true),
+                        title: "五小时窗口", percent: 70, severity: .normal,
+                        resetsAt: Date().addingTimeInterval(2 * 3600), isActive: true,
+                        windowLength: 5 * 3600),
             QuotaWindow(id: "weekly_all", provider: .claude, channel: .week,
                         title: "周窗口", percent: 100, severity: .critical,
                         resetsAt: Date().addingTimeInterval(9 * 86400), confirmedExhausted: true),
@@ -234,6 +237,18 @@ enum Probe {
             shoot(AnyView(SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
                                        enableRealQuota: {})),
                   width: 380, dark: dark, to: dir + "/stress-settings-\(tag).png")
+
+            // One snapshot has one protagonist, and the two hero states worth checking are
+            // mutually exclusive: a spent window outranks everything, so the pace projection
+            // can never be seen in the same frame. Drop the exhausted weekly and draw the
+            // other one.
+            var racing = snap
+            racing.windows = snap.windows.filter { $0.id != "weekly_all" }
+            let paced = Store()
+            paced.injectForTesting(racing)
+            shoot(AnyView(PanelView(store: paced, onTrophy: {}, onSettings: {},
+                                    onOpen: { _ in }, onEnableQuota: {})),
+                  width: Theme.panelWidth, dark: dark, to: dir + "/stress-pace-\(tag).png")
         }
         for mode in MenuBarMode.allCases {
             let image = StatusIcon.render(snap, mode: mode, dark: true)

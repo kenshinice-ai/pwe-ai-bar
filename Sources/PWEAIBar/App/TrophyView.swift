@@ -33,10 +33,6 @@ struct TrophyView: View {
                     byModel
                     byDay
                     tokens
-                    Text("口径：按 API 目录价折算，缓存写取输入价 1.25×、缓存读 0.1×。"
-                         + "价目表是 pricing.json，改价改文件即可。")
-                        .font(Theme.sans(11)).foregroundStyle(Theme.text2)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(Theme.s4)
             }
@@ -118,29 +114,72 @@ struct TrophyView: View {
             }
             .frame(height: 48)
             if let first = t.byDay.first?.day, let last = t.byDay.last?.day {
-                Text("\(first) 至 \(last) · \(t.byDay.count) 个活跃日")
-                    .font(Theme.sans(11)).foregroundStyle(Theme.text2)
+                HStack(spacing: 4) {
+                    Text("\(first) 至 \(last) · \(t.byDay.count) 个活跃日")
+                        .font(Theme.sans(11)).foregroundStyle(Theme.text2)
+                    Spacer(minLength: Theme.s1)
+                    // Same reason the hourly chart needed one: without the tallest bar's value
+                    // the row is a silhouette, and every silhouette looks the same.
+                    if let top = t.byDay.max(by: { $0.usd < $1.usd }), top.usd > 0 {
+                        Text("最高 \(money(top.usd)) · \(top.day)")
+                            .font(Theme.figures(11, 500)).foregroundStyle(Theme.text)
+                    }
+                }
             }
         }
     }
 
     private var tokens: some View {
-        VStack(alignment: .leading, spacing: Theme.s2) {
+        let parts: [(String, Int)] = [("输入", t.tokens.input), ("输出", t.tokens.output),
+                                      ("缓存写", t.tokens.cacheWrite), ("缓存读", t.tokens.cacheRead)]
+        let total = max(parts.reduce(0) { $0 + $1.1 }, 1)
+        return VStack(alignment: .leading, spacing: Theme.s2) {
             Text("Token".uppercased()).brandLabel().foregroundStyle(Theme.text2)
-            grid("输入", t.tokens.input)
-            grid("输出", t.tokens.output)
-            grid("缓存写", t.tokens.cacheWrite)
-            grid("缓存读", t.tokens.cacheRead)
+            // Four numbers in a column hide the actual shape of this page: cache reads run two
+            // to three orders of magnitude past everything else, which four right-aligned
+            // figures make you notice only if you count digits. One bar says it at a glance,
+            // and it is the most surprising true thing here.
+            GeometryReader { g in
+                HStack(spacing: 0) {
+                    ForEach(Array(parts.enumerated()), id: \.offset) { i, part in
+                        Rectangle().fill(tokenColour(i))
+                            .frame(width: g.size.width * Double(part.1) / Double(total))
+                    }
+                }
+            }
+            .frame(height: 10).clipShape(Capsule())
+            ForEach(Array(parts.enumerated()), id: \.offset) { i, part in
+                grid(part.0, part.1, share: Double(part.1) / Double(total), swatch: tokenColour(i))
+            }
             Divider().overlay(Theme.hairline)
             grid("往返", t.turns, raw: true)
         }
     }
 
-    private func grid(_ k: String, _ v: Int, raw: Bool = false) -> some View {
+    /// Cache reads get the second colour because they are the cheap bulk — a tenth of the input
+    /// rate — and separating them is what makes the bar say something rather than just be long.
+    private func tokenColour(_ i: Int) -> Color {
+        i == 3 ? modelColour(0) : Theme.accent.opacity(0.4 + 0.2 * Double(i))
+    }
+
+    private func grid(_ k: String, _ v: Int, raw: Bool = false, share: Double? = nil,
+                      swatch: Color? = nil) -> some View {
         HStack {
+            if let swatch {
+                RoundedRectangle(cornerRadius: 2).fill(swatch).frame(width: 9, height: 9)
+            } else if share == nil, !raw {
+                Color.clear.frame(width: 9, height: 9)
+            }
             Text(k).font(Theme.sans(12)).foregroundStyle(Theme.text2)
             Spacer()
+            if let share, share >= 0.001 {
+                Text(share >= 0.1 ? "\(Int((share * 100).rounded()))%"
+                                  : String(format: "%.1f%%", share * 100))
+                    .font(Theme.figures(11, 400)).foregroundStyle(Theme.text2)
+                    .frame(width: 44, alignment: .trailing)
+            }
             Text(raw ? "\(v)" : big(v)).font(Theme.figures(12, 500)).foregroundStyle(Theme.text)
+                .frame(width: 72, alignment: .trailing)
         }
     }
 
@@ -177,11 +216,22 @@ struct TrophyView: View {
         return String(format: "$%.2f", v)
     }
 
-    private func big(_ v: Int) -> String {
+    /// Rounding can push a figure past the unit it was chosen for: 999,999,999 is under a
+    /// billion, so it lands in millions — and `%.1f` then prints it as "1000.0 M".
+    static func big(_ v: Int) -> String {
+        let units: [(limit: Double, unit: String, places: Int)] =
+            [(1e9, "B", 2), (1e6, "M", 1), (1e3, "K", 0)]
         let d = Double(v)
-        if d >= 1e9 { return String(format: "%.2f B", d / 1e9) }
-        if d >= 1e6 { return String(format: "%.1f M", d / 1e6) }
-        if d >= 1e3 { return String(format: "%.0f K", d / 1e3) }
+        for (i, u) in units.enumerated() where d >= u.limit {
+            let power = pow(10, Double(u.places))
+            if (d / u.limit * power).rounded() / power >= 1000, i > 0 {
+                let up = units[i - 1]
+                return String(format: "%.\(up.places)f %@", d / up.limit, up.unit)
+            }
+            return String(format: "%.\(u.places)f %@", d / u.limit, u.unit)
+        }
         return "\(v)"
     }
+
+    private func big(_ v: Int) -> String { Self.big(v) }
 }

@@ -86,11 +86,12 @@ enum ExtraProviders {
     }
 
     static func window(_ id: String, _ p: Provider, _ title: String,
-                               used: Double?, resetsAt: Date?, now: Date) -> QuotaWindow? {
+                               used: Double?, resetsAt: Date?, now: Date,
+                               length: TimeInterval? = nil) -> QuotaWindow? {
         guard let used = ExtraSource.percent(used) else { return nil }
         return QuotaWindow(id: "\(p.rawValue)_\(id)", provider: p, channel: p.channel, title: title,
                            percent: used, resetsAt: resetsAt, observedAt: now,
-                           gradedBy: .local, confirmedExhausted: used >= 99.5)
+                           gradedBy: .local, confirmedExhausted: used >= 99.5, windowLength: length)
     }
 
     // MARK: Cursor
@@ -265,12 +266,14 @@ enum ExtraProviders {
             if info["hideDailyQuota"] as? Bool != true,
                let left = ExtraSource.number(plan["dailyQuotaRemainingPercent"]),
                let row = window("daily", .devin, "每日额度", used: 100 - left,
-                                resetsAt: ExtraSource.date(plan["dailyQuotaResetAtUnix"]), now: now) {
+                                resetsAt: ExtraSource.date(plan["dailyQuotaResetAtUnix"]),
+                                now: now, length: 86400) {
                 windows.append(row)
             }
             if let left = ExtraSource.number(plan["weeklyQuotaRemainingPercent"]),
                let row = window("weekly", .devin, "每周额度", used: 100 - left,
-                                resetsAt: ExtraSource.date(plan["weeklyQuotaResetAtUnix"]), now: now) {
+                                resetsAt: ExtraSource.date(plan["weeklyQuotaResetAtUnix"]),
+                                now: now, length: 7 * 86400) {
                 windows.append(row)
             }
             guard !windows.isEmpty else { return nil }
@@ -298,7 +301,8 @@ enum ExtraProviders {
                   (period["type"] as? String) == "USAGE_PERIOD_TYPE_WEEKLY",
                   let row = window("weekly", .grok, "每周额度",
                                    used: ExtraSource.number(config["creditUsagePercent"]),
-                                   resetsAt: ExtraSource.date(period["end"]), now: now)
+                                   resetsAt: ExtraSource.date(period["end"]), now: now,
+                                   length: 7 * 86400)
             else { return nil }
             return ExtraSource.Reading(windows: [row])
         }

@@ -51,17 +51,25 @@ enum StatusIcon {
             case .full:
                 for p in providers(snap) {
                     segments.append(Segment(text: "", colour: tint(p.band, dark), mark: p.provider))
+                    // One countdown for the whole bar could only ever belong to one provider and
+                    // the reader had no way to tell which. Per provider it is answerable — but
+                    // only if it sits against the number it is counting down, which for Claude
+                    // means going between its two figures rather than after both of them.
+                    func clock(_ w: QuotaWindow) -> [Segment] {
+                        guard w.id == p.id, let c = countdown(w) else { return [] }
+                        return [Segment(text: "↻\(c)", colour: label.withAlphaComponent(0.55))]
+                    }
                     if p.provider == .claude,
                        let five = snap.window(.session), let week = snap.window(.week) {
                         segments.append(Segment(text: Readout.text(five, remaining: remaining), colour: tint(five.band, dark)))
+                        segments += clock(five)
                         segments.append(Segment(text: "/", colour: label.withAlphaComponent(0.45)))
                         segments.append(Segment(text: Readout.text(week, remaining: remaining), colour: tint(week.band, dark)))
+                        segments += clock(week)
                     } else {
                         segments.append(Segment(text: Readout.text(p, remaining: remaining), colour: tint(p.band, dark)))
+                        segments += clock(p)
                     }
-                }
-                if let c = countdown(snap) {
-                    segments.append(Segment(text: "↻\(c)", colour: label))
                 }
             }
         }
@@ -141,10 +149,15 @@ enum StatusIcon {
         h == .calm ? (dark ? .white : .black) : Theme.healthNS(h, dark: dark)
     }
 
-    /// Time until the active window rolls over — the number that actually tells you whether to
-    /// start something now or wait.
+    /// Time until the window rolls over — the number that actually tells you whether to start
+    /// something now or wait.
     private static func countdown(_ snap: Snapshot) -> String? {
-        guard let w = snap.protagonist, let at = w.resetsAt else { return nil }
+        guard let w = snap.protagonist else { return nil }
+        return countdown(w)
+    }
+
+    private static func countdown(_ w: QuotaWindow) -> String? {
+        guard let at = w.resetsAt else { return nil }
         let s = Int(at.timeIntervalSinceNow)
         guard s > 0 else { return nil }
         if s < 60 { return "<1m" }

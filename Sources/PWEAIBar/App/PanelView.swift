@@ -19,6 +19,11 @@ struct PanelView: View {
     var onOpen: (Provider) -> Void
     var onEnableQuota: () -> Void
 
+    /// Which feather the pointer is over, and which one has been clicked to stay. Hovering is
+    /// exploring; clicking is deciding, and clicking the same one again lets go.
+    @State private var hovered: Channel?
+    @State private var pinned: Channel?
+
     private var snap: Snapshot { store.snapshot }
 
     var body: some View {
@@ -95,11 +100,18 @@ struct PanelView: View {
 
             if let a = snap.attention {
                 waitingStage(a)
-            } else if let p = snap.protagonist {
+            } else if let p = focused {
                 HStack(alignment: .firstTextBaseline, spacing: Theme.s2) {
                     Text(Readout.text(p, remaining: prefs.showRemaining)).font(Theme.figures(36))
                         .foregroundStyle(Theme.health(p.band, dark: isDark))
                     Spacer()
+                    // Pinning is easy to do by accident and impossible to undo if the panel
+                    // never admits it happened. Clicking the same feather also releases it.
+                    if pinned != nil {
+                        Button("自动") { pinned = nil }
+                            .buttonStyle(.plain).font(Theme.sans(10.5))
+                            .foregroundStyle(Theme.accent)
+                    }
                     Text(resetText(p) ?? "").font(Theme.sans(11)).foregroundStyle(Theme.text2)
                 }
                 track(p).padding(.top, 11)
@@ -117,6 +129,7 @@ struct PanelView: View {
                         .lineLimit(1).truncationMode(.tail)
                 }
                 .padding(.top, Theme.s2)
+                paceLine(p)
             } else {
                 emptyState
             }
@@ -151,6 +164,55 @@ struct PanelView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(snap.waiting > 1 ? "\(snap.waiting) 个会话在等你回话" : "\(e.provider.name) 在等你回话")
+    }
+
+    /// The pace, and where it lands.
+    ///
+    /// Two numbers you would otherwise work out in your head: how fast this window is going, and
+    /// whether that rate gets you to the reset. It needs no history — the window's own length
+    /// says when it opened, and the percentage says how much has gone since — and it moves on
+    /// its own as you work, which is the only kind of live number worth putting here. Every
+    /// animated figure this app has tried told a lie at some point in its entrance.
+    ///
+    /// Straight-line, and it says so. A burst of Opus in the last ten minutes is not the same
+    /// as the same total spread evenly over four hours, and the wording never pretends it is.
+    @ViewBuilder
+    private func paceLine(_ w: QuotaWindow) -> some View {
+        if let rate = w.burnPerHour(at: Date()), let landing = w.projectedPercentAtReset(at: Date()) {
+            HStack(spacing: 4) {
+                Text("每小时 \(rate < 1 ? String(format: "%.1f", rate) : String(Int(rate.rounded())))%")
+                    .font(Theme.figures(11, 500)).foregroundStyle(Theme.text)
+                Text("·").foregroundStyle(Theme.text2)
+                if let out = w.projectedExhaustion(at: Date()) {
+                    Text("按这个节奏 \(clock(out)) 见底")
+                        .font(Theme.sans(11)).foregroundStyle(Theme.health(.hot, dark: isDark))
+                    if let reset = w.resetsAt {
+                        Text("早 \(span(reset.timeIntervalSince(out)))")
+                            .font(Theme.sans(11)).foregroundStyle(Theme.text2)
+                    }
+                } else {
+                    Text("到重置约 \(Int(min(100, landing).rounded()))%，用不完")
+                        .font(Theme.sans(11)).foregroundStyle(Theme.text2)
+                }
+                Spacer(minLength: 0)
+            }
+            .lineLimit(1)
+            .padding(.top, 5)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func clock(_ d: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "HH:mm"
+        return f.string(from: d)
+    }
+
+    private func span(_ seconds: TimeInterval) -> String {
+        let s = max(0, Int(seconds))
+        if s < 3600 { return "\(max(1, s / 60)) 分钟" }
+        let hours = s / 3600, minutes = (s % 3600) / 60
+        if s < 86400 { return minutes == 0 ? "\(hours) 小时" : "\(hours) 小时 \(minutes) 分" }
+        return "\(s / 86400) 天"
     }
 
     /// What to say when there is nothing to show. "读不到额度" is true and useless — each of
@@ -376,35 +438,67 @@ struct PanelView: View {
 
     private func gauge(_ w: CGFloat) -> some View {
         WingView(channels: snap.channels(), perFeather: true,
+                 highlight: pinned ?? hovered,
+                 onHover: { hovered = $0 },
+                 onPick: { pinned = pinned == $0 ? nil : $0 },
                  spoken: snap.spoken(remaining: prefs.showRemaining))
             .frame(width: w, height: w / BrandMark.aspect)
+    }
+
+    /// The reading the big number is showing: whichever feather you are pointing at or have
+    /// pinned, and otherwise whichever window is closest to stopping you.
+    ///
+    /// This is what the gauge is for. It was a hundred and twenty points of the panel that could
+    /// not be asked anything — five feathers standing for five channels, none of them reachable.
+    /// Now each one answers, and the space it takes is the price of the panel's navigation
+    /// rather than of its decoration.
+    private var focused: QuotaWindow? {
+        guard let channel = pinned ?? hovered else { return snap.protagonist }
+        if channel == .context { return contextWindow }
+        let mine = snap.windows.filter { $0.channel == channel }
+        return mine.max { $0.strain < $1.strain } ?? snap.protagonist
+    }
+
+    private var contextWindow: QuotaWindow? {
+        guard let c = snap.contextPercent else { return nil }
+        return QuotaWindow(id: "context", provider: .claude, channel: .context, title: "上下文",
+                           percent: c,
+                           severity: Severity(word: Health.grade(
+                               c, warm: Channel.context.warm,
+                               hot: Channel.context.hot) == .calm ? "normal" : "warning"))
     }
 
     /// A window with no ratio gets no bar. A credit pool that is simply gone is a state, not a
     /// fraction, and drawing it full-width beside Claude's 89 % claims a measurement we do not
     /// have. It gets a dashed rule: present, clearly not a scale.
-    @ViewBuilder
-    private func track(_ w: QuotaWindow) -> some View {
-        if let fraction = Readout.fill(w, remaining: prefs.showRemaining) {
-            GeometryReader { g in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Theme.sunk)
-                    // A genuine zero draws nothing. A minimum width keeps small values visible,
-                    // but painting a sliver on an empty window reads as "a little bit" when the
-                    // truth is "none".
-                    if fraction > 0 {
-                        Capsule().fill(Theme.health(w.band, dark: isDark))
-                            .frame(width: max(3, g.size.width * fraction))
-                    }
-                }
-            }
-            .frame(height: 6)
-        } else {
-            Capsule()
+    private func track(_ w: QuotaWindow) -> AnyView {
+        guard let fraction = Readout.fill(w, remaining: prefs.showRemaining) else {
+            // No ratio to draw: a dashed outline says "there is a window here and we cannot
+            // measure it", which a flat empty bar would read as zero.
+            return AnyView(Capsule()
                 .strokeBorder(Theme.health(w.band, dark: isDark).opacity(0.5),
                               style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
-                .frame(height: 6)
+                .frame(height: 6))
         }
+        // The pace projection is deliberately not drawn in here, and that was a change of mind
+        // worth recording. A mark at the projected position pins to the very end of the track in
+        // the one case that matters — a rate that eats everything left — where it reads as the
+        // end cap. Shading the doomed stretch instead turns the fill into a ghost, so a window
+        // with 30 % genuinely left looks empty. The bar has one job: where you are now. Where
+        // you are heading is a sentence, and `paceLine` says it more precisely than any tick.
+        return AnyView(GeometryReader { g in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Theme.sunk)
+                // A genuine zero draws nothing. A minimum width keeps small values visible, but
+                // painting a sliver on an empty window reads as "a little bit" when the truth
+                // is "none".
+                if fraction > 0 {
+                    Capsule().fill(Theme.health(w.band, dark: isDark))
+                        .frame(width: max(3, g.size.width * fraction))
+                }
+            }
+        }
+        .frame(height: 6))
     }
 
     /// The appearance of *this view*, not of the application.
@@ -442,13 +536,7 @@ struct PanelView: View {
     /// heading with the rest of what Claude reports.
     private func rows(for p: Provider) -> [QuotaWindow] {
         var out = snap.windows(of: p).sorted { ($0.percent ?? -1) > ($1.percent ?? -1) }
-        if p == .claude, let c = snap.contextPercent {
-            out.append(QuotaWindow(id: "context", provider: .claude, channel: .context,
-                                   title: "上下文", percent: c,
-                                   severity: Severity(word: Health.grade(
-                                       c, warm: Channel.context.warm,
-                                       hot: Channel.context.hot) == .calm ? "normal" : "warning")))
-        }
+        if p == .claude, let context = contextWindow { out.append(context) }
         if prefs.panelMode == .lean { out = Array(out.prefix(2)) }
         return out
     }

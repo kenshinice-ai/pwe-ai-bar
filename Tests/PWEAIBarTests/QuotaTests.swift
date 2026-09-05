@@ -141,4 +141,64 @@ final class QuotaTests: XCTestCase {
         XCTAssertEqual(reading?.windows.first?.percent, 5)
     }
 
+    /// The pace figures need no stored history: the window's own length says when it opened,
+    /// and the percentage says how much has gone since. What they must not do is answer at all
+    /// when the answer would be noise.
+    func testPaceProjectionAnswersOnlyWhenTheAnswerMeansSomething() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func window(percent: Double?, resetIn: TimeInterval, length: TimeInterval?,
+                    stale: Bool = false) -> QuotaWindow {
+            QuotaWindow(id: "five_hour", provider: .claude, channel: .session, title: "t",
+                        percent: percent, resetsAt: now.addingTimeInterval(resetIn),
+                        isStale: stale, confirmedExhausted: (percent ?? 0) >= 99.5,
+                        windowLength: length)
+        }
+        // Three hours into a five-hour window with 70% gone: 23.3%/h, and the line crosses 100%
+        // about 43 minutes before the window would have rolled over.
+        let racing = window(percent: 70, resetIn: 2 * 3600, length: 5 * 3600)
+        XCTAssertEqual(racing.burnPerHour(at: now) ?? 0, 23.33, accuracy: 0.01)
+        XCTAssertEqual(racing.projectedPercentAtReset(at: now) ?? 0, 116.67, accuracy: 0.01)
+        // Started 3 h ago, 70 % gone, so 100 % lands at start + 3 h × 100/70 ≈ now + 77 min —
+        // about 43 minutes before the window would have rolled over on its own.
+        let out = try? XCTUnwrap(racing.projectedExhaustion(at: now))
+        XCTAssertEqual(out?.timeIntervalSince(now) ?? 0, 4_629, accuracy: 60)
+        XCTAssertEqual((racing.resetsAt?.timeIntervalSince(out ?? now)) ?? 0, 2_571, accuracy: 60)
+
+        // Comfortably inside the window: there is a rate, but "you will not run out" is not news.
+        let easy = window(percent: 20, resetIn: 2 * 3600, length: 5 * 3600)
+        XCTAssertNotNil(easy.burnPerHour(at: now))
+        XCTAssertEqual(easy.projectedPercentAtReset(at: now) ?? 0, 33.33, accuracy: 0.01)
+        XCTAssertNil(easy.projectedExhaustion(at: now))
+
+        for (label, w) in [
+            ("no window length", window(percent: 70, resetIn: 3600, length: nil)),
+            ("no reading", window(percent: nil, resetIn: 3600, length: 5 * 3600)),
+            ("barely started", window(percent: 70, resetIn: 5 * 3600 - 60, length: 5 * 3600)),
+            ("too little used", window(percent: 2, resetIn: 3600, length: 5 * 3600)),
+            ("already spent", window(percent: 100, resetIn: 3600, length: 5 * 3600)),
+            ("stale reading", window(percent: 70, resetIn: 3600, length: 5 * 3600, stale: true)),
+            ("already reset", window(percent: 70, resetIn: -60, length: 5 * 3600)),
+        ] {
+            XCTAssertNil(w.projectedExhaustion(at: now), label)
+            XCTAssertNil(w.burnPerHour(at: now), label)
+        }
+    }
+
+    /// A weekly window is seven days long whichever way the reading arrives, including out of
+    /// the disk cache — without that, the projection silently stops working after a restart.
+    func testWindowLengthsSurviveParsingAndTheDiskCache() async throws {
+        let space = try TestSpace(); let clock = TestClock(); let credential = FakeCredential()
+        let body = #"{"limits":[{"kind":"session","percent":40,"resets_at":"2027-01-15T08:00:00Z"},"#
+            + #"{"kind":"weekly_all","percent":10,"resets_at":"2027-01-20T08:00:00Z"}]}"#
+        let http = HTTPStub([(200, body, [:])])
+        let p = provider(space, clock: clock, credential: credential, http: http)
+        let first = await p.windows()
+        XCTAssertEqual(first.windows.map(\.windowLength), [5 * 3600, 7 * 86400])
+
+        let restart = provider(space, clock: clock, credential: credential, http: http)
+        let cached = await restart.windows()
+        XCTAssertEqual(cached.windows.map(\.windowLength), [5 * 3600, 7 * 86400],
+                       "a length lost on reload is a projection that quietly stops working")
+    }
+
 }

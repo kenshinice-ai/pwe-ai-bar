@@ -58,6 +58,50 @@ struct QuotaWindow: Identifiable {
     var isStale = false
     var confirmedExhausted = false
 
+    /// How long the window runs for. Known where the provider says so — Claude's two are fixed,
+    /// Codex reports `window_minutes` — and nil everywhere else rather than guessed.
+    var windowLength: TimeInterval?
+
+    /// When this window would hit its limit if the pace so far kept up.
+    ///
+    /// No history needed and none kept: the window's own length says when it opened, and the
+    /// percentage says how much of it has gone since. Straight-line, and said as such — a burst
+    /// of Opus in the last ten minutes is not the same as the same total spread over four hours.
+    ///
+    /// Deliberately nil unless it lands *before* the reset. "You will not run out" is not news;
+    /// the whole value of the figure is the case where you will, and how long you have.
+    func projectedExhaustion(at now: Date) -> Date? {
+        guard let pace = pace(at: now) else { return nil }
+        let at = pace.start.addingTimeInterval(pace.elapsed * 100 / pace.percent)
+        return at > now && at < pace.reset ? at : nil
+    }
+
+    /// Percent per hour so far. The same unit as the bar beside it, which is the point: "每小时
+    /// 18%" can be checked against the bar by eye, where tokens per minute cannot.
+    func burnPerHour(at now: Date) -> Double? {
+        guard let pace = pace(at: now) else { return nil }
+        return pace.percent / (pace.elapsed / 3600)
+    }
+
+    /// Where the pace line lands when the window rolls over. Uncapped on purpose: 140 % is the
+    /// answer to "am I going to make it", and clamping it to 100 throws that away.
+    func projectedPercentAtReset(at now: Date) -> Double? {
+        guard let pace = pace(at: now) else { return nil }
+        let total = pace.reset.timeIntervalSince(pace.start)
+        return pace.percent * total / pace.elapsed
+    }
+
+    private func pace(at now: Date)
+        -> (percent: Double, start: Date, reset: Date, elapsed: TimeInterval)? {
+        guard let percent, percent >= 5, percent < 99.5, !isStale,
+              let length = windowLength, let reset = resetsAt, reset > now else { return nil }
+        let start = reset.addingTimeInterval(-length)
+        let elapsed = now.timeIntervalSince(start)
+        // Ten minutes into a five-hour window, two turns extrapolate to anything at all.
+        guard elapsed > max(300, length * 0.05) else { return nil }
+        return (percent, start, reset, elapsed)
+    }
+
     func canNotify(at now: Date) -> Bool {
         !isStale && observedAt <= now && now.timeIntervalSince(observedAt) <= 600
             && (resetsAt.map { $0 > now } ?? true)

@@ -344,7 +344,9 @@ actor ClaudeProvider {
                                    isActive: l["is_active"] as? Bool ?? false, observedAt: now(),
                                    gradedBy: recognized ? .server : .local,
                                    confirmedExhausted: (pct ?? 0) >= 99.5
-                                       || ["exhausted", "rejected"].contains(word?.lowercased() ?? "")))
+                                       || ["exhausted", "rejected"].contains(word?.lowercased() ?? ""),
+                                   windowLength: channel == .session ? 5 * 3600
+                                       : channel == .week ? 7 * 86400 : nil))
         }
         for (key, channel) in [("five_hour", Channel.session), ("seven_day", Channel.week)]
         where !out.contains(where: { $0.channel == channel }) {
@@ -352,7 +354,8 @@ actor ClaudeProvider {
                   pct.isFinite, pct >= 0, pct <= 100 else { continue }
             out.append(QuotaWindow(id: key, provider: .claude, channel: channel, title: title(key), percent: pct,
                                    resetsAt: (node["resets_at"] as? String).flatMap(ISO8601DateFormatter.parse),
-                                   observedAt: now(), gradedBy: .local, confirmedExhausted: pct >= 99.5))
+                                   observedAt: now(), gradedBy: .local, confirmedExhausted: pct >= 99.5,
+                                   windowLength: channel == .session ? 5 * 3600 : 7 * 86400))
         }
         let others = out.filter { $0.channel == .other }
         if others.count > 1, let worst = others.max(by: { $0.strain < $1.strain }) {
@@ -397,7 +400,9 @@ actor ClaudeProvider {
                                percent: pct, severity: Severity(word: r["severity"] as? String),
                                resetsAt: (r["resetsAt"] as? Double).map { Date(timeIntervalSince1970: $0) },
                                isActive: r["isActive"] as? Bool ?? false, observedAt: Date(timeIntervalSince1970: at),
-                               gradedBy: grader, confirmedExhausted: r["exhausted"] as? Bool ?? false)
+                               gradedBy: grader, confirmedExhausted: r["exhausted"] as? Bool ?? false,
+                               windowLength: channel == .session ? 5 * 3600
+                                   : channel == .week ? 7 * 86400 : nil)
         }
     }
 
