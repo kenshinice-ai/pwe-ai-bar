@@ -24,6 +24,9 @@ final class Store: ObservableObject {
     private let readCodex: () async -> ([QuotaWindow], String?)
     private let deliver: (RuleEngine.Alert, Bool) async -> Bool
     private let tracks: () -> (claude: Bool, codex: Bool)
+    private let tracksExtra: (Provider) -> Bool
+    private let readExtras: ([Provider]) async -> ExtraStore.Result
+    private func tracks(extra p: Provider) -> Bool { tracksExtra(p) }
     private let eventInterval: TimeInterval
     private var eventTimer: Timer?
     private var eventsInFlight = false
@@ -35,7 +38,10 @@ final class Store: ObservableObject {
          readLocal: (() async -> Transcript.Result)? = nil,
          readCodex: (() async -> ([QuotaWindow], String?))? = nil,
          deliver: ((RuleEngine.Alert, Bool) async -> Bool)? = nil,
-         tracks: (() -> (claude: Bool, codex: Bool))? = nil, eventInterval: TimeInterval = 1,
+         tracks: (() -> (claude: Bool, codex: Bool))? = nil,
+         tracksExtra: ((Provider) -> Bool)? = nil,
+         readExtras: (([Provider]) async -> ExtraStore.Result)? = nil,
+         eventInterval: TimeInterval = 1,
          lastActivity: Date = Date()) {
         self.claude = claude; self.rules = rules ?? RuleEngine()
         self.readEvents = readEvents ?? { await HookEventReader.shared.events() }
@@ -50,6 +56,8 @@ final class Store: ObservableObject {
         }
         self.deliver = deliver ?? { await Notifier.shared.deliver($0, away: $1) }
         self.tracks = tracks ?? { (Prefs.shared.trackClaude, Prefs.shared.trackCodex) }
+        self.tracksExtra = tracksExtra ?? { p in MainActor.assumeIsolated { Prefs.shared.tracks(p) } }
+        self.readExtras = readExtras ?? { await ExtraStore.shared.read($0) }
         self.eventInterval = eventInterval
         self.lastActivity = lastActivity
     }
@@ -126,6 +134,16 @@ final class Store: ObservableObject {
                 let (rows, plan) = await readCodex()
                 snap.windows += rows
                 snap.plans[.codex] = plan
+            }
+            // The other five, in parallel and each on its own clock. None of them may hold up
+            // the two that this app is actually about.
+            let extras = Provider.allCases.filter {
+                $0 != .claude && $0 != .codex && $0.unavailableReason == nil && tracks(extra: $0)
+            }
+            if !extras.isEmpty {
+                let result = await readExtras(extras)
+                snap.windows += result.windows
+                snap.plans.merge(result.plans) { _, new in new }
             }
 
             // Both of these read hundreds of megabytes of session logs. They are actors on

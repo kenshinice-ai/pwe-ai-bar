@@ -104,10 +104,16 @@ struct PanelView: View {
                 }
                 track(p).padding(.top, 11)
                 HStack(spacing: 5) {
-                    ProviderMarkView(provider: p.provider, tint: Theme.text2)
+                    ProviderMarkView(provider: p.provider,
+                                     tint: p.confirmedExhausted ? Theme.health(.hot, dark: isDark) : Theme.text2)
                         .frame(width: 10, height: 10)
-                    Text("\(p.provider.name) · \(p.title) · \(prefs.showRemaining ? Readout.label.remaining : Readout.label.used)")
-                        .font(Theme.sans(11)).foregroundStyle(Theme.text2)
+                    // Spent is a state, not a reading: "剩余" under a zero is the wrong caption,
+                    // and how long you are stopped for is the only thing left worth saying.
+                    Text(p.confirmedExhausted
+                         ? "\(p.provider.name) · \(p.title) · \(waitText(p))"
+                         : "\(p.provider.name) · \(p.title) · \(prefs.showRemaining ? Readout.label.remaining : Readout.label.used)")
+                        .font(Theme.sans(11))
+                        .foregroundStyle(p.confirmedExhausted ? Theme.text : Theme.text2)
                         .lineLimit(1).truncationMode(.tail)
                 }
                 .padding(.top, Theme.s2)
@@ -445,6 +451,19 @@ struct PanelView: View {
         }
         if prefs.panelMode == .lean { out = Array(out.prefix(2)) }
         return out
+    }
+
+    /// How long you are stopped for, said as a duration rather than a clock time. "23:10 重置"
+    /// makes you do the arithmetic; "还有 1 小时 26 分" is the answer you were going to work out.
+    private func waitText(_ w: QuotaWindow) -> String {
+        guard let at = w.resetsAt else { return "等待重置" }
+        let s = Int(at.timeIntervalSinceNow)
+        guard s > 0 else { return "应该已经重置" }
+        if s < 60 { return "不到 1 分钟就恢复" }
+        if s < 3600 { return "还有 \(s / 60) 分钟" }
+        let hours = s / 3600, minutes = (s % 3600) / 60
+        if s < 86400 { return minutes == 0 ? "还有 \(hours) 小时" : "还有 \(hours) 小时 \(minutes) 分" }
+        return "还有 \(s / 86400) 天"
     }
 
     private func resetText(_ w: QuotaWindow) -> String? {

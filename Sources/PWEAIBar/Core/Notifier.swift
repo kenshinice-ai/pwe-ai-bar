@@ -8,13 +8,16 @@ import UserNotifications
 /// things that are actually waiting on you. Notification Center is the one that survives you
 /// being in another Space, and the only one that can carry buttons.
 @MainActor
-final class Notifier: NSObject, UNUserNotificationCenterDelegate {
+final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
 
     static let shared = Notifier()
     var onOpen: ((Provider) -> Void)?
 
     private var authorizationTask: Task<Permission, Never>?
     private var refusedAt: Date?
+    /// True once the OS has actually said no. The panel says so, because an alert that cannot
+    /// be delivered anywhere still has to reach the person somehow.
+    @Published private(set) var systemChannelRefused = false
     private var auxiliaryAttempts: [String: Date] = [:]
 
     /// Refused is not the same as failed. Notification permission is asked for the first time we
@@ -32,14 +35,21 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             case .authorized, .provisional, .ephemeral: return .granted
             case .denied: return .refused
             default:
-                return (try? await center.requestAuthorization(options: [.alert, .sound])) == true
-                    ? .granted : .refused
+                do {
+                    // A thrown error is not an answer. Treating it as one is how an alert gets
+                    // marked delivered and silently dropped, which is worse than never firing.
+                    return try await center.requestAuthorization(options: [.alert, .sound])
+                        ? .granted : .refused
+                } catch {
+                    return .unavailable
+                }
             }
         }
         authorizationTask = task
         let result = await task.value
         authorizationTask = nil
         if result == .refused { refusedAt = Date() }
+        systemChannelRefused = result == .refused
         return result
     }
 
@@ -85,6 +95,47 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                 UNNotificationRequest(identifier: a.id, content: n, trigger: nil))
         } catch { return false }
         return true
+    }
+
+    /// Prints what the notification system actually thinks, then tries one real delivery.
+    func diagnose() async {
+        let center = UNUserNotificationCenter.current()
+        start()
+        let before = await center.notificationSettings()
+        print("授权状态   \(Self.word(before.authorizationStatus))")
+        print("提醒样式   \(before.alertStyle.rawValue)   通知中心 \(before.notificationCenterSetting.rawValue)")
+        if before.authorizationStatus == .notDetermined {
+            do {
+                let granted = try await center.requestAuthorization(options: [.alert, .sound])
+                print("请求授权   \(granted ? "同意" : "拒绝")")
+            } catch {
+                print("请求授权   抛错：\(error.localizedDescription)")
+                print("           这不是拒绝。当成拒绝处理会让提醒被静静丢掉。")
+            }
+        }
+        let after = await center.notificationSettings()
+        print("现在状态   \(Self.word(after.authorizationStatus))")
+        let content = UNMutableNotificationContent()
+        content.title = "PWE AI Bar 自检"
+        content.body = "这条能看到，说明通知这条路是通的。"
+        do {
+            try await center.add(UNNotificationRequest(identifier: "pwe-selftest",
+                                                       content: content, trigger: nil))
+            print("投递测试   系统已接受")
+        } catch {
+            print("投递测试   失败：\(error.localizedDescription)")
+        }
+    }
+
+    static func word(_ status: UNAuthorizationStatus) -> String {
+        switch status {
+        case .authorized: return "已授权"
+        case .denied: return "已拒绝"
+        case .notDetermined: return "尚未询问"
+        case .provisional: return "临时授权"
+        case .ephemeral: return "短期授权"
+        @unknown default: return "未知(\(status.rawValue))"
+        }
     }
 
     /// A plain POST to whatever endpoint the user configured — ntfy, Bark, a webhook. No account

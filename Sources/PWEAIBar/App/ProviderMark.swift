@@ -20,6 +20,11 @@ enum ProviderMark {
         switch p {
         case .claude: color.setFill(); burst(in: rect).fill()
         case .gemini: color.setFill(); spark(in: rect).fill()
+        case .cursor: stroke(cube(in: rect), in: rect, color: color, weight: 0.16)
+        case .copilot: color.setFill(); goggles(in: rect).fill()
+        case .devin: stroke(comb(in: rect), in: rect, color: color, weight: 0.15)
+        case .grok: color.setFill(); slash(in: rect).fill()
+        case .antigravity: stroke(chevrons(in: rect), in: rect, color: color, weight: 0.2)
         case .codex:
             guard let ctx = NSGraphicsContext.current?.cgContext else { return }
             ctx.saveGState()
@@ -28,6 +33,109 @@ enum ProviderMark {
             ctx.fillPath()
             ctx.restoreGState()
         }
+    }
+
+    /// Outline marks are stroked rather than filled: at 13 pt a filled cube is a blob and a
+    /// filled hexagon is a dot. Stroke weight scales with the mark for the same reason the
+    /// rosette's does — a fixed width closes every gap at menu-bar size.
+    private static func stroke(_ path: CGPath, in rect: CGRect, color: NSColor, weight: CGFloat) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let r = min(rect.width, rect.height) / 2
+        ctx.saveGState()
+        ctx.setFillColor(color.cgColor)
+        ctx.addPath(path.copy(strokingWithWidth: max(1, r * weight),
+                              lineCap: .round, lineJoin: .round, miterLimit: 10))
+        ctx.fillPath()
+        ctx.restoreGState()
+    }
+
+    /// Cursor — the isometric cube, drawn as its silhouette plus the two inner edges that make
+    /// it read as a solid rather than a hexagon. Those two edges are the whole mark: without
+    /// them it is Devin's outline, and the pair have to be told apart in the same list.
+    private static func cube(in rect: CGRect) -> CGPath {
+        let c = CGPoint(x: rect.midX, y: rect.midY)
+        let r = min(rect.width, rect.height) / 2 * 0.86
+        let w = r * 0.87                    // half-width of the hex silhouette
+        let h = r * 0.5                     // half-height of a face's top edge
+        let top = CGPoint(x: c.x, y: c.y + r)
+        let bottom = CGPoint(x: c.x, y: c.y - r)
+        let upperL = CGPoint(x: c.x - w, y: c.y + h), upperR = CGPoint(x: c.x + w, y: c.y + h)
+        let lowerL = CGPoint(x: c.x - w, y: c.y - h), lowerR = CGPoint(x: c.x + w, y: c.y - h)
+        let path = CGMutablePath()
+        path.addLines(between: [top, upperR, lowerR, bottom, lowerL, upperL, top])
+        path.move(to: upperL); path.addLine(to: c)
+        path.addLine(to: upperR)
+        path.move(to: c); path.addLine(to: bottom)
+        return path
+    }
+
+    /// GitHub Copilot — the visor. Horizontal where every other mark here is radial, which is
+    /// what makes it findable in a row of them.
+    private static func goggles(in rect: CGRect) -> NSBezierPath {
+        let c = CGPoint(x: rect.midX, y: rect.midY)
+        let r = min(rect.width, rect.height) / 2
+        let path = NSBezierPath(roundedRect:
+            CGRect(x: c.x - r * 0.98, y: c.y - r * 0.62, width: r * 1.96, height: r * 1.24),
+            xRadius: r * 0.62, yRadius: r * 0.62)
+        // Two eyes punched out, even-odd. Slits rather than dots: a pair of dots at 13 pt reads
+        // as a colon lying down.
+        for side in [-1.0, 1.0] as [CGFloat] {
+            path.append(NSBezierPath(roundedRect:
+                CGRect(x: c.x + side * r * 0.46 - r * 0.17, y: c.y - r * 0.3,
+                       width: r * 0.34, height: r * 0.6),
+                xRadius: r * 0.17, yRadius: r * 0.17))
+        }
+        path.windingRule = .evenOdd
+        return path
+    }
+
+    /// Devin — a hexagon with a hollow centre. The plain outline of the cube without its inner
+    /// edges, which is exactly why the cube keeps them.
+    private static func comb(in rect: CGRect) -> CGPath {
+        let c = CGPoint(x: rect.midX, y: rect.midY)
+        let r = min(rect.width, rect.height) / 2 * 0.84
+        let path = CGMutablePath()
+        for scale in [1.0, 0.42] as [CGFloat] {
+            var points: [CGPoint] = []
+            for i in 0..<6 {
+                let a = CGFloat(i) * .pi / 3 + .pi / 6
+                points.append(CGPoint(x: c.x + cos(a) * r * scale, y: c.y + sin(a) * r * scale))
+            }
+            points.append(points[0])
+            path.addLines(between: points)
+        }
+        return path
+    }
+
+    /// Grok — the double slash. Two parallelograms leaning the same way; the only diagonal
+    /// silhouette in the set.
+    private static func slash(in rect: CGRect) -> NSBezierPath {
+        let c = CGPoint(x: rect.midX, y: rect.midY)
+        let r = min(rect.width, rect.height) / 2
+        let lean = r * 0.42                 // horizontal travel from bottom to top
+        let path = NSBezierPath()
+        for (offset, width) in [(-r * 0.42, r * 0.3), (r * 0.42, r * 0.3)] {
+            let x = c.x + offset
+            path.move(to: CGPoint(x: x - lean, y: c.y - r * 0.92))
+            path.line(to: CGPoint(x: x - lean + width, y: c.y - r * 0.92))
+            path.line(to: CGPoint(x: x + lean + width, y: c.y + r * 0.92))
+            path.line(to: CGPoint(x: x + lean, y: c.y + r * 0.92))
+            path.close()
+        }
+        return path
+    }
+
+    /// Antigravity — two stacked chevrons pointing up. The name is the mark.
+    private static func chevrons(in rect: CGRect) -> CGPath {
+        let c = CGPoint(x: rect.midX, y: rect.midY)
+        let r = min(rect.width, rect.height) / 2
+        let path = CGMutablePath()
+        for y in [r * 0.42, -r * 0.34] as [CGFloat] {
+            path.addLines(between: [CGPoint(x: c.x - r * 0.8, y: c.y + y - r * 0.42),
+                                    CGPoint(x: c.x, y: c.y + y + r * 0.3),
+                                    CGPoint(x: c.x + r * 0.8, y: c.y + y - r * 0.42)])
+        }
+        return path
     }
 
     /// Claude — a radial burst of tapered blades.

@@ -9,6 +9,7 @@ struct SettingsView: View {
     var saveToken: (String) async -> ClaudeProvider.TokenUpdate
     var enableRealQuota: () -> Void
     @State private var hookState: String
+    @State private var states: [Provider: String] = [:]
     @State private var token: String = ""
     @StateObject private var tokenEditor: TokenEditor
 
@@ -118,11 +119,12 @@ struct SettingsView: View {
                 }
             }
             row("追踪") {
-                VStack(alignment: .leading, spacing: Theme.s1) {
-                    Toggle("Claude Code", isOn: $prefs.trackClaude)
-                    Toggle("Codex", isOn: $prefs.trackCodex)
+                VStack(alignment: .leading, spacing: 7) {
+                    ForEach(Provider.allCases, id: \.rawValue) { p in providerRow(p) }
+                    Text("关掉的不会被查询。「未安装」指本机找不到该工具存下的登录信息。")
+                        .font(Theme.sans(10)).foregroundStyle(Theme.text2)
+                        .fixedSize(horizontal: false, vertical: true).padding(.top, 2)
                 }
-                .toggleStyle(.switch).font(Theme.sans(12))
             }
             row("会话事件") {
                 HStack {
@@ -156,6 +158,10 @@ struct SettingsView: View {
         // System blue on a navy-and-amber panel reads as someone else's app. One tint at the
         // root covers every switch, picker and button below it.
         .tint(Theme.accent)
+        .task {
+            let found = await Task.detached(priority: .userInitiated) { Self.detect() }.value
+            states = found
+        }
     }
 
     private var sourceLine: String {
@@ -166,6 +172,49 @@ struct SettingsView: View {
             return "已选择共享钥匙串，连接结果请查看额度面板。"
         }
         return "还没接真实额度，只有本地估算——而且不会有任何弹框。"
+    }
+
+    /// One line per provider, whether or not it is here. A tool that is installed but signed
+    /// out and a tool that was never installed look identical when both are simply absent from
+    /// the panel — so both are listed, and each says which it is.
+    private func providerRow(_ p: Provider) -> some View {
+        let reason = p.unavailableReason
+        let detected = states[p]
+        return HStack(spacing: 7) {
+            ProviderMarkView(provider: p, tint: reason == nil ? Theme.text : Theme.text2)
+                .frame(width: 13, height: 13)
+            Text(p.name).font(Theme.sans(12)).foregroundStyle(reason == nil ? Theme.text : Theme.text2)
+                .lineLimit(1)
+            Spacer(minLength: Theme.s1)
+            // Empty until detection comes back off the main thread — a dash that turns into
+            // "已登录" is honest; a guess that turns out wrong is not.
+            Text(reason ?? detected ?? "…").font(Theme.sans(10)).foregroundStyle(Theme.text2)
+                .lineLimit(1)
+            Toggle("", isOn: Binding(get: { prefs.tracks(p) },
+                                     set: { prefs.setTracking(p, $0) }))
+                .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                .disabled(reason != nil)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(p.name)，\(reason ?? detected ?? "检测中")")
+    }
+
+    /// Detection only: whether a credential exists, never whether it still works. Saying
+    /// "已连接" before a single request has come back would be inventing a fact.
+    ///
+    /// Run once, off the main thread, and never from inside a view body: finding these costs
+    /// `sqlite3` and `security` subprocesses, and SwiftUI re-evaluates a body far more often
+    /// than anyone installs an IDE.
+    nonisolated private static func detect() -> [Provider: String] {
+        var out: [Provider: String] = [:]
+        for p in Provider.allCases where p.unavailableReason == nil {
+            switch p {
+            case .claude: out[p] = Credentials.sharedItemExists() ? "已登录" : "未登录"
+            case .codex:  out[p] = CodexAppServer.executable() != nil ? "已安装" : "未安装"
+            default:      out[p] = ExtraProviders.installed(p) ? "检测到" : "未安装"
+            }
+        }
+        return out
     }
 
     private func row<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {

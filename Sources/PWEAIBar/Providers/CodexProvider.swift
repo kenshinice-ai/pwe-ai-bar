@@ -150,7 +150,7 @@ actor CodexProvider {
                            percent: expired ? nil : pct, resetsAt: reset,
                            note: expired ? "待确认" : nil, observedAt: observed,
                            gradedBy: .local, isStale: expired,
-                           confirmedExhausted: !expired && pct >= 100)
+                           confirmedExhausted: !expired && pct >= 99.5)
     }
 
     private func recentFiles(_ limit: Int) -> [URL] {

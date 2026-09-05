@@ -33,10 +33,11 @@ enum Probe {
         // The provider marks on their own, big enough to judge. At 13 pt a silhouette either
         // reads instantly or it does not, and squinting at the bar cannot tell you which.
         for dark in [true, false] {
-            let sheet = NSImage(size: NSSize(width: 220, height: 80))
+            let width = CGFloat(Provider.allCases.count) * 70 + 20
+            let sheet = NSImage(size: NSSize(width: width, height: 80))
             sheet.lockFocus()
             NSColor(Theme.hex(dark ? Theme.navy : Theme.paper)).setFill()
-            NSRect(x: 0, y: 0, width: 220, height: 80).fill()
+            NSRect(x: 0, y: 0, width: width, height: 80).fill()
             for (i, p) in Provider.allCases.enumerated() {
                 let big = NSRect(x: 20 + CGFloat(i) * 70, y: 30, width: 44, height: 44)
                 ProviderMark.draw(p, in: big, color: NSColor(Theme.hex(dark ? Theme.amber : Theme.amberDeep)))
@@ -195,7 +196,7 @@ enum Probe {
                         resetsAt: Date().addingTimeInterval(59), isActive: true),
             QuotaWindow(id: "weekly_all", provider: .claude, channel: .week,
                         title: "周窗口", percent: 100, severity: .critical,
-                        resetsAt: Date().addingTimeInterval(9 * 86400)),
+                        resetsAt: Date().addingTimeInterval(9 * 86400), confirmedExhausted: true),
             QuotaWindow(id: "seven_day_oauth_apps", provider: .claude, channel: .other,
                         title: "周 oauth apps 超长名字测试", percent: 66.6, severity: .warning,
                         resetsAt: Date().addingTimeInterval(3600)),
@@ -207,7 +208,7 @@ enum Probe {
                         observedAt: Date().addingTimeInterval(-9 * 86400)),
         ]
         snap.contextPercent = 99.7
-        snap.events = [AgentEvent(id: "s", provider: .claude, kind: .waiting,
+        snap.events = [AgentEvent(id: "s", provider: .claude, kind: .finished,
                                   text: String(repeating: "很长的等待说明文字，", count: 12),
                                   at: Date().addingTimeInterval(-45))]
         snap.trophy = Trophy(

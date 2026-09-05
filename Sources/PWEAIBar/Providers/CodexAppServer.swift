@@ -91,7 +91,7 @@ actor CodexAppServer {
                     id: "codex_\(minutes.map(String.init) ?? key)", provider: .codex, channel: .codex,
                     title: CodexProvider.windowName(minutes: minutes, key: key), percent: pct,
                     resetsAt: reset, observedAt: now(), gradedBy: .local,
-                    confirmedExhausted: pct >= 100))
+                    confirmedExhausted: pct >= 99.5))
             }
         }
         // The add-on pool is a separate fact, and only while it is actually spent. Reporting it

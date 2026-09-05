@@ -85,16 +85,41 @@ struct QuotaWindow: Identifiable {
 }
 
 enum Provider: String, CaseIterable, Codable {
-    case claude, codex, gemini
+    /// Ordered as they appear in the panel and in settings: the two with a first-party quota
+    /// source first, then the rest alphabetically. Adding a case here is safe — `Channel` fixes
+    /// five feathers and every provider past Claude and Codex rides in `other`, which carries
+    /// whichever of them is currently tightest.
+    case claude, codex, antigravity, copilot, cursor, devin, gemini, grok
 
-    var name: String { ["claude": "Claude Code", "codex": "Codex", "gemini": "Gemini"][rawValue] ?? rawValue }
+    var name: String {
+        switch self {
+        case .claude:      return "Claude Code"
+        case .codex:       return "Codex"
+        case .antigravity: return "Antigravity"
+        case .copilot:     return "GitHub Copilot"
+        case .cursor:      return "Cursor"
+        case .devin:       return "Devin"
+        case .gemini:      return "Gemini"
+        case .grok:        return "Grok"
+        }
+    }
+
+    /// Which feather this provider's windows ride on. Only the two with their own feather get
+    /// one; the rest share `other`, which shows the tightest of them.
+    var channel: Channel { self == .codex ? .codex : .other }
+
     /// Bundle ids tried in order when the user clicks through to the app. ChatGPT.app ships
     /// with `com.openai.codex` as its identifier, which is why that one is first.
     var bundleIDs: [String] {
         switch self {
-        case .claude: return ["com.anthropic.claudefordesktop", "com.anthropic.claude"]
-        case .codex:  return ["com.openai.codex", "com.openai.chat"]
-        case .gemini: return ["com.google.GeminiMacOS"]
+        case .claude:      return ["com.anthropic.claudefordesktop", "com.anthropic.claude"]
+        case .codex:       return ["com.openai.codex", "com.openai.chat"]
+        case .antigravity: return ["com.google.antigravity", "dev.antigravity.Antigravity"]
+        case .copilot:     return ["com.microsoft.VSCode", "com.github.GitHubClient"]
+        case .cursor:      return ["com.todesktop.230313mzl4w4u92"]
+        case .devin:       return ["ai.cognition.devin", "com.exafunction.windsurf"]
+        case .gemini:      return ["com.google.GeminiMacOS"]
+        case .grok:        return ["com.x.grok", "ai.x.grok"]
         }
     }
 
@@ -102,10 +127,22 @@ enum Provider: String, CaseIterable, Codable {
     /// worse than opening the wrong thing.
     var fallbackURL: URL? {
         switch self {
-        case .claude: return URL(string: "https://claude.ai/code")
-        case .codex:  return URL(string: "https://chatgpt.com/codex")
-        case .gemini: return URL(string: "https://gemini.google.com")
+        case .claude:      return URL(string: "https://claude.ai/code")
+        case .codex:       return URL(string: "https://chatgpt.com/codex")
+        case .antigravity: return URL(string: "https://antigravity.google")
+        case .copilot:     return URL(string: "https://github.com/features/copilot")
+        case .cursor:      return URL(string: "https://cursor.com/dashboard")
+        case .devin:       return URL(string: "https://app.devin.ai")
+        case .gemini:      return URL(string: "https://gemini.google.com")
+        case .grok:        return URL(string: "https://grok.com")
         }
+    }
+
+    /// Why a provider can be listed but never report anything. Gemini's desktop app keeps only
+    /// settings databases — no quota field anywhere — and the CLI's `gemini_cli.token.usage` is
+    /// a token count behind opt-in telemetry, which is not the same measurement.
+    var unavailableReason: String? {
+        self == .gemini ? "本地没有额度来源" : nil
     }
 }
 

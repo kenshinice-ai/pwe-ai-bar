@@ -71,7 +71,23 @@ enum StatusIcon {
             s.mark != nil ? markW : (s.text as NSString)
                 .size(withAttributes: [.font: font]).width
         }
-        let widths = segments.map(width)
+        // A provider's `note` is free text from someone else's API. Unclipped, one long one
+        // pushes every other reading off the far end of the bar — and on a full menu bar macOS
+        // hides the whole item rather than shortening it, so an over-long label does not look
+        // untidy, it looks like the app has crashed.
+        segments = segments.map { seg in
+            guard seg.mark == nil, seg.text.count > 6 else { return seg }
+            return Segment(text: String(seg.text.prefix(5)) + "…", colour: seg.colour)
+        }
+        var widths = segments.map(width)
+        // Whole segments come off the tail before anything gets squeezed: half a reading is
+        // worse than one fewer reading. The wing and the first provider always survive.
+        let ceiling: CGFloat = 260
+        while segments.count > 2,
+              widths.reduce(0, +) + CGFloat(segments.count - 1) * 5 > ceiling {
+            segments.removeLast()
+            widths.removeLast()
+        }
         let run = widths.reduce(0, +) + CGFloat(max(segments.count - 1, 0)) * gap
         let total = lead + wingWidth + (segments.isEmpty ? 0 : gap + run) + trail
 
@@ -132,6 +148,10 @@ enum StatusIcon {
         let s = Int(at.timeIntervalSinceNow)
         guard s > 0 else { return nil }
         if s < 60 { return "<1m" }
-        return s < 3600 ? "\(s / 60)m" : String(format: "%d:%02d", s / 3600, (s % 3600) / 60)
+        if s < 3600 { return "\(s / 60)m" }
+        // Past a day, hours stop being a unit anyone reads. A weekly window rendered as
+        // "215:59", which is not a time so much as a dare.
+        if s < 86400 { return String(format: "%d:%02d", s / 3600, (s % 3600) / 60) }
+        return "\(s / 86400)天"
     }
 }

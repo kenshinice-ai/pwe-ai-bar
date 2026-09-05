@@ -154,4 +154,55 @@ final class RuleTests: XCTestCase {
         let full = rules.evaluate(snap)
         XCTAssertEqual(full.map(\.kind), [.exhausted])
     }
+    /// The complaint that produced this test: the bar went red at 100 % and nothing said so.
+    /// The alert had in fact fired — but only because the app happened to be running when the
+    /// window crossed. The baseline lived in memory, so any relaunch re-seeded it from whatever
+    /// was true at that moment, and a window that filled up across a restart had no "before"
+    /// left to be compared against.
+    @MainActor func testExhaustionStillAlertsWhenItHappensAcrossARestart() async throws {
+        let space = try TestSpace(); let clock = TestClock()
+        func engine() -> RuleEngine {
+            RuleEngine(defaults: space.defaults, now: { clock.date }, away: { false }, remaining: { true })
+        }
+        func window(_ pct: Double) -> Snapshot {
+            var snap = Snapshot()
+            snap.windows = [QuotaWindow(id: "five_hour", provider: .claude, channel: .session,
+                                        title: "五小时窗口", percent: pct,
+                                        resetsAt: clock.date.addingTimeInterval(3600),
+                                        observedAt: clock.date,
+                                        confirmedExhausted: pct >= 99.5)]
+            return snap
+        }
+        // A first sighting is a baseline, never an alert: otherwise every launch announces
+        // whatever happens to be true at that moment.
+        XCTAssertTrue(engine().evaluate(window(60)).isEmpty)
+
+        clock.date.addTimeInterval(300)
+        let after = engine()                       // the app restarts here
+        let alerts = after.evaluate(window(100))
+        XCTAssertEqual(alerts.map(\.kind), [.exhausted])
+        XCTAssertTrue(alerts[0].urgent)
+        XCTAssertTrue(alerts[0].title.contains("用尽"))
+        after.acknowledge(alerts[0])
+
+        // Still spent is not news, and neither is another relaunch.
+        clock.date.addTimeInterval(60)
+        XCTAssertTrue(after.evaluate(window(100)).isEmpty)
+        XCTAssertTrue(engine().evaluate(window(100)).isEmpty)
+    }
+
+    /// Anything that displays as 100 % is spent. An exact float comparison meant a window the
+    /// server reported at 99.8 drew a red "100%" and was still treated as having room.
+    @MainActor func testAnythingThatReadsAsFullCountsAsFull() {
+        for pct in [99.5, 99.8, 100.0] {
+            let w = QuotaWindow(id: "w", provider: .claude, channel: .session, title: "t",
+                                percent: pct, confirmedExhausted: pct >= 99.5)
+            XCTAssertEqual(Readout.text(w, remaining: true), "已用尽", "\(pct)")
+            XCTAssertEqual(Readout.text(w, remaining: false), "已用尽", "两种口径下都是同一件事")
+        }
+        let nearly = QuotaWindow(id: "w", provider: .claude, channel: .session, title: "t",
+                                 percent: 99.4, confirmedExhausted: false)
+        XCTAssertEqual(Readout.text(nearly, remaining: false), "99%")
+    }
+
 }

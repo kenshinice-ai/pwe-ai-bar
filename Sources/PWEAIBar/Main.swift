@@ -26,6 +26,20 @@ enum PWEAIBarMain {
         }
         // Headless credential setup, so a token can be piped straight in:
         //     claude setup-token | "PWE AI Bar.app/Contents/MacOS/PWEAIBar" --token -
+        // `--notify` answers the only question that matters when an alert fires and nothing
+        // appears: did the OS take it? Everything else in this app can be inspected from the
+        // outside; notification delivery cannot.
+        if CommandLine.arguments.contains("--notify") {
+            let sem = DispatchSemaphore(value: 0)
+            Task { @MainActor in
+                await Notifier.shared.diagnose()
+                sem.signal()
+            }
+            while sem.wait(timeout: .now()) == .timedOut {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            }
+            return
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--token") {
             let arg = i + 1 < CommandLine.arguments.count ? CommandLine.arguments[i + 1] : ""
             var value = arg

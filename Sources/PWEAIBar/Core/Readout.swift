@@ -17,6 +17,10 @@ import Foundation
 enum Readout {
 
     static func text(_ w: QuotaWindow, remaining: Bool) -> String {
+        // The one state where a number is the wrong answer. "100%" and "0%" are the same fact
+        // written two ways, and both need reading twice; at a glance in a menu bar, neither
+        // says *you are stopped*. Two characters do.
+        if w.confirmedExhausted { return "已用尽" }
         guard let pct = w.percent else { return w.note ?? "—" }
         let shown = remaining ? max(0, 100 - pct) : pct
         return "\(Int(shown.rounded()))%"

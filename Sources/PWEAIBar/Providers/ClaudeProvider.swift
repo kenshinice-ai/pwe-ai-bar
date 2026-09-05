@@ -343,7 +343,8 @@ actor ClaudeProvider {
                                    resetsAt: (l["resets_at"] as? String).flatMap(ISO8601DateFormatter.parse),
                                    isActive: l["is_active"] as? Bool ?? false, observedAt: now(),
                                    gradedBy: recognized ? .server : .local,
-                                   confirmedExhausted: pct == 100 || ["exhausted", "rejected"].contains(word?.lowercased() ?? "")))
+                                   confirmedExhausted: (pct ?? 0) >= 99.5
+                                       || ["exhausted", "rejected"].contains(word?.lowercased() ?? "")))
         }
         for (key, channel) in [("five_hour", Channel.session), ("seven_day", Channel.week)]
         where !out.contains(where: { $0.channel == channel }) {
@@ -351,7 +352,7 @@ actor ClaudeProvider {
                   pct.isFinite, pct >= 0, pct <= 100 else { continue }
             out.append(QuotaWindow(id: key, provider: .claude, channel: channel, title: title(key), percent: pct,
                                    resetsAt: (node["resets_at"] as? String).flatMap(ISO8601DateFormatter.parse),
-                                   observedAt: now(), gradedBy: .local, confirmedExhausted: pct == 100))
+                                   observedAt: now(), gradedBy: .local, confirmedExhausted: pct >= 99.5))
         }
         let others = out.filter { $0.channel == .other }
         if others.count > 1, let worst = others.max(by: { $0.strain < $1.strain }) {

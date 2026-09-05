@@ -31,8 +31,15 @@ final class Prefs: ObservableObject {
     @Published var menuBarMode: MenuBarMode { didSet { d.set(menuBarMode.rawValue, forKey: "menuBarMode") } }
     @Published var panelMode: PanelMode      { didSet { d.set(panelMode.rawValue, forKey: "panelMode") } }
     @Published var placement: AlertPlacement { didSet { d.set(placement.rawValue, forKey: "placement") } }
-    @Published var trackClaude: Bool { didSet { d.set(trackClaude, forKey: "trackClaude") } }
-    @Published var trackCodex: Bool  { didSet { d.set(trackCodex, forKey: "trackCodex") } }
+    /// Which providers to query at all. One set rather than a switch per provider: eight named
+    /// booleans is how a ninth provider ends up half-wired.
+    @Published var tracked: Set<String> { didSet { d.set(Array(tracked), forKey: "tracked") } }
+    var trackClaude: Bool { tracks(.claude) }
+    var trackCodex: Bool { tracks(.codex) }
+    func tracks(_ p: Provider) -> Bool { p.unavailableReason == nil && tracked.contains(p.rawValue) }
+    func setTracking(_ p: Provider, _ on: Bool) {
+        if on { tracked.insert(p.rawValue) } else { tracked.remove(p.rawValue) }
+    }
     /// Whether percentages read as "how much is left" rather than "how much is spent".
     /// Defaults to remaining — see `Readout` for why.
     @Published var showRemaining: Bool { didSet { d.set(showRemaining, forKey: "showRemaining") } }
@@ -51,8 +58,19 @@ final class Prefs: ObservableObject {
         let saved = AlertPlacement(rawValue: d.string(forKey: "placement") ?? "") ?? .menubar
         // A setting carried over from a Mac that had a notch would silently deliver nothing here.
         placement = (saved == .notch && !Prefs.hasNotch) ? .menubar : saved
-        trackClaude = d.object(forKey: "trackClaude") as? Bool ?? true
-        trackCodex  = d.object(forKey: "trackCodex")  as? Bool ?? true
+        if let saved = d.array(forKey: "tracked") as? [String] {
+            tracked = Set(saved)
+        } else {
+            // Carry the two original switches forward. The other five start off, and that is
+            // deliberate: turning one on sends a credential this app found on disk to a vendor
+            // the user never asked it to contact. Every other permission here waits to be given
+            // rather than assumed, and an outbound request with someone's token is not the place
+            // to make an exception. Settings shows which are detected, one click away.
+            var initial: Set<String> = []
+            if d.object(forKey: "trackClaude") as? Bool != false { initial.insert(Provider.claude.rawValue) }
+            if d.object(forKey: "trackCodex") as? Bool != false { initial.insert(Provider.codex.rawValue) }
+            tracked = initial
+        }
         showRemaining = d.object(forKey: "showRemaining") as? Bool ?? true
         sound       = d.object(forKey: "sound")       as? Bool ?? true
         pushURL     = d.string(forKey: "pushURL") ?? ""

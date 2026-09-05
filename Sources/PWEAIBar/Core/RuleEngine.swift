@@ -16,15 +16,25 @@ final class RuleEngine {
         let createdAt: Date
     }
 
+    /// What each window looked like last time, so a threshold can be *crossed* rather than
+    /// merely observed.
+    struct Memory: Codable {
+        var band: Int
+        var exhausted: Bool
+        var at: Date
+    }
     private struct State: Codable {
         var pendingResets: [String: Date] = [:]
         var seenEvents: [String: Date] = [:]
         var outbox: [String: Alert] = [:]
         var lastFired: [String: Date] = [:]
+        /// Persisted, and that is the point. Held only in memory, every relaunch re-seeded the
+        /// baseline from whatever was true at that moment — so a window that filled up while
+        /// the app was restarting had no "before" to be compared against, and the one alert
+        /// worth sending was the one that could never fire.
+        var memory: [String: Memory] = [:]
     }
     private var state: State
-    private var bands: [String: Health] = [:]
-    private var exhausted: [String: Bool] = [:]
     private let defaults: UserDefaults
     private let now: () -> Date
     private let away: () -> Bool
@@ -74,6 +84,12 @@ final class RuleEngine {
                 }
             }
             let fresh = w.canNotify(at: date) && !(w.provider == .claude && snap.stale)
+            let seen = state.memory[key]
+            if fresh, seen?.band != w.band.rawValue || seen?.exhausted != w.confirmedExhausted {
+                state.memory[key] = Memory(band: w.band.rawValue,
+                                           exhausted: w.confirmedExhausted, at: date)
+                changed = true
+            }
             if fresh, w.band >= .warm, let reset = w.resetsAt, reset > date,
                state.pendingResets[key] == nil || state.pendingResets[key]! > date {
                 if state.pendingResets[key] != reset { state.pendingResets[key] = reset; changed = true }
@@ -94,12 +110,9 @@ final class RuleEngine {
                                   provider: w.provider, urgent: false, subject: key, createdAt: date))
                 }
             }
-            guard fresh, let previous = bands.updateValue(w.band, forKey: key) else {
-                if fresh { _ = exhausted.updateValue(w.confirmedExhausted, forKey: key) }
-                continue
-            }
-            let wasExhausted = exhausted.updateValue(w.confirmedExhausted, forKey: key)
-            if w.confirmedExhausted, wasExhausted != true {
+            guard fresh, let seen, let previous = Health(rawValue: seen.band) else { continue }
+            let wasExhausted = seen.exhausted
+            if w.confirmedExhausted, !wasExhausted {
                 enqueue(Alert(id: "exhausted:\(key):\(w.observedAt.timeIntervalSince1970)", kind: .exhausted,
                               title: "\(w.provider.name) \(w.title)已用尽", body: resetText(w, at: date),
                               provider: w.provider, urgent: true, subject: key, createdAt: date))
@@ -139,6 +152,11 @@ final class RuleEngine {
         let seen = state.seenEvents.filter { date.timeIntervalSince($0.value) < 86400 }
         let pending = state.pendingResets.filter { date.timeIntervalSince($0.value) < 86400 }
         let fired = state.lastFired.filter { date.timeIntervalSince($0.value) < 86400 }
+        // A week is long enough to survive a holiday and short enough that a window the vendor
+        // renamed does not keep a baseline for ever.
+        let memory = state.memory.filter { abs(date.timeIntervalSince($0.value.at)) < 7 * 86400 }
+        if memory.count != state.memory.count { changed = true }
+        state.memory = memory
         let outbox = state.outbox.filter { _, a in
             let life: TimeInterval = a.kind == .reset || a.kind == .resetExpected ? 86400
                 : a.kind == .waiting ? 1800 : 120
