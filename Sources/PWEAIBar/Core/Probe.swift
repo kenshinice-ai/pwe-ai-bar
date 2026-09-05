@@ -13,6 +13,10 @@ enum Probe {
     /// and all three densities. A 22 pt icon is too small to debug by squinting at the bar, and
     /// an icon that renders empty looks exactly like one macOS decided to hide.
     static func icons(into dir: String) {
+        // Deliberately synthetic, and it must say so: these numbers exercise calm/warm/exhausted
+        // in one frame, which live data will not do on demand. Mistaking this sheet for a live
+        // reading is a good way to go hunting for a bug that is not there.
+        print("  （合成数据，非实时读数：58 / 87 / 耗尽）")
         var snap = Snapshot()
         snap.windows = [
             QuotaWindow(id: "session", provider: .claude, channel: .session, title: "五小时窗口",
