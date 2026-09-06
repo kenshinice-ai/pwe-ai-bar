@@ -149,6 +149,16 @@ final class Store: ObservableObject {
                 let result = await readExtras(extras)
                 snap.windows += result.windows
                 snap.plans.merge(result.plans) { _, new in new }
+                for (p, connection) in result.connections {
+                    // Only the states worth a row. "Connected" needs no explanation and
+                    // "not installed" is not this panel's business.
+                    switch connection {
+                    case .signedOut, .unavailable, .unsupported:
+                        snap.connections[p] = connection.word
+                    case .connected, .notInstalled:
+                        break
+                    }
+                }
             }
 
             // Both of these read hundreds of megabytes of session logs. They are actors on

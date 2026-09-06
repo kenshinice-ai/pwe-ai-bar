@@ -146,30 +146,38 @@ final class HookTests: XCTestCase {
     /// The installed script is a copy. Shipping a fix inside it changes nothing on a machine
     /// that already installed the old one, and the settings file looks identical either way —
     /// so "已安装" would keep saying yes to a script from weeks ago.
+    ///
+    /// Everything here is a temporary path. The first version of this test reached for
+    /// `HookProvider.script` — the real `~/.cache` copy on the developer's own machine — backed
+    /// it up and restored it. It passed, which is exactly why it was worth changing: a test that
+    /// touches real user state is one interrupted run away from leaving it broken.
     func testStaleInstalledScriptIsDetectedAndRefreshedInPlace() throws {
         let space = try TestSpace()
         let source = try space.file("bundled/pwe-ai-bar-hook.sh", "#!/bin/bash\nexit 0\n")
-        let installed = HookProvider.script
-        let backup = try? Data(contentsOf: installed)
-        defer { if let backup { try? backup.write(to: installed) } }
+        let installed = space.root.appendingPathComponent("cache/pwe-ai-bar-hook.sh")
+        let settings = space.root.appendingPathComponent("settings.json")
 
         // Nothing to compare against is not evidence of staleness.
-        XCTAssertTrue(HookProvider.installedScriptIsCurrent(source: nil))
+        XCTAssertTrue(HookProvider.installedScriptIsCurrent(source: nil, script: installed))
 
         try FileManager.default.createDirectory(at: installed.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
         try Data("#!/bin/bash\n# an older build\nexit 0\n".utf8).write(to: installed)
-        XCTAssertFalse(HookProvider.installedScriptIsCurrent(source: source))
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: installed.path)
+        XCTAssertFalse(HookProvider.installedScriptIsCurrent(source: source, script: installed))
 
-        // Refresh only touches a script the settings file already points at.
-        if HookProvider.isInstalled {
-            XCTAssertTrue(HookProvider.refreshScript(source: source))
-            XCTAssertTrue(HookProvider.installedScriptIsCurrent(source: source))
-            XCTAssertTrue(FileManager.default.isExecutableFile(atPath: installed.path))
-            XCTAssertFalse(HookProvider.refreshScript(source: source), "already current")
-        } else {
-            XCTAssertFalse(HookProvider.refreshScript(source: source))
-        }
+        // Refresh only ever touches a script the settings file already points at.
+        XCTAssertFalse(HookProvider.refreshScript(source: source, settings: settings, script: installed),
+                       "nothing installed, nothing to refresh")
+        XCTAssertTrue(HookProvider.install(scriptPath: installed.path, settings: settings, source: source))
+
+        // Installing already copied it; make it stale again and check the refresh path itself.
+        try Data("#!/bin/bash\n# an older build\nexit 0\n".utf8).write(to: installed)
+        XCTAssertTrue(HookProvider.refreshScript(source: source, settings: settings, script: installed))
+        XCTAssertTrue(HookProvider.installedScriptIsCurrent(source: source, script: installed))
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: installed.path))
+        XCTAssertFalse(HookProvider.refreshScript(source: source, settings: settings, script: installed),
+                       "already current")
     }
 
 }

@@ -91,7 +91,7 @@ enum ExtraProviders {
         guard let used = ExtraSource.percent(used) else { return nil }
         return QuotaWindow(id: "\(p.rawValue)_\(id)", provider: p, channel: p.channel, title: title,
                            percent: used, resetsAt: resetsAt, observedAt: now,
-                           gradedBy: .local, confirmedExhausted: used >= 99.5, windowLength: length)
+                           gradedBy: .local, confirmedExhausted: used >= 100, windowLength: length)
     }
 
     // MARK: Cursor

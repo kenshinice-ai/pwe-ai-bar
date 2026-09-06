@@ -97,6 +97,10 @@ struct QuotaWindow: Identifiable {
         // it would have shown that rate as a solid mark. A reading we could not take is not a
         // reading, whichever branch produces the number.
         guard !isStale else { return nil }
+        // And a reading taken long enough ago is the same problem wearing a timestamp. Ten
+        // minutes matches what the alert rules already treat as current; past it the honest
+        // answer is the countdown and "读数太旧，不推算", which the instrument already draws.
+        guard observedAt <= now, now.timeIntervalSince(observedAt) <= 600 else { return nil }
         // How far back to measure, scaled to what is actually being decided.
         //
         // A fixed stretch is wrong at both ends. Too long and a burst is averaged back into the
@@ -128,8 +132,10 @@ struct QuotaWindow: Identifiable {
     func projectedExhaustion(at now: Date) -> Date? {
         guard let percent, percent < 99.5, let reset = resetsAt, reset > now,
               let rate = burn(at: now)?.perHour, rate > 0.01 else { return nil }
-        let hoursLeft = (100 - percent) / rate
-        let at = now.addingTimeInterval(hoursLeft * 3600)
+        // Anchored to when the reading was taken, not to now. Basing it on the clock treats an
+        // old percentage as if it were current, which pushes the crossing later every second
+        // the panel stays open.
+        let at = observedAt.addingTimeInterval((100 - percent) / rate * 3600)
         return at > now && at < reset ? at : nil
     }
 
@@ -138,14 +144,18 @@ struct QuotaWindow: Identifiable {
     func projectedPercentAtReset(at now: Date) -> Double? {
         guard let percent, percent < 99.5, let reset = resetsAt, reset > now,
               let rate = burn(at: now)?.perHour else { return nil }
-        return percent + rate * (reset.timeIntervalSince(now) / 3600)
+        return percent + rate * (reset.timeIntervalSince(observedAt) / 3600)
     }
 
     private func averagePace(at now: Date) -> (perHour: Double, elapsed: TimeInterval)? {
         guard let percent, percent >= 5, percent < 99.5, !isStale,
               let length = windowLength, let start = windowStart(at: now),
               let reset = resetsAt, reset > now else { return nil }
-        let elapsed = now.timeIntervalSince(start)
+        // Measured from the reading, not from the clock. Dividing by the time since the window
+        // opened means the average falls on its own while nothing new arrives — leave the panel
+        // open for twenty minutes and the same percentage quietly becomes a gentler pace and a
+        // rosier forecast, with no observation behind the change.
+        let elapsed = observedAt.timeIntervalSince(start)
         // Ten minutes into a five-hour window, two turns extrapolate to anything at all.
         guard elapsed > max(300, length * 0.05) else { return nil }
         return (percent / (elapsed / 3600), elapsed)
@@ -312,6 +322,11 @@ struct Snapshot {
     /// What each provider calls the plan this account is on. Shown as-is: it is their word for
     /// their own product, and translating "team" into anything else would be inventing meaning.
     var plans: [Provider: String] = [:]
+
+    /// Why a tracked provider has nothing to show. Carried so a provider that failed keeps its
+    /// place in the panel and says what happened, instead of vanishing — which looks identical
+    /// to never having been switched on.
+    var connections: [Provider: String] = [:]
 
     var attention: AgentEvent? { events.first { $0.isAttention } }
     var waiting: Int { events.filter(\.isAttention).count }

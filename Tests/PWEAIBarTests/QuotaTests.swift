@@ -148,10 +148,12 @@ final class QuotaTests: XCTestCase {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         func window(percent: Double?, resetIn: TimeInterval, length: TimeInterval?,
                     stale: Bool = false) -> QuotaWindow {
+            // `observedAt` matters now: the pace is anchored to when the reading was taken,
+            // and a reading older than ten minutes gets no forecast at all.
             QuotaWindow(id: "five_hour", provider: .claude, channel: .session, title: "t",
                         percent: percent, resetsAt: now.addingTimeInterval(resetIn),
-                        isStale: stale, confirmedExhausted: (percent ?? 0) >= 99.5,
-                        windowLength: length)
+                        observedAt: now, isStale: stale,
+                        confirmedExhausted: (percent ?? 0) >= 99.5, windowLength: length)
         }
         // Three hours into a five-hour window with 70% gone: 23.3%/h, and the line crosses 100%
         // about 43 minutes before the window would have rolled over.
@@ -179,6 +181,11 @@ final class QuotaTests: XCTestCase {
             ("already spent", window(percent: 100, resetIn: 3600, length: 5 * 3600)),
             ("stale reading", window(percent: 70, resetIn: 3600, length: 5 * 3600, stale: true)),
             ("already reset", window(percent: 70, resetIn: -60, length: 5 * 3600)),
+            ("reading too old", QuotaWindow(id: "five_hour", provider: .claude, channel: .session,
+                                            title: "t", percent: 70,
+                                            resetsAt: now.addingTimeInterval(3600),
+                                            observedAt: now.addingTimeInterval(-3600),
+                                            windowLength: 5 * 3600)),
         ] {
             XCTAssertNil(w.projectedExhaustion(at: now), label)
             XCTAssertNil(w.burn(at: now), label)
@@ -200,6 +207,42 @@ final class QuotaTests: XCTestCase {
         let cached = await restart.windows()
         XCTAssertEqual(cached.windows.map(\.windowLength), [5 * 3600, 7 * 86400],
                        "a length lost on reload is a projection that quietly stops working")
+    }
+
+    /// From the audit: a failed refresh used to overwrite the *success* time, so a miss extended
+    /// the life of the value it had failed to replace — and the panel went on presenting it as
+    /// current. Attempting and succeeding are now two different clocks.
+    func testAFailedRefreshDoesNotMakeTheOldReadingLookNewer() async throws {
+        let space = try TestSpace(); let clock = TestClock()
+        var replies: [[[String: Any]]] = [
+            [["id": 2, "result": ["rateLimitsByLimitId": ["codex": [
+                "primary": ["usedPercent": 40, "windowDurationMins": 300,
+                            "resetsAt": clock.date.addingTimeInterval(3600).timeIntervalSince1970]]]]]],
+            [],   // the next attempt fails
+        ]
+        let server = CodexAppServer(locate: { "/bin/echo" },
+                                    exchange: { _, _ in replies.isEmpty ? [] : replies.removeFirst() },
+                                    now: { clock.date })
+        let codex = CodexProvider(root: space.root, now: { clock.date }, server: server)
+
+        let first = await codex.windows()
+        XCTAssertEqual(first.first?.percent, 40)
+        XCTAssertFalse(first.first?.isStale ?? true)
+
+        // Past the cache's life, and the refresh fails. The figure may be shown; it may not be
+        // shown as current.
+        clock.date.addTimeInterval(301)
+        let held = await codex.windows()
+        XCTAssertEqual(held.first?.percent, 40, "last good is still worth showing")
+        XCTAssertTrue(held.first?.isStale ?? false, "but not as a fresh reading")
+        XCTAssertNil(held.first?.burn(at: clock.date), "and nothing is forecast from it")
+
+        // Past its own reset it is not merely stale — it describes a window that has gone.
+        clock.date.addTimeInterval(3600)
+        let expired = await codex.windows()
+        XCTAssertNil(expired.first?.percent)
+        XCTAssertEqual(expired.first?.note, "待确认")
+        XCTAssertFalse(expired.first?.confirmedExhausted ?? true)
     }
 
 }

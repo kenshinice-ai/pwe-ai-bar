@@ -91,7 +91,7 @@ actor CodexAppServer {
                     id: "codex_\(minutes.map(String.init) ?? key)", provider: .codex, channel: .codex,
                     title: CodexProvider.windowName(minutes: minutes, key: key), percent: pct,
                     resetsAt: reset, observedAt: now(), gradedBy: .local,
-                    confirmedExhausted: pct >= 99.5,
+                    confirmedExhausted: pct >= 100,
                     windowLength: minutes.map { TimeInterval($0) * 60 }))
             }
         }

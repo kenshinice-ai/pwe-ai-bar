@@ -248,4 +248,52 @@ final class HistoryTests: XCTestCase {
         XCTAssertNil(stale.projectedPercentAtReset(at: clock))
     }
 
+    /// From the audit, and the ordering error was exactly as described: the ring was cleared on
+    /// a percentage drop *before* anything checked whether the reading was newer. A late
+    /// arrival — an older, lower figure landing after a newer, higher one — was therefore read
+    /// as a window reset and destroyed the record it should have been dropped by.
+    func testALateArrivingOlderReadingCannotDisturbANewerRecord() async throws {
+        let space = try TestSpace()
+        var clock = origin
+        let history = History(url: space.root.appendingPathComponent("h.json"), now: { clock })
+
+        clock.addTimeInterval(600)
+        _ = await history.observe([window(10, at: clock)])
+        clock.addTimeInterval(600)
+        let built = await history.observe([window(20, at: clock)])
+        XCTAssertEqual(built.first?.samples.count, 2)
+
+        // Now a reading observed ten minutes *earlier* than the last one turns up.
+        let late = window(10, at: origin.addingTimeInterval(300))
+        let after = await history.observe([late])
+        XCTAssertEqual(after.first?.samples.count, 2, "the older reading is dropped, not obeyed")
+        XCTAssertEqual(after.first?.samples.last?.percent, 20)
+
+        // And it must not have been recorded at the back either.
+        XCTAssertEqual(after.first?.samples.map(\.percent), [10, 20])
+    }
+
+    /// Also from the audit. The whole-window average divided by the time since the window
+    /// opened — measured from the clock. With no new reading arriving, the same percentage
+    /// therefore became a gentler pace every second the panel stayed open, and the forecast
+    /// improved on its own with nothing behind the change.
+    func testTheAveragePaceDoesNotImproveWhileNothingIsObserved() async throws {
+        let observedAt = origin.addingTimeInterval(3 * 3600)
+        let window = QuotaWindow(id: "five_hour", provider: .claude, channel: .session, title: "t",
+                                 percent: 60, resetsAt: origin.addingTimeInterval(5 * 3600),
+                                 observedAt: observedAt, windowLength: 5 * 3600)
+        let first = try XCTUnwrap(window.burn(at: observedAt))
+        XCTAssertFalse(first.measured)
+        XCTAssertEqual(first.perHour, 20, accuracy: 0.01)
+
+        // Nine minutes later, still no new reading: the rate is the same reading, so it is the
+        // same rate. The projection may move with the clock; the measurement may not.
+        let later = try XCTUnwrap(window.burn(at: observedAt.addingTimeInterval(540)))
+        XCTAssertEqual(later.perHour, first.perHour, accuracy: 0.0001)
+
+        // Past the freshness budget there is no rate at all rather than a quietly stale one.
+        XCTAssertNil(window.burn(at: observedAt.addingTimeInterval(900)))
+        XCTAssertNil(window.projectedExhaustion(at: observedAt.addingTimeInterval(900)))
+    }
+
 }

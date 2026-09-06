@@ -187,7 +187,11 @@ struct PanelView: View {
             case .unauthorized, .forbidden, .network:
                 return ("额度连接需要处理", store.blocker.message)
             case .expired:
-                return ("登录已过期", "打开一次 Claude Code 就会自动续期")
+                // The old wording said opening Claude Code would renew it. Measured on this
+                // machine: the credential sat expired for seven and a half hours while Claude
+                // Code ran the whole time — the CLI does not rewrite that item on every refresh,
+                // so the advice sent people to do something that would not have worked.
+                return ("Claude 凭据已过期", "本 app 不替你续期。终端跑 claude setup-token，把结果贴进设置")
             case .rateLimited(let until):
                 let m = max(1, Int(until.timeIntervalSinceNow / 60))
                 return ("接口限流中", "\(m) 分钟后自动重试")
@@ -247,6 +251,13 @@ struct PanelView: View {
 
             ForEach(rows(for: p)) { w in
                 windowRow(w)
+            }
+            // A provider that failed keeps its heading and says why. Dropping the section
+            // instead is indistinguishable from never having turned it on, and the one thing
+            // someone needs at that moment is which of those two it is.
+            if rows(for: p).isEmpty, let why = snap.connections[p] {
+                Text(why).font(Theme.sans(11)).foregroundStyle(Theme.text2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             // The call to action has to live here, not only in the empty state. As soon as any
@@ -454,7 +465,8 @@ struct PanelView: View {
     /// "turn this on" row lives, and hiding it would hide the only way forward.
     private var activeProviders: [Provider] {
         Provider.allCases.filter {
-            !rows(for: $0).isEmpty || ($0 == .claude && claudeCallToAction != nil)
+            !rows(for: $0).isEmpty || snap.connections[$0] != nil
+                || ($0 == .claude && claudeCallToAction != nil)
         }
     }
 

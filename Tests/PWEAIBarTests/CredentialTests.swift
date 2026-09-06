@@ -182,4 +182,54 @@ final class CredentialTests: XCTestCase {
         XCTAssertTrue(reading.stale); XCTAssertNil(reading.windows.first?.percent)
         XCTAssertEqual(reading.windows.first?.note, "待确认")
     }
+    /// Measured on the machine this was written on: Claude Code's keychain credential sat
+    /// expired for seven and a half hours while Claude Code itself ran the entire time. The CLI
+    /// does not rewrite that item on every refresh, so "open Claude Code and it will renew" was
+    /// advice that would not have worked — and taking the first credential found meant the app
+    /// reported 登录过期 while a perfectly good long-lived token sat in its own item, never tried.
+    func testAnExpiredCLICredentialFallsThroughToTheStoredToken() async throws {
+        let space = try TestSpace(); let clock = TestClock(); let credential = FakeCredential()
+        credential.claudeCode = "expired-cli-token"
+        credential.claudeCodeExpiry = clock.date.addingTimeInterval(-7 * 3600)
+        credential.value = "long-lived-token"
+
+        var seen: [String] = []
+        let http = HTTPStub([(200, "{\"five_hour\":{\"utilization\":12}}", [:])])
+        let p = ClaudeProvider(defaults: space.defaults,
+                               cacheURL: space.root.appendingPathComponent("q.json"),
+                               access: credential.access, now: { clock.date },
+                               request: { request in
+                                   seen.append(request.value(forHTTPHeaderField: "Authorization") ?? "")
+                                   return try await http.send(request)
+                               }, fallback: { nil })
+
+        let reading = await p.windows()
+        XCTAssertFalse(reading.stale)
+        let source = await p.source
+        XCTAssertEqual(source, .ownToken, "the expired one is skipped, not surrendered to")
+        XCTAssertEqual(seen, ["Bearer long-lived-token"])
+        let blocker = await p.blocker
+        XCTAssertEqual(blocker, .none)
+    }
+
+    /// With nothing to fall through to, an expired credential is still an expired credential —
+    /// and the wording has to say who is going to fix it, since this app does not renew tokens.
+    func testWithNoFallbackAnExpiredCredentialSaysSoAndSaysWhatToDo() async throws {
+        let space = try TestSpace(); let clock = TestClock(); let credential = FakeCredential()
+        credential.claudeCode = "expired-cli-token"
+        credential.claudeCodeExpiry = clock.date.addingTimeInterval(-7 * 3600)
+        credential.value = nil
+
+        let http = HTTPStub([])
+        let p = provider(space, clock: clock, credential: credential, http: http)
+        let reading = await p.windows()
+        XCTAssertTrue(reading.stale)
+        let blocker = await p.blocker
+        XCTAssertEqual(blocker, .expired)
+        XCTAssertTrue(blocker.message.contains("setup-token"),
+                      "the remedy has to be one that actually works")
+        let count = await http.count
+        XCTAssertEqual(count, 0, "an expired credential is not worth a request")
+    }
+
 }

@@ -24,7 +24,8 @@ actor ClaudeProvider {
             case .needsSetup: return "请启用真实额度"
             case .notLoggedIn: return "未找到凭据，请登录 Claude Code"
             case .keychainRefused: return "钥匙串访问失败，请重新授权"
-            case .expired, .unauthorized: return "凭据已失效，请在设置中更换令牌或重新登录 Claude Code"
+            case .expired: return "Claude Code 的凭据已过期，而本 app 不替你续期。用 claude setup-token 生成长期令牌贴进设置即可"
+            case .unauthorized: return "凭据已失效，请在设置中更换令牌或重新登录 Claude Code"
             case .forbidden: return "凭据无权读取额度，请检查账户权限或更换令牌"
             case .network: return "暂时无法验证，请检查网络，稍后自动重试"
             case .rateLimited: return "接口限流中，将按服务端时间重试"
@@ -99,12 +100,28 @@ actor ClaudeProvider {
     private func token() async -> Credentials.Token? {
         // Both of these block: one on securityd, one on a subprocess. Neither may run on this
         // actor — a refresh that waits on the keychain is a menu bar that stops answering.
-        // Claude Code's own credential comes first. It is the one the CLI keeps refreshed, and
-        // reading it costs a ~20 ms subprocess; the fallback is a static token a user pasted in
-        // months ago, read through securityd, which has been measured here at 4–84 s. A manual
-        // token is the answer for machines without Claude Code, not the preferred source.
-        let own = access.own, read = access.claudeCode
-        if let token = await offActor({ read() ?? own() }) { lastSource = token.source; return token }
+        // Claude Code's own credential comes first: it is the one the CLI keeps current, and
+        // reading it costs a ~20 ms subprocess against 4–84 s for the fallback. But *first* is
+        // not *only*. It was measured on this machine expired by seven and a half hours while
+        // Claude Code ran happily the whole time — the CLI does not rewrite that item on every
+        // refresh — and taking the first credential found meant giving up with "登录过期" while
+        // a perfectly good long-lived token sat in our own item, never tried.
+        let read = access.claudeCode
+        let date = now()
+        let cli = await offActor { read() }
+        if let cli, cli.expiresAt.map({ $0 > date }) ?? true {
+            lastSource = cli.source
+            return cli
+        }
+        // Only now is the slow one worth paying for.
+        if let stored = await ownWithTimeout() {
+            lastSource = stored.source
+            return stored
+        }
+        if let cli {
+            lastSource = cli.source
+            return cli
+        }
         // Everything below is the old direct-keychain path, which can put a dialog on screen.
         // It is reached only when Claude Code's credential could not be read the quiet way.
         guard sharedAllowed else {
@@ -112,6 +129,33 @@ actor ClaudeProvider {
         }
         guard !refusedBefore else { blocker = .keychainRefused; return nil }
         return await sharedWithTimeout()
+    }
+
+    /// `SecItemCopyMatching` against our own item has been measured on this machine at 4 ms,
+    /// 4 s, 10 s and 84 s for the same read — securityd's cold path, and worse again for a
+    /// binary whose signature changed since the item was written. A refresh that waits on it
+    /// unboundedly is a panel that stops updating, so it gets the same racing-continuation
+    /// treatment the shared keychain read already has: answer in three seconds or count as
+    /// absent for this cycle and try again on the next one.
+    private func ownWithTimeout() async -> Credentials.Token? {
+        let read = access.own
+        return await withCheckedContinuation { cont in
+            let resumed = OSAllocatedUnfairLock(initialState: false)
+            func claim() -> Bool {
+                resumed.withLock { done in
+                    if done { return false }
+                    done = true
+                    return true
+                }
+            }
+            DispatchQueue.global(qos: .userInitiated).async {
+                let token = read()
+                if claim() { cont.resume(returning: token) }
+            }
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 3) {
+                if claim() { cont.resume(returning: nil) }
+            }
+        }
     }
 
     private func offActor<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
@@ -343,7 +387,7 @@ actor ClaudeProvider {
                                    resetsAt: (l["resets_at"] as? String).flatMap(ISO8601DateFormatter.parse),
                                    isActive: l["is_active"] as? Bool ?? false, observedAt: now(),
                                    gradedBy: recognized ? .server : .local,
-                                   confirmedExhausted: (pct ?? 0) >= 99.5
+                                   confirmedExhausted: (pct ?? 0) >= 100
                                        || ["exhausted", "rejected"].contains(word?.lowercased() ?? ""),
                                    windowLength: channel == .session ? 5 * 3600
                                        : channel == .week ? 7 * 86400 : nil))
@@ -354,7 +398,7 @@ actor ClaudeProvider {
                   pct.isFinite, pct >= 0, pct <= 100 else { continue }
             out.append(QuotaWindow(id: key, provider: .claude, channel: channel, title: title(key), percent: pct,
                                    resetsAt: (node["resets_at"] as? String).flatMap(ISO8601DateFormatter.parse),
-                                   observedAt: now(), gradedBy: .local, confirmedExhausted: pct >= 99.5,
+                                   observedAt: now(), gradedBy: .local, confirmedExhausted: pct >= 100,
                                    windowLength: channel == .session ? 5 * 3600 : 7 * 86400))
         }
         let others = out.filter { $0.channel == .other }

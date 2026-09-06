@@ -170,7 +170,7 @@ final class RuleTests: XCTestCase {
                                         title: "五小时窗口", percent: pct,
                                         resetsAt: clock.date.addingTimeInterval(3600),
                                         observedAt: clock.date,
-                                        confirmedExhausted: pct >= 99.5)]
+                                        confirmedExhausted: pct >= 100)]
             return snap
         }
         // A first sighting is a baseline, never an alert: otherwise every launch announces
@@ -191,18 +191,67 @@ final class RuleTests: XCTestCase {
         XCTAssertTrue(engine().evaluate(window(100)).isEmpty)
     }
 
-    /// Anything that displays as 100 % is spent. An exact float comparison meant a window the
-    /// server reported at 99.8 drew a red "100%" and was still treated as having room.
-    @MainActor func testAnythingThatReadsAsFullCountsAsFull() {
-        for pct in [99.5, 99.8, 100.0] {
-            let w = QuotaWindow(id: "w", provider: .claude, channel: .session, title: "t",
-                                percent: pct, confirmedExhausted: pct >= 99.5)
-            XCTAssertEqual(Readout.text(w, remaining: true), "已用尽", "\(pct)")
-            XCTAssertEqual(Readout.text(w, remaining: false), "已用尽", "两种口径下都是同一件事")
+    /// Two ways to get this wrong, and this app has now made both.
+    ///
+    /// First it compared `== 100` exactly, so a window the server reported at 99.8 drew a red
+    /// "100%" while still being treated as having room. The fix — calling anything above 99.5
+    /// exhausted — moved the lie rather than removing it: `confirmedExhausted` fires a
+    /// notification that says the quota is spent, and at 99.6 % that is a false statement.
+    ///
+    /// The boundary belongs to the fact. Percentages round normally everywhere else and are
+    /// simply not allowed to round *into* 100 % used or 0 % left.
+    @MainActor func testTheBoundaryValuesAreReservedForTheFact() {
+        func window(_ pct: Double, exhausted: Bool = false) -> QuotaWindow {
+            QuotaWindow(id: "w", provider: .claude, channel: .session, title: "t",
+                        percent: pct, confirmedExhausted: exhausted || pct >= 100)
         }
-        let nearly = QuotaWindow(id: "w", provider: .claude, channel: .session, title: "t",
-                                 percent: 99.4, confirmedExhausted: false)
-        XCTAssertEqual(Readout.text(nearly, remaining: false), "99%")
+        for pct in [99.49, 99.5, 99.6, 99.99] {
+            let w = window(pct)
+            XCTAssertFalse(w.confirmedExhausted, "\(pct) is not spent")
+            XCTAssertEqual(Readout.text(w, remaining: false), "99%", "\(pct) must not read 100%")
+            XCTAssertEqual(Readout.text(w, remaining: true), "1%", "\(pct) must not read 0% left")
+        }
+        XCTAssertTrue(window(100).confirmedExhausted)
+        XCTAssertEqual(Readout.text(window(100), remaining: false), "已用尽")
+        XCTAssertEqual(Readout.text(window(100), remaining: true), "已用尽")
+
+        // The server saying so is enough on its own, with or without a percentage.
+        var stated = QuotaWindow(id: "w", provider: .claude, channel: .session, title: "t",
+                                 percent: nil, severity: .critical, note: "已用尽",
+                                 confirmedExhausted: true)
+        XCTAssertEqual(Readout.text(stated, remaining: false), "已用尽")
+        stated.percent = 40
+        XCTAssertEqual(Readout.text(stated, remaining: false), "已用尽",
+                       "the server's word outranks a stale-looking ratio")
+
+        // Ordinary values are untouched by the boundary rule.
+        XCTAssertEqual(Readout.text(window(50.6), remaining: false), "51%")
+        XCTAssertEqual(Readout.text(window(0.4), remaining: false), "0%")
+        XCTAssertEqual(Readout.text(window(0.4), remaining: true), "100%")
+    }
+
+    /// 99.6 % must not fire the notification that says the quota is spent.
+    @MainActor func testNearlyFullDoesNotAnnounceExhaustion() async throws {
+        let space = try TestSpace(); let clock = TestClock()
+        let rules = RuleEngine(defaults: space.defaults, now: { clock.date },
+                               away: { false }, remaining: { true })
+        func snapshot(_ pct: Double) -> Snapshot {
+            var snap = Snapshot()
+            snap.windows = [QuotaWindow(id: "five_hour", provider: .claude, channel: .session,
+                                        title: "五小时窗口", percent: pct,
+                                        resetsAt: clock.date.addingTimeInterval(3600),
+                                        observedAt: clock.date, confirmedExhausted: pct >= 100)]
+            return snap
+        }
+        XCTAssertTrue(rules.evaluate(snapshot(60)).isEmpty)          // baseline
+        clock.date.addTimeInterval(300)
+        let near = rules.evaluate(snapshot(99.6))
+        XCTAssertFalse(near.contains { $0.kind == .exhausted }, "99.6% is not an exhaustion event")
+        near.forEach { rules.acknowledge($0) }
+
+        clock.date.addTimeInterval(300)
+        let full = rules.evaluate(snapshot(100))
+        XCTAssertEqual(full.map(\.kind), [.exhausted])
     }
 
 }

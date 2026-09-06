@@ -55,6 +55,18 @@ actor History {
             let key = Self.key(window)
             var ring = samples[key] ?? []
 
+            // Time order is checked before anything else, and the order of these checks is the
+            // whole point. It used to clear the ring on a percentage drop first — so a reading
+            // that arrived late and out of order (an older, lower figure landing after a newer,
+            // higher one) was read as a window reset and wiped the record it should have been
+            // dropped by. An observation no newer than the last one is not news, whatever it
+            // says; it cannot correct, extend, or destroy what is already recorded.
+            if let last = ring.last, window.observedAt <= last.at {
+                var out = window
+                out.samples = ring
+                return out
+            }
+
             // A window that rolled over starts again: its old samples describe a different
             // window that happens to share a name, and averaging across the boundary would
             // report a pace that never happened.
@@ -80,8 +92,7 @@ actor History {
             if let last = ring.last {
                 // Replaying a cached reading is not a new observation, however long ago the
                 // last one was recorded. Only a genuinely newer observation earns a sample.
-                if window.observedAt > last.at,
-                   date.timeIntervalSince(last.at) >= Self.quiet || abs(percent - last.percent) >= 0.5 {
+                if date.timeIntervalSince(last.at) >= Self.quiet || abs(percent - last.percent) >= 0.5 {
                     ring.append(Sample(at: window.observedAt, percent: percent))
                 }
             } else {

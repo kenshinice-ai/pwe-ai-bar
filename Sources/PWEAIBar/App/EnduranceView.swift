@@ -61,11 +61,18 @@ struct EnduranceView: View {
 
     /// Everything the drawing needs, resolved once. Nil when this window has no timeline —
     /// no reset, or a reset already behind us, which is a different fact and gets said instead.
+    /// The rule always spans now → this reset, and the gate is always its right end.
+    ///
+    /// It used to rescale when the endurance ran past the reset, sliding the gate inward to make
+    /// room for a reserve tail. Two things were wrong with that. The axis label kept saying the
+    /// reset time at the far right while the gate had moved to the middle, so the line and the
+    /// words pointed at different moments — and even correctly labelled, a rule whose span
+    /// changes with the reading cannot be compared with the same rule half an hour later.
+    ///
+    /// Spare capacity is a ratio, and it belongs in the sentence: 「到点还剩 38%」.
     private struct Plan {
-        let trip: TimeInterval          // now → reset
-        let axis: TimeInterval          // what the full width of the rule spans
-        let gate: CGFloat               // x of the reset
-        let needle: CGFloat?            // x where the pace runs dry; nil when off-scale
+        let trip: TimeInterval          // now → reset, and the full width of the rule
+        let needle: CGFloat?            // x where the pace runs dry; nil when it lasts the trip
         let endurance: TimeInterval?    // now → dry
         let measured: Bool
         let ticks: [CGFloat]
@@ -86,25 +93,10 @@ struct EnduranceView: View {
         }
 
         let W = Self.ruleWidth
-        var axis = trip
-        var gate = W
-        var needle: CGFloat? = nil
-        if let endurance {
-            if endurance < trip {
-                needle = W * endurance / trip
-            } else if endurance < trip * 2 {
-                axis = endurance
-                gate = W * trip / axis
-                needle = W
-            } else {
-                // Reserve past twice the trip is off the rule. Absence says "off-scale" more
-                // honestly than a mark crushed against the edge, which reads as a value.
-                axis = trip * 2
-                gate = W / 2
-            }
-        }
-        return Plan(trip: trip, axis: axis, gate: gate, needle: needle, endurance: endurance,
-                    measured: burn?.measured ?? false, ticks: Self.ticks(axis: axis, now: now, width: W))
+        let needle: CGFloat? = endurance.flatMap { $0 < trip ? W * CGFloat($0 / trip) : nil }
+        return Plan(trip: trip, needle: needle, endurance: endurance,
+                    measured: burn?.measured ?? false,
+                    ticks: Self.ticks(axis: trip, now: now, width: W))
     }
 
     private var shortfall: TimeInterval? {
@@ -118,7 +110,7 @@ struct EnduranceView: View {
         HStack(spacing: 5) {
             // With no timeline there is nothing to head; the collapsed line says it all, and
             // "到重置" above "没有重置时间" is the instrument contradicting itself.
-            Text(plan == nil ? "" : (window.confirmedExhausted || plan?.endurance == nil ? "到重置" : "续航"))
+            Text(plan == nil ? "" : (headlineIsEndurance ? "续航" : "到重置"))
                 .brandLabel().foregroundStyle(Theme.text2)
             Spacer(minLength: Theme.s1)
             // Saying which stretch the rate covers is the difference between a claim and a
@@ -134,12 +126,23 @@ struct EnduranceView: View {
         .frame(height: 11)
     }
 
+    /// The headline is whichever of the two will actually happen.
+    ///
+    /// Endurance past the reset is hypothetical: the window rolls over and refills long before
+    /// the tank would have run dry, so a two-hour window headlining "13 小时 40 分" describes
+    /// uninterrupted running time nobody is ever going to get. When the pace lasts the trip, the
+    /// thing that happens is the reset, and the spare capacity is a ratio in the verdict.
+    private var headlineIsEndurance: Bool {
+        guard let plan, !window.confirmedExhausted, let endurance = plan.endurance else { return false }
+        return endurance < plan.trip
+    }
+
     private var reading: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.s2) {
-            if let plan, !window.confirmedExhausted, let endurance = plan.endurance {
+            if let plan, headlineIsEndurance, let endurance = plan.endurance {
                 duration(endurance)
-            } else if plan != nil {
-                duration(plan!.trip)
+            } else if let plan {
+                duration(plan.trip)
             } else {
                 Text("没有重置时间").font(Theme.sans(15, 600)).foregroundStyle(Theme.text2)
             }
@@ -199,7 +202,7 @@ struct EnduranceView: View {
     private func rule(_ plan: Plan) -> some View {
         let W = Self.ruleWidth
         let hot = Theme.health(.hot, dark: isDark)
-        let fuelEnd = min(plan.needle ?? W, plan.gate)
+        let fuelEnd = plan.needle ?? W
         return ZStack(alignment: .topLeading) {
             // Track: the empty tank. Never says anything on its own.
             Capsule().fill(Theme.sunk)
@@ -222,21 +225,8 @@ struct EnduranceView: View {
             } else {
                 Capsule().fill(Theme.accent)
                     .frame(width: max(2, fuelEnd), height: 10).offset(y: 6)
-                // Reserve: fuel that will not be needed. Half the height rather than another
-                // colour — "will use" and "will not use" is a different distinction from
-                // "fine" and "not fine", and colour is already spoken for.
-                //
-                // A nil needle here means the reserve ran off the end of the rule, not that
-                // there is none: the tail has to run to the edge. Without this the calm case —
-                // by far the most common one — drew a bar stopping exactly on the gate, which
-                // reads as "just enough" when the truth is "twice over".
-                if plan.needle == nil || (plan.needle ?? 0) > plan.gate {
-                    Rectangle().fill(Theme.accent)
-                        .frame(width: (plan.needle ?? W) - plan.gate, height: 5)
-                        .offset(x: plan.gate, y: 8.5)
-                }
-                if let needle = plan.needle, needle < plan.gate {
-                    dimension(from: needle, to: plan.gate, colour: hot)
+                if let needle = plan.needle {
+                    dimension(from: needle, to: W, colour: hot)
                 }
             }
 
@@ -253,8 +243,8 @@ struct EnduranceView: View {
             // Gate: the reset. Knocked out of whatever it crosses first, which is the old
             // instrument trick for a cursor over a filled bar — without it a white line on
             // amber turns to mud in dark mode.
-            Rectangle().fill(Theme.surface).frame(width: 6, height: 22).offset(x: plan.gate - 3)
-            Rectangle().fill(Theme.text).frame(width: 2, height: 22).offset(x: plan.gate - 1)
+            Rectangle().fill(Theme.surface).frame(width: 6, height: 22).offset(x: W - 3)
+            Rectangle().fill(Theme.text).frame(width: 2, height: 22).offset(x: W - 2)
 
             // Needle: where the pace runs dry. Solid when that pace was measured from readings,
             // hollow when it is the whole-window average — the drawing carries its own evidence.

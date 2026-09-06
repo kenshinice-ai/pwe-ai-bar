@@ -27,7 +27,11 @@ actor CodexProvider {
     private let tailBytes: Int
     private let server: CodexAppServer?
     private var live: CodexAppServer.Reading?
+    /// When the reading in hand was actually taken, and when we last tried. Kept apart on
+    /// purpose: a failed attempt used to overwrite the success time, so a miss *extended* the
+    /// life of the value it failed to replace and the panel went on showing it as current.
     private var liveAt: Date?
+    private var attemptedAt: Date?
     private(set) var plan: String?
     private(set) var resetCredits = 0
 
@@ -44,7 +48,22 @@ actor CodexProvider {
         if let reading = await liveReading(), !reading.windows.isEmpty {
             plan = reading.planType
             resetCredits = reading.resetCredits
-            return reading.windows
+            let date = now()
+            // Held-over readings are marked as what they are. Two things used to be reported as
+            // current here that were not: a value kept after a failed refresh, and a value whose
+            // own window has since rolled over. The second is worse — past its reset it is not
+            // stale, it is describing a window that no longer exists.
+            return reading.windows.map { window in
+                var w = window
+                let age = date.timeIntervalSince(w.observedAt)
+                if let reset = w.resetsAt, reset <= date {
+                    w.percent = nil; w.note = "待确认"; w.severity = .normal
+                    w.confirmedExhausted = false; w.isStale = true
+                } else if age > ttl(reading) {
+                    w.isStale = true
+                }
+                return w
+            }
         }
         return logWindows()
     }
@@ -52,12 +71,12 @@ actor CodexProvider {
     private func liveReading() async -> CodexAppServer.Reading? {
         if let live, let at = liveAt, now().timeIntervalSince(at) < ttl(live) { return live }
         guard let server else { return nil }
-        guard let fresh = await server.read(), !fresh.windows.isEmpty else {
-            // Remember the miss for a minute: a machine without Codex should not spawn a process
-            // it does not have on every single refresh.
-            liveAt = now(); live = live ?? CodexAppServer.Reading()
-            return live?.windows.isEmpty == true ? nil : live
-        }
+        // Back off from *attempting*, separately from how long a success stays good. A machine
+        // without Codex should not spawn a process it does not have on every refresh; a machine
+        // whose last attempt failed should not have that failure make its old figure look newer.
+        if let attemptedAt, now().timeIntervalSince(attemptedAt) < 60, live == nil { return nil }
+        attemptedAt = now()
+        guard let fresh = await server.read(), !fresh.windows.isEmpty else { return live }
         live = fresh; liveAt = now()
         return fresh
     }
@@ -150,7 +169,7 @@ actor CodexProvider {
                            percent: expired ? nil : pct, resetsAt: reset,
                            note: expired ? "待确认" : nil, observedAt: observed,
                            gradedBy: .local, isStale: expired,
-                           confirmedExhausted: !expired && pct >= 99.5,
+                           confirmedExhausted: !expired && pct >= 100,
                            windowLength: minutes.map { TimeInterval($0) * 60 })
     }
 

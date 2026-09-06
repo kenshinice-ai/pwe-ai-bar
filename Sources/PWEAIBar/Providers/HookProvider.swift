@@ -46,20 +46,22 @@ enum HookProvider {
     /// The installed script is a copy, so an app update leaves the old one running. Nothing in
     /// the settings file changes when we fix a bug inside it, so "已安装" would keep saying yes
     /// to a script written weeks ago — which is exactly how a concurrency fix ships to nobody.
-    static func installedScriptIsCurrent(source: URL?) -> Bool {
+    static func installedScriptIsCurrent(source: URL?, script: URL? = nil) -> Bool {
         guard let source, let want = try? Data(contentsOf: source) else { return true }
-        return (try? Data(contentsOf: script)) == want
+        return (try? Data(contentsOf: script ?? Self.script)) == want
     }
 
     /// Replace our own copy in place when it has fallen behind. Only ever touches a file this
     /// app wrote, in this app's cache directory, and only when the settings file already points
     /// at it — installing the hooks is still a decision the user makes once, by hand.
     @discardableResult
-    static func refreshScript(source: URL?) -> Bool {
-        guard let source, isInstalled, !installedScriptIsCurrent(source: source),
+    static func refreshScript(source: URL?, settings: URL? = nil, script: URL? = nil) -> Bool {
+        let target = script ?? Self.script
+        guard let source, isInstalled(settings: settings ?? settingsURL, script: target),
+              !installedScriptIsCurrent(source: source, script: target),
               let bytes = try? Data(contentsOf: source) else { return false }
-        guard (try? bytes.write(to: script, options: .atomic)) != nil else { return false }
-        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+        guard (try? bytes.write(to: target, options: .atomic)) != nil else { return false }
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: target.path)
         return true
     }
 

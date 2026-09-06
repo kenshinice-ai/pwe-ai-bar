@@ -23,7 +23,14 @@ enum Readout {
         if w.confirmedExhausted { return "已用尽" }
         guard let pct = w.percent else { return w.note ?? "—" }
         let shown = remaining ? max(0, 100 - pct) : pct
-        return "\(Int(shown.rounded()))%"
+        var value = Int(shown.rounded())
+        // The boundary values are reserved for the fact. 99.6 % used rounds to "100%", which
+        // reads as spent when it is not — and the fix used to be to call 99.6 exhausted, which
+        // put the lie in the alert instead of the label. Round normally everywhere else; never
+        // round *into* 100 % used or 0 % left.
+        if !remaining, value >= 100 { value = 99 }
+        if remaining, value <= 0 { value = 1 }
+        return "\(value)%"
     }
 
     /// How much of the bar to paint, 0…1. In remaining mode the bar empties as you spend,

@@ -66,13 +66,18 @@ final class FakeCredential {
     var value: String? = "synthetic-test-token"
     /// What Claude Code's own credential would hand back. Nil means "the CLI never logged in".
     var claudeCode: String?
+    /// When Claude Code's stored credential expires. Nil means "no expiry recorded", which the
+    /// provider must read as usable rather than as unknown-and-therefore-bad.
+    var claudeCodeExpiry: Date?
     var claudeCodeReads = 0
     var result: Credentials.SaveResult = .saved
     var access: ClaudeProvider.Access {
         .init(own: { self.value.map { .init(value: $0, expiresAt: nil, source: .ownToken) } },
               claudeCode: {
                   self.claudeCodeReads += 1
-                  return self.claudeCode.map { .init(value: $0, expiresAt: nil, source: .claudeKeychain) }
+                  return self.claudeCode.map {
+                      .init(value: $0, expiresAt: self.claudeCodeExpiry, source: .claudeKeychain)
+                  }
               },
               sharedExists: { false }, shared: { XCTFail("Unexpected shared keychain read"); return nil },
               save: { text in
