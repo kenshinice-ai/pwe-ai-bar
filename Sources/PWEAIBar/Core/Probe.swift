@@ -191,6 +191,60 @@ enum Probe {
     /// `--endurance DIR` draws the forecast instrument on its own, across every state it can
     /// reach. Real data is tidy: it will show one or two of these and never the other seven, so
     /// the branches that only appear on a bad day would never be looked at.
+    /// `--credentials` answers the one question this app should never make someone guess at:
+    /// why it cannot read Claude quota right now. Each source is reported separately — present
+    /// or not, expired or not, and what the endpoint actually says to it. No token is printed.
+    ///
+    /// Written because the answer turned out to be genuinely surprising: the credential Claude
+    /// Code keeps in the keychain sat expired for twelve hours while Claude Code itself ran the
+    /// whole time, and no surface in the app could tell you that was what had happened.
+    static func credentials() async {
+        func line(_ k: String, _ v: String) { print("  \(k.padding(toLength: 14, withPad: " ", startingAt: 0))\(v)") }
+        let f = DateFormatter(); f.dateFormat = "MM-dd HH:mm:ss"
+        let now = Date()
+
+        print("PWE AI Bar — 凭据自检\n" + String(repeating: "─", count: 58))
+        for (name, token) in [("Claude Code 钥匙串", Credentials.claudeCodeCredential()),
+                              ("本 app 长期令牌", Credentials.ownToken())] {
+            print("\n\(name)")
+            guard let token else { line("状态", "没有找到"); continue }
+            line("来源", token.source.rawValue)
+            line("长度", "\(token.value.count) 字符")
+            if let expiry = token.expiresAt {
+                let gone = expiry <= now
+                line("到期", "\(f.string(from: expiry))  \(gone ? "已过期 \(Int(now.timeIntervalSince(expiry) / 60)) 分钟" : "还有 \(Int(expiry.timeIntervalSince(now) / 60)) 分钟")")
+            } else {
+                line("到期", "凭据里没有记到期时间")
+            }
+
+            var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
+            request.setValue("Bearer \(token.value)", forHTTPHeaderField: "Authorization")
+            request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+            request.setValue(ClaudeProvider.userAgent, forHTTPHeaderField: "User-Agent")
+            request.timeoutInterval = 15
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                let http = response as? HTTPURLResponse
+                line("接口返回", "\(http?.statusCode ?? -1)")
+                if let retry = http?.value(forHTTPHeaderField: "Retry-After") {
+                    line("Retry-After", retry)
+                }
+                if http?.statusCode == 200 {
+                    let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+                    let count = (root["limits"] as? [[String: Any]])?.count ?? 0
+                    line("读到", "\(count) 个额度窗口")
+                } else {
+                    // Error bodies carry the reason and no secrets; the token is only ever in
+                    // the request header, never in a response.
+                    line("正文", String(String(data: data, encoding: .utf8) ?? "").prefix(300).description)
+                }
+            } catch {
+                line("接口返回", "请求失败：\(error.localizedDescription)")
+            }
+        }
+        print("")
+    }
+
     static func endurance(into dir: String) {
         let hour: TimeInterval = 3600
         func window(_ label: String, percent: Double?, resetIn: TimeInterval,

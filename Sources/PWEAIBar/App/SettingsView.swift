@@ -19,7 +19,11 @@ struct SettingsView: View {
          tokenEditor: TokenEditor? = nil, hookInstalled: Bool? = nil) {
         self.installHooks = installHooks; self.saveToken = saveToken; self.enableRealQuota = enableRealQuota
         self.prefs = prefs ?? .shared
-        _tokenEditor = StateObject(wrappedValue: tokenEditor ?? TokenEditor(hasToken: Credentials.hasOwnToken))
+        // The flag, not the keychain. Reading the item itself here is a synchronous trip to
+        // securityd inside a view initialiser — measured on this machine at up to 84 s, which
+        // is a settings window that appears to hang on open.
+        _tokenEditor = StateObject(wrappedValue: tokenEditor
+            ?? TokenEditor(hasToken: Credentials.hasStoredOwnToken))
         let installed = hookInstalled ?? HookProvider.isInstalled
         let current = HookProvider.installedScriptIsCurrent(
             source: Bundle.module.url(forResource: "pwe-ai-bar-hook", withExtension: "sh"))

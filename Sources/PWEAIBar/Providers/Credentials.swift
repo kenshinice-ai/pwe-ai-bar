@@ -139,6 +139,13 @@ enum Credentials {
 
     static var hasOwnToken: Bool { ownToken() != nil }
 
+    /// Whether a token was ever stored, answered from the flag alone. Safe on the main thread
+    /// and safe inside a view's initialiser, which `hasOwnToken` is not: that one goes to
+    /// securityd, and securityd has taken 84 seconds on this machine for this item.
+    static var hasStoredOwnToken: Bool {
+        UserDefaults.standard.bool(forKey: ownFlag)
+    }
+
     // MARK: Claude Code's own credential — no dialog
 
     /// True when Claude Code has ever logged in on this machine. Asks the keychain only for
