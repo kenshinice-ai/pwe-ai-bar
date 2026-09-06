@@ -80,86 +80,11 @@ struct QuotaWindow: Identifiable {
         return start <= now ? start : nil
     }
 
-    /// How fast this window is filling, in percent per hour.
-    ///
-    /// Two answers, and which one it is matters enough to be returned alongside the number.
-    /// `measured` comes from readings taken over a recent stretch and is the honest answer to
-    /// "how fast am I going right now". The fallback divides the whole percentage by the whole
-    /// elapsed time, which is the average since the window opened — a different question, and
-    /// a reassuring one: an hour of heavy work after three quiet hours averages out to nothing
-    /// alarming right up until it stops you.
-    ///
-    /// `span` is how long the measurement covers, so the sentence can say so. "每小时 23%" with
-    /// no span behind it is a claim; "最近 22 分钟每小时 23%" is a reading.
-    func burn(at now: Date) -> (perHour: Double, measured: Bool, span: TimeInterval)? {
-        // The staleness guard used to live only in the averaging fallback, so a stale window
-        // still handed back a confident measured rate from its samples — and the drawing above
-        // it would have shown that rate as a solid mark. A reading we could not take is not a
-        // reading, whichever branch produces the number.
-        guard !isStale else { return nil }
-        // And a reading taken long enough ago is the same problem wearing a timestamp. Ten
-        // minutes matches what the alert rules already treat as current; past it the honest
-        // answer is the countdown and "读数太旧，不推算", which the instrument already draws.
-        guard observedAt <= now, now.timeIntervalSince(observedAt) <= 600 else { return nil }
-        // How far back to measure, scaled to what is actually being decided.
-        //
-        // A fixed stretch is wrong at both ends. Too long and a burst is averaged back into the
-        // quiet hours before it — the exact failure this history was added to fix. Too short and
-        // one heavy turn becomes the whole sample, and a weekly window starts projecting from
-        // four minutes of evidence.
-        //
-        // So: a quarter of the time left, floored at ten minutes and capped at a quarter of the
-        // window. A five-hour window with two hours to go measures the last half hour; a weekly
-        // window with five days left measures the last day and a bit.
-        let remaining = resetsAt.map { $0.timeIntervalSince(now) } ?? 3600
-        let horizon = min(max(remaining / 4, 600), (windowLength ?? 3600) / 4)
-        let recent = samples.filter { now.timeIntervalSince($0.at) <= horizon }
-        if let first = recent.first, let last = recent.last, recent.count >= 2 {
-            let span = last.at.timeIntervalSince(first.at)
-            let climb = last.percent - first.percent
-            if span >= 600, climb >= 0 {
-                return (climb / (span / 3600), true, span)
-            }
-        }
-        guard let average = averagePace(at: now) else { return nil }
-        return (average.perHour, false, average.elapsed)
-    }
-
-    /// When this window would hit its limit if the current rate kept up.
-    ///
-    /// Deliberately nil unless it lands *before* the reset. "You will not run out" is not news;
-    /// the whole value of the figure is the case where you will, and how long you have.
-    func projectedExhaustion(at now: Date) -> Date? {
-        guard let percent, percent < 99.5, let reset = resetsAt, reset > now,
-              let rate = burn(at: now)?.perHour, rate > 0.01 else { return nil }
-        // Anchored to when the reading was taken, not to now. Basing it on the clock treats an
-        // old percentage as if it were current, which pushes the crossing later every second
-        // the panel stays open.
-        let at = observedAt.addingTimeInterval((100 - percent) / rate * 3600)
-        return at > now && at < reset ? at : nil
-    }
-
-    /// Where the pace lands when the window rolls over. Uncapped on purpose: 140 % is the answer
-    /// to "am I going to make it", and clamping it to 100 throws that away.
-    func projectedPercentAtReset(at now: Date) -> Double? {
-        guard let percent, percent < 99.5, let reset = resetsAt, reset > now,
-              let rate = burn(at: now)?.perHour else { return nil }
-        return percent + rate * (reset.timeIntervalSince(observedAt) / 3600)
-    }
-
-    private func averagePace(at now: Date) -> (perHour: Double, elapsed: TimeInterval)? {
-        guard let percent, percent >= 5, percent < 99.5, !isStale,
-              let length = windowLength, let start = windowStart(at: now),
-              let reset = resetsAt, reset > now else { return nil }
-        // Measured from the reading, not from the clock. Dividing by the time since the window
-        // opened means the average falls on its own while nothing new arrives — leave the panel
-        // open for twenty minutes and the same percentage quietly becomes a gentler pace and a
-        // rosier forecast, with no observation behind the change.
-        let elapsed = observedAt.timeIntervalSince(start)
-        // Ten minutes into a five-hour window, two turns extrapolate to anything at all.
-        guard elapsed > max(300, length * 0.05) else { return nil }
-        return (percent / (elapsed / 3600), elapsed)
-    }
+    /// Everything about pace, projection and verdict now lives in `Forecast`, reached through
+    /// `forecast(at:)`. It used to be three methods here plus four if-chains in the view, which
+    /// is how the same window could be described as measured by one of them and unknown by
+    /// another, and how "we cannot tell you" ended up rendering in the same grey as "you are
+    /// fine". One question, one answer, one place.
 
     var display: String { percent.map { "\(Int($0.rounded()))%" } ?? (note ?? "—") }
 

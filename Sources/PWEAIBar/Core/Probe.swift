@@ -247,39 +247,60 @@ enum Probe {
 
     static func endurance(into dir: String) {
         let hour: TimeInterval = 3600
+        let now = Date()
         func window(_ label: String, percent: Double?, resetIn: TimeInterval,
                     length: TimeInterval?, stale: Bool = false, spent: Bool = false,
-                    samples: [History.Sample] = []) -> (String, QuotaWindow) {
+                    observedAgo: TimeInterval = 0,
+                    samples: [(TimeInterval, Double)] = []) -> (String, QuotaWindow) {
             var w = QuotaWindow(id: "five_hour", provider: .claude, channel: .session,
                                 title: "五小时窗口", percent: percent,
-                                resetsAt: resetIn == 0 ? nil : Date().addingTimeInterval(resetIn),
-                                observedAt: Date(), isStale: stale,
+                                resetsAt: resetIn == 0 ? nil : now.addingTimeInterval(resetIn),
+                                observedAt: now.addingTimeInterval(-observedAgo), isStale: stale,
                                 confirmedExhausted: spent, windowLength: length)
-            w.samples = samples
+            w.samples = samples.map {
+                History.Sample(at: now.addingTimeInterval($0.0), percent: $0.1)
+            }
             return (label, w)
         }
-        // A measured rate needs readings; these are synthetic but shaped like real ones.
-        let measured = (0...6).map {
-            History.Sample(at: Date().addingTimeInterval(-Double(6 - $0) * 300),
-                           percent: 60 + Double($0) * 1.6)
-        }
+        // Shapes taken from the real cache rather than invented: a burst of integer steps, a
+        // long flat stretch, and a single step with nothing either side of it.
+        let burst: [(TimeInterval, Double)] = [(-1500, 60), (-1200, 63), (-900, 66),
+                                               (-600, 69), (-300, 72), (0, 75)]
+        let flat: [(TimeInterval, Double)] = [(-2700, 40), (-1800, 40), (-900, 40), (0, 40)]
+        let oneStep: [(TimeInterval, Double)] = [(-1800, 94), (0, 95)]
+        let weekly: [(TimeInterval, Double)] = [(-900, 19), (-835, 20), (-675, 21), (0, 23)]
         let cases = [
             window("short", percent: 70, resetIn: 2 * hour, length: 5 * hour),
-            window("measured", percent: 70, resetIn: 2 * hour, length: 5 * hour, samples: measured),
+            window("measured", percent: 75, resetIn: 2 * hour, length: 5 * hour, samples: burst),
+            window("flat", percent: 40, resetIn: 3 * hour, length: 5 * hour, samples: flat),
+            window("tooclose", percent: 95, resetIn: 4 * hour, length: 5 * hour, samples: oneStep),
             window("comfortable", percent: 18, resetIn: 2 * hour, length: 5 * hour),
             window("offscale", percent: 6, resetIn: 2 * hour, length: 5 * hour),
             window("touching", percent: 60, resetIn: 2 * hour, length: 5 * hour),
             window("spent", percent: 100, resetIn: 90 * 60, length: 5 * hour, spent: true),
-            window("stale", percent: 55, resetIn: 2 * hour, length: 5 * hour, stale: true),
+            window("blind", percent: nil, resetIn: 2 * hour, length: 5 * hour,
+                   stale: true, observedAgo: 7 * hour),
+            window("stale", percent: 55, resetIn: 2 * hour, length: 5 * hour,
+                   stale: true, observedAgo: 400),
             window("nolength", percent: 55, resetIn: 2 * hour, length: nil),
             window("noratio", percent: nil, resetIn: 2 * hour, length: 5 * hour),
             window("noreset", percent: 55, resetIn: 0, length: 5 * hour),
-            window("weekly", percent: 44, resetIn: 5 * 86400, length: 7 * 86400),
+            window("weekly", percent: 23, resetIn: 6.5 * 86400, length: 7 * 86400, samples: weekly),
         ]
+        func line(_ k: String, _ v: String) {
+            print("  \(k.padding(toLength: 12, withPad: " ", startingAt: 0))\(v)")
+        }
+        print("续航仪的十四个状态（合成数据）")
+        for (label, w) in cases {
+            let f = w.forecast(at: now)
+            line(label, "\(f.verdictText)   |   \(f.headingLeft) "
+                + (f.headline.map { Forecast.span($0) } ?? "—")
+                + "   |   " + (f.paceText ?? "没有速率"))
+        }
         for dark in [true, false] {
             let tag = dark ? "dark" : "light"
             for (label, w) in cases {
-                shoot(AnyView(EnduranceView(window: w, now: Date())
+                shoot(AnyView(EnduranceView(window: w, now: now)
                                 .padding(.horizontal, 16).padding(.vertical, 10)
                                 .background(Theme.surface)),
                       width: Theme.panelWidth, dark: dark,

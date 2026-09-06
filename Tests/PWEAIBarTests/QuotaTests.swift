@@ -144,7 +144,7 @@ final class QuotaTests: XCTestCase {
     /// The pace figures need no stored history: the window's own length says when it opened,
     /// and the percentage says how much has gone since. What they must not do is answer at all
     /// when the answer would be noise.
-    func testPaceProjectionAnswersOnlyWhenTheAnswerMeansSomething() {
+    func testPaceProjectionAnswersOnlyWhenTheAnswerMeansSomething() throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         func window(percent: Double?, resetIn: TimeInterval, length: TimeInterval?,
                     stale: Bool = false) -> QuotaWindow {
@@ -157,39 +157,67 @@ final class QuotaTests: XCTestCase {
         }
         // Three hours into a five-hour window with 70% gone: 23.3%/h, and the line crosses 100%
         // about 43 minutes before the window would have rolled over.
-        let racing = window(percent: 70, resetIn: 2 * 3600, length: 5 * 3600)
-        XCTAssertEqual(racing.burn(at: now)?.perHour ?? 0, 23.33, accuracy: 0.01)
-        XCTAssertEqual(racing.burn(at: now)?.measured, false, "no samples yet: this is the average")
-        XCTAssertEqual(racing.projectedPercentAtReset(at: now) ?? 0, 116.67, accuracy: 0.01)
-        // Started 3 h ago, 70 % gone, so 100 % lands at start + 3 h × 100/70 ≈ now + 77 min —
-        // about 43 minutes before the window would have rolled over on its own.
-        let out = try? XCTUnwrap(racing.projectedExhaustion(at: now))
-        XCTAssertEqual(out?.timeIntervalSince(now) ?? 0, 4_629, accuracy: 60)
-        XCTAssertEqual((racing.resetsAt?.timeIntervalSince(out ?? now)) ?? 0, 2_571, accuracy: 60)
-
-        // Comfortably inside the window: there is a rate, but "you will not run out" is not news.
-        let easy = window(percent: 20, resetIn: 2 * 3600, length: 5 * 3600)
-        XCTAssertNotNil(easy.burn(at: now))
-        XCTAssertEqual(easy.projectedPercentAtReset(at: now) ?? 0, 33.33, accuracy: 0.01)
-        XCTAssertNil(easy.projectedExhaustion(at: now))
-
-        for (label, w) in [
-            ("no window length", window(percent: 70, resetIn: 3600, length: nil)),
-            ("no reading", window(percent: nil, resetIn: 3600, length: 5 * 3600)),
-            ("barely started", window(percent: 70, resetIn: 5 * 3600 - 60, length: 5 * 3600)),
-            ("too little used", window(percent: 2, resetIn: 3600, length: 5 * 3600)),
-            ("already spent", window(percent: 100, resetIn: 3600, length: 5 * 3600)),
-            ("stale reading", window(percent: 70, resetIn: 3600, length: 5 * 3600, stale: true)),
-            ("already reset", window(percent: 70, resetIn: -60, length: 5 * 3600)),
-            ("reading too old", QuotaWindow(id: "five_hour", provider: .claude, channel: .session,
-                                            title: "t", percent: 70,
-                                            resetsAt: now.addingTimeInterval(3600),
-                                            observedAt: now.addingTimeInterval(-3600),
-                                            windowLength: 5 * 3600)),
-        ] {
-            XCTAssertNil(w.projectedExhaustion(at: now), label)
-            XCTAssertNil(w.burn(at: now), label)
+        let racing = window(percent: 70, resetIn: 2 * 3600, length: 5 * 3600).forecast(at: now)
+        let rate = try XCTUnwrap(racing.rate)
+        XCTAssertEqual(racing.evidence?.isMeasured, false, "no samples yet: this is the average")
+        XCTAssertEqual(rate.low, 23.0, accuracy: 0.01)
+        XCTAssertEqual(rate.high, 71.0 / 3, accuracy: 0.01)
+        // Even at the slowest rate the reading allows, the tank is dry about 42 minutes before
+        // the window would have rolled over on its own — so the shortfall is a guarantee, not a
+        // projection from one fitted number.
+        guard case .fallsShort(let gap) = racing.verdict else {
+            return XCTFail("70 % three hours in must be called short: \(racing.verdict)")
         }
+        XCTAssertEqual(gap, 2_400, accuracy: 60, "floored to the same grain as the headline")
+        XCTAssertEqual(racing.tone, .hot)
+        XCTAssertEqual(try XCTUnwrap(racing.enduranceLow), 4_563, accuracy: 60)
+
+        // Comfortably inside the window: there is a rate, and the answer is that it does not
+        // matter — stated as the floor of what will be left rather than as a crossing.
+        let easy = window(percent: 20, resetIn: 2 * 3600, length: 5 * 3600).forecast(at: now)
+        XCTAssertNotNil(easy.rate)
+        guard case .makesIt(let spare) = easy.verdict else {
+            return XCTFail("20 % three hours in makes it: \(easy.verdict)")
+        }
+        XCTAssertEqual(spare, 66, accuracy: 0.5)
+        XCTAssertEqual(easy.tone, .plain)
+        XCTAssertFalse(easy.headlineIsEndurance, "the reset is what actually happens, so it leads")
+
+        // A window barely touched used to be refused a forecast on a floor of five percent.
+        // The bracket makes the floor unnecessary: two percent over four hours is [0.25, 0.75]
+        // %/h, which is wide in ratio and decisive in effect.
+        let untouched = window(percent: 2, resetIn: 3600, length: 5 * 3600).forecast(at: now)
+        guard case .makesIt = untouched.verdict else {
+            return XCTFail("2 % four hours in makes it: \(untouched.verdict)")
+        }
+
+        for (label, w, expected) in [
+            ("no window length", window(percent: 70, resetIn: 3600, length: nil),
+             Forecast.Thinness.noWindowLength),
+            ("no reading", window(percent: nil, resetIn: 3600, length: 5 * 3600), .noPercent),
+            ("barely started", window(percent: 70, resetIn: 5 * 3600 - 60, length: 5 * 3600),
+             .tooEarlyInWindow),
+            ("stale reading", window(percent: 70, resetIn: 3600, length: 5 * 3600, stale: true),
+             .readingTooOld),
+        ] {
+            let f = w.forecast(at: now)
+            XCTAssertNil(f.rate, label)
+            XCTAssertEqual(f.verdict, .sampling, label)
+            XCTAssertEqual(f.thinness, expected, label)
+            XCTAssertEqual(f.verdictText, "还在采样", label)
+        }
+
+        // An hour with no new reading is not thin evidence, it is silence, and it is named.
+        let silent = QuotaWindow(id: "five_hour", provider: .claude, channel: .session,
+                                 title: "t", percent: 70, resetsAt: now.addingTimeInterval(3600),
+                                 observedAt: now.addingTimeInterval(-3600), windowLength: 5 * 3600)
+        XCTAssertEqual(silent.forecast(at: now).verdict, .blind(since: 3600))
+
+        // The two that are not "wait": one is a fact, the other has no timeline to draw on.
+        XCTAssertEqual(window(percent: 100, resetIn: 3600, length: 5 * 3600).forecast(at: now).verdict,
+                       .spent)
+        XCTAssertEqual(window(percent: 70, resetIn: -60, length: 5 * 3600).forecast(at: now).verdict,
+                       .noTimeline(.resetPassed))
     }
 
     /// A weekly window is seven days long whichever way the reading arrives, including out of
@@ -235,7 +263,7 @@ final class QuotaTests: XCTestCase {
         let held = await codex.windows()
         XCTAssertEqual(held.first?.percent, 40, "last good is still worth showing")
         XCTAssertTrue(held.first?.isStale ?? false, "but not as a fresh reading")
-        XCTAssertNil(held.first?.burn(at: clock.date), "and nothing is forecast from it")
+        XCTAssertNil(held.first?.forecast(at: clock.date).rate, "and nothing is forecast from it")
 
         // Past its own reset it is not merely stale — it describes a window that has gone.
         clock.date.addTimeInterval(3600)

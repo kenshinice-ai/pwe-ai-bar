@@ -142,14 +142,19 @@ final class HistoryTests: XCTestCase {
             _ = await history.observe([window(12 + Double(step) * 5, at: clock, resetIn: 5 * 3600)])
         }
         let out = await history.observe([window(32, at: clock, resetIn: 5 * 3600)])
-        let burn = try XCTUnwrap(out.first?.burn(at: clock))
-        XCTAssertTrue(burn.measured, "with samples in hand the rate is measured, not averaged")
-        XCTAssertGreaterThan(burn.perHour, 30, "the burst is what is happening now")
-        XCTAssertLessThan(burn.span, 3600)
+        let f = try XCTUnwrap(out.first).forecast(at: clock)
+        let evidence = try XCTUnwrap(f.evidence)
+        XCTAssertTrue(evidence.isMeasured, "with samples in hand the rate is measured, not averaged")
+        XCTAssertLessThan(evidence.span, 3600)
+        // Even the slowest rate the readings allow is the burst, not the quiet hours before it.
+        XCTAssertGreaterThan(try XCTUnwrap(f.rate).low, 30, "the burst is what is happening now")
 
         // Averaged over the window it would read about 9 %/h and project no trouble at all;
-        // measured, it runs out well before the reset.
-        XCTAssertNotNil(out.first?.projectedExhaustion(at: clock))
+        // bracketed from the samples, it runs dry before the reset under every rate the
+        // readings admit.
+        guard case .fallsShort = f.verdict else {
+            return XCTFail("a burst that outruns the window must be called short: \(f.verdict)")
+        }
     }
 
     /// Without enough history the honest answer is the average, and it must say so.
@@ -161,8 +166,8 @@ final class HistoryTests: XCTestCase {
         _ = await history.observe([window(60, at: clock, resetIn: 5 * 3600)])
         clock.addTimeInterval(120)
         let out = await history.observe([window(62, at: clock, resetIn: 5 * 3600)])
-        let burn = try XCTUnwrap(out.first?.burn(at: clock))
-        XCTAssertFalse(burn.measured, "two minutes is not a rate")
+        let f = try XCTUnwrap(out.first).forecast(at: clock)
+        XCTAssertEqual(f.evidence?.isMeasured, false, "two minutes is not a rate")
     }
 
     func testStaleAndUnreadableWindowsAreNotRecorded() async throws {
@@ -192,8 +197,8 @@ final class HistoryTests: XCTestCase {
 
         XCTAssertEqual(out.first?.samples.count, 1, "the leap starts the record again")
         XCTAssertEqual(out.first?.samples.first?.percent, 91)
-        XCTAssertNil(out.first?.burn(at: clock)?.measured == true ? true : nil,
-                     "one sample is not a rate")
+        XCTAssertNotEqual(out.first?.forecast(at: clock).evidence?.isMeasured, true,
+                          "one sample is not a rate")
 
         // A climb of the same size over a believable stretch is a real burst and is kept.
         var slow = origin
@@ -239,13 +244,15 @@ final class HistoryTests: XCTestCase {
             _ = await history.observe([window(Double(step) * 8, at: clock)])
         }
         let live = await history.observe([window(40, at: clock)])
-        XCTAssertEqual(live.first?.burn(at: clock)?.measured, true)
+        XCTAssertEqual(live.first?.forecast(at: clock).evidence?.isMeasured, true)
 
         var stale = try XCTUnwrap(live.first)
         stale.isStale = true
-        XCTAssertNil(stale.burn(at: clock), "no reading, no rate")
-        XCTAssertNil(stale.projectedExhaustion(at: clock))
-        XCTAssertNil(stale.projectedPercentAtReset(at: clock))
+        let f = stale.forecast(at: clock)
+        XCTAssertNil(f.rate, "no reading, no rate")
+        XCTAssertNil(f.enduranceLow)
+        XCTAssertEqual(f.verdict, .sampling)
+        XCTAssertEqual(f.thinness, .readingTooOld)
     }
 
     /// From the audit, and the ordering error was exactly as described: the ring was cleared on
@@ -282,18 +289,22 @@ final class HistoryTests: XCTestCase {
         let window = QuotaWindow(id: "five_hour", provider: .claude, channel: .session, title: "t",
                                  percent: 60, resetsAt: origin.addingTimeInterval(5 * 3600),
                                  observedAt: observedAt, windowLength: 5 * 3600)
-        let first = try XCTUnwrap(window.burn(at: observedAt))
-        XCTAssertFalse(first.measured)
-        XCTAssertEqual(first.perHour, 20, accuracy: 0.01)
+        let first = try XCTUnwrap(window.forecast(at: observedAt).rate)
+        XCTAssertEqual(window.forecast(at: observedAt).evidence?.isMeasured, false)
+        // 60 % over three hours, bracketed by the one point of quantisation the reading carries.
+        XCTAssertEqual(first.low, 59.0 / 3, accuracy: 0.01)
+        XCTAssertEqual(first.high, 61.0 / 3, accuracy: 0.01)
 
         // Nine minutes later, still no new reading: the rate is the same reading, so it is the
         // same rate. The projection may move with the clock; the measurement may not.
-        let later = try XCTUnwrap(window.burn(at: observedAt.addingTimeInterval(540)))
-        XCTAssertEqual(later.perHour, first.perHour, accuracy: 0.0001)
+        let later = try XCTUnwrap(window.forecast(at: observedAt.addingTimeInterval(540)).rate)
+        XCTAssertEqual(later.low, first.low, accuracy: 0.0001)
+        XCTAssertEqual(later.high, first.high, accuracy: 0.0001)
 
         // Past the freshness budget there is no rate at all rather than a quietly stale one.
-        XCTAssertNil(window.burn(at: observedAt.addingTimeInterval(900)))
-        XCTAssertNil(window.projectedExhaustion(at: observedAt.addingTimeInterval(900)))
+        let old = window.forecast(at: observedAt.addingTimeInterval(900))
+        XCTAssertNil(old.rate)
+        XCTAssertEqual(old.thinness, .readingTooOld)
     }
 
 }
