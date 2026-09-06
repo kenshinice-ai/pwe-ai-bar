@@ -257,7 +257,6 @@ struct EnduranceView: View {
     @ViewBuilder
     private func axisLabels(_ plan: Plan, _ f: Forecast) -> some View {
         let W = Self.ruleWidth
-        let hot = Theme.health(.hot, dark: isDark)
         let certain = plan.certain
         ZStack(alignment: .topLeading) {
             if certain == nil || (certain ?? 0) > 51 {
