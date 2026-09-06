@@ -24,7 +24,11 @@ actor ClaudeProvider {
             case .needsSetup: return "请启用真实额度"
             case .notLoggedIn: return "未找到凭据，请登录 Claude Code"
             case .keychainRefused: return "钥匙串访问失败，请重新授权"
-            case .expired: return "Claude Code 的凭据已过期，而本 app 不替你续期。用 claude setup-token 生成长期令牌贴进设置即可"
+            // Measured, not guessed: the endpoint answers an expired credential with
+            // "OAuth access token has expired. Re-authenticate to continue." Re-logging in is
+            // what actually rewrites that keychain item; a stored long-lived token is the other
+            // way out, and it does work — the endpoint accepts one (429, never 401/403).
+            case .expired: return "Claude Code 的凭据已过期，本 app 不替你续期。在 Claude Code 里重新登录，或用 claude setup-token 存一个长期令牌"
             case .unauthorized: return "凭据已失效，请在设置中更换令牌或重新登录 Claude Code"
             case .forbidden: return "凭据无权读取额度，请检查账户权限或更换令牌"
             case .network: return "暂时无法验证，请检查网络，稍后自动重试"
@@ -57,6 +61,13 @@ actor ClaudeProvider {
     private var revision = 0
     private var requestTask: Task<Reading, Never>?
     private var rejectedValue: String?
+    /// The stored long-lived token, held for the life of the process once read.
+    ///
+    /// Re-reading it every refresh buys nothing — it does not expire and it does not change
+    /// unless this app changes it — and it costs a synchronous trip to securityd that has been
+    /// measured on this machine anywhere from 4 ms to 84 s. `invalidateCredential()` clears it,
+    /// which is the only way it can become wrong.
+    private var storedToken: Credentials.Token??
     private var retryNetworkAt: Date?
     private(set) var lastSource: Credentials.Source = .none
 
@@ -113,8 +124,8 @@ actor ClaudeProvider {
             lastSource = cli.source
             return cli
         }
-        // Only now is the slow one worth paying for.
-        if let stored = await ownWithTimeout() {
+        // Only now is the slow one worth paying for, and only once.
+        if let stored = await cachedOwnToken() {
             lastSource = stored.source
             return stored
         }
@@ -137,6 +148,15 @@ actor ClaudeProvider {
     /// unboundedly is a panel that stops updating, so it gets the same racing-continuation
     /// treatment the shared keychain read already has: answer in three seconds or count as
     /// absent for this cycle and try again on the next one.
+    private func cachedOwnToken() async -> Credentials.Token? {
+        if let storedToken { return storedToken }
+        let token = await ownWithTimeout()
+        // A timeout is not an answer, so it is not cached: the next refresh tries again rather
+        // than writing off a token that was merely slow to arrive.
+        if token != nil { storedToken = token }
+        return token
+    }
+
     private func ownWithTimeout() async -> Credentials.Token? {
         let read = access.own
         return await withCheckedContinuation { cont in
@@ -152,7 +172,10 @@ actor ClaudeProvider {
                 let token = read()
                 if claim() { cont.resume(returning: token) }
             }
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 3) {
+            // Ten seconds, not three. securityd's cold path on this machine has taken nine —
+            // and since the answer is now kept for the life of the process, this is paid once,
+            // off the actor, while the panel keeps showing what it already has.
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 10) {
                 if claim() { cont.resume(returning: nil) }
             }
         }
@@ -241,6 +264,7 @@ actor ClaudeProvider {
         requestTask?.cancel(); requestTask = nil
         fetchedAt = nil; cache = []; loaded = true
         rejectedValue = nil; retryNetworkAt = nil; blocker = .none; lastSource = .none
+        storedToken = nil
         try? FileManager.default.removeItem(at: cacheURL)
     }
 

@@ -70,9 +70,13 @@ final class FakeCredential {
     /// provider must read as usable rather than as unknown-and-therefore-bad.
     var claudeCodeExpiry: Date?
     var claudeCodeReads = 0
+    var ownReads = 0
     var result: Credentials.SaveResult = .saved
     var access: ClaudeProvider.Access {
-        .init(own: { self.value.map { .init(value: $0, expiresAt: nil, source: .ownToken) } },
+        .init(own: {
+                  self.ownReads += 1
+                  return self.value.map { .init(value: $0, expiresAt: nil, source: .ownToken) }
+              },
               claudeCode: {
                   self.claudeCodeReads += 1
                   return self.claudeCode.map {

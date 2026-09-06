@@ -210,6 +210,14 @@ final class CredentialTests: XCTestCase {
         XCTAssertEqual(seen, ["Bearer long-lived-token"])
         let blocker = await p.blocker
         XCTAssertEqual(blocker, .none)
+
+        // Read once and remembered. It does not expire and it does not change behind us, and
+        // the read is a synchronous trip to securityd measured on this machine from 4 ms to
+        // 84 s — paying that on every refresh buys nothing at all.
+        let before = credential.ownReads
+        clock.date.addTimeInterval(3600)
+        _ = await p.windows()
+        XCTAssertEqual(credential.ownReads, before, "the stored token is read once, not per refresh")
     }
 
     /// With nothing to fall through to, an expired credential is still an expired credential —
