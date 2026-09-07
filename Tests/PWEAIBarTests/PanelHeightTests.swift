@@ -14,11 +14,12 @@ import XCTest
 final class PanelHeightTests: XCTestCase {
 
     /// The smallest Mac still sold is 1440 x 900 points; the menu bar and the popover's own
-    /// beak and margins take roughly forty of them. A panel taller than what is left cannot be
-    /// shown whole no matter where AppKit puts it.
+    /// beak and margins take roughly forty of them.
     static let smallestUsableScreen: CGFloat = 860
 
-    @MainActor func testTheFullPanelFitsOnTheSmallestScreenWithEveryProviderShowing() throws {
+    /// What the panel measures with everything switched on. Not a budget — a fact to compare
+    /// the two screens against, so both claims below are about the same number.
+    @MainActor private func measuredHeight() throws -> CGFloat {
         let space = try TestSpace()
         let prefs = Prefs(defaults: space.defaults)
         prefs.panelMode = .full
@@ -62,25 +63,36 @@ final class PanelHeightTests: XCTestCase {
         let host = NSHostingView(rootView: AnyView(panel))
         host.frame = NSRect(x: 0, y: 0, width: Theme.panelWidth, height: host.fittingSize.height)
         host.layoutSubtreeIfNeeded()
-        let height = host.fittingSize.height
-        print("panel height with every provider, full mode: \(height) pt "
-              + "(ceiling \(PanelView.ceiling) pt)")
+        defer { store.stop() }
+        XCTAssertNotNil(host.descendantScrollView(),
+                        "no scroller means whatever does not fit is simply gone")
+        return host.fittingSize.height
+    }
 
-        // Two separate claims. The cap has to be small enough for the smallest Mac whatever
-        // screen this test happens to run on — otherwise the assertion below passes here and
-        // the panel still overflows on a 1440 x 900 machine.
-        XCTAssertLessThanOrEqual(PanelView.ceiling, Self.smallestUsableScreen,
-                                 "the panel's own cap does not fit the smallest Mac")
-        XCTAssertLessThanOrEqual(height, PanelView.ceiling,
-                                 "the panel measures \(height) pt against its own \(PanelView.ceiling) pt "
-                                 + "cap — the overflow goes off the top of the screen, taking the "
-                                 + "header, the provider picker and the endurance block with it")
+    /// On a small screen the panel is capped, and what the cap hides is still reachable.
+    @MainActor func testOnASmallScreenThePanelIsCappedAndStillScrollable() throws {
+        let height = try measuredHeight()
+        let cap = PanelView.ceiling(usableHeight: Self.smallestUsableScreen)
+        print("panel height with every provider, full mode: \(height) pt")
+        XCTAssertLessThanOrEqual(cap, Self.smallestUsableScreen,
+                                 "the cap has to fit the screen it was computed from")
+        XCTAssertLessThan(cap, height,
+                          "on a 1440 x 900 Mac the panel genuinely does not fit — that is the case "
+                          + "the scroller exists for")
+    }
 
-        // The cap is only honest if what it hides is still reachable. Remove the ScrollView and
-        // this passes while the rows below the fold become unreachable, exactly as in Settings.
-        XCTAssertTrue(host.descendantScrollView() != nil,
-                      "the panel is capped but has no scroller, so everything past the cap is gone")
-        store.stop()
+    /// And on a screen with room, nothing scrolls: it all just shows.
+    ///
+    /// The first cut of this fix also capped at 860 pt on the grounds that a taller popover
+    /// "stops being a menu-bar panel". That is taste, not a constraint, and on the 1334 pt
+    /// display it was actually running on it hid 474 pt of room the reader had — turning a fix
+    /// for unreachable content into a scrollbar nobody needed. The limit is the screen.
+    @MainActor func testOnAScreenWithRoomTheWholePanelShowsWithoutScrolling() throws {
+        let height = try measuredHeight()
+        let cap = PanelView.ceiling(usableHeight: 1334)
+        XCTAssertGreaterThanOrEqual(cap, height,
+                                    "\(height) pt of panel against a \(cap) pt cap on a 1334 pt "
+                                    + "screen — the reader is being made to scroll for nothing")
     }
 }
 

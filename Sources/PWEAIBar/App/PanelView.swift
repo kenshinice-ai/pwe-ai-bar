@@ -22,7 +22,7 @@ struct PanelView: View {
 
     private var snap: Snapshot { store.snapshot }
 
-    /// How tall the popover is allowed to get.
+    /// How tall the popover is allowed to get: as tall as the screen actually allows.
     ///
     /// A popover cannot be taller than the screen it hangs from. With every provider switched on
     /// and full mode showing the chart and the score row, the panel measures 913 pt — more than
@@ -31,12 +31,19 @@ struct PanelView: View {
     /// reason the app exists, all unreachable. Settings met this first at eight providers and
     /// got a scroller; this is the same fix on the surface that matters more.
     ///
-    /// `visibleFrame` already excludes the menu bar; the popover's beak and margins take a
-    /// little more. The 860 ceiling is what the smallest Mac still leaves, and no screen needs a
-    /// panel taller than that — past a point it stops being a menu-bar panel.
-    static var ceiling: CGFloat {
-        let usable = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame.height
-        return min((usable ?? 860) - 32, 860)
+    /// The limit is the screen and nothing else. A first cut capped this at 860 pt as well —
+    /// "past a point it stops being a menu-bar panel" — which is an opinion, and on a 1334 pt
+    /// display it threw away 474 pt of room the reader had and made them scroll for no reason.
+    /// The content tops out around 913 pt on its own, so on any reasonable display everything
+    /// simply shows and the scroller never appears.
+    ///
+    /// `visibleFrame` already excludes the menu bar; 32 pt covers the popover's beak and its
+    /// margins. The floor exists only so a pathological screen still leaves something readable.
+    static func ceiling(usableHeight: CGFloat? = nil) -> CGFloat {
+        let usable = usableHeight
+            ?? (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame.height
+            ?? 860
+        return max(420, usable - 32)
     }
 
     var body: some View {
@@ -50,7 +57,7 @@ struct PanelView: View {
             footer
         }
         .frame(width: Theme.panelWidth)
-        .frame(maxHeight: Self.ceiling)
+        .frame(maxHeight: Self.ceiling())
         .background(Theme.surface)
     }
 
