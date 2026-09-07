@@ -304,4 +304,49 @@ final class ClaudeUsageTests: XCTestCase {
         let elsewhere = await provider.windows(force: true).windows.first?.observationNamespace
         XCTAssertNotEqual(elsewhere, before)
     }
+
+    /// The worst failure this app is capable of, found by the second cloud review.
+    ///
+    /// Once the refresh call returns, the server may already have retired the refresh token
+    /// Claude Code is still holding, and the only copy of its replacement is in this process's
+    /// memory. Writing it back is therefore not part of producing a result — it is cleanup that
+    /// must happen whether or not anyone still wants the result. It used to be guarded by two
+    /// `check(version)` calls and a re-read of the candidates, so anything that bumped
+    /// `revision` in that window — the user tapping 「重新连接」 in settings, or saving a manual
+    /// token — abandoned the replacement and left them logged out of their own CLI.
+    func testARotationIsWrittenBackEvenIfTheAppStopsCaringMidFlight() async throws {
+        final class Box: @unchecked Sendable { var provider: ClaudeProvider? }
+        let box = Box()
+        let space = try TestSpace(); let memory = ClaudeMemory()
+        memory.put("/synthetic/auth.json", auth(expiry: date.timeIntervalSince1970 + 30))
+        let http = HTTPStub([
+            (200, #"{"access_token":"rotated","refresh_token":"rotated-refresh","expires_in":3600}"#, [:]),
+            (200, quota, [:]),
+        ])
+        let provider = ClaudeProvider(defaults: space.defaults, access: memory.access,
+                                      now: { self.date }, request: { request in
+            if request.url == ClaudeUsageClient.refreshURL {
+                // The exchange is in flight and the reader picks this moment to reconnect.
+                await box.provider?.enableSharedKeychain()
+            }
+            return try await http.send(request)
+        })
+        box.provider = provider
+
+        _ = await provider.windows()
+
+        let stored = try XCTUnwrap(memory.get("/synthetic/auth.json"))
+        let root = try JSONSerialization.jsonObject(with: Data(stored.utf8)) as! [String: Any]
+        let oauth = try XCTUnwrap(root["claudeAiOauth"] as? [String: Any])
+        XCTAssertEqual(oauth["accessToken"] as? String, "rotated",
+                       "the replacement has to reach disk even when nobody wants the reading")
+        XCTAssertEqual(oauth["refreshToken"] as? String, "rotated-refresh",
+                       "and the rotated refresh token above all — it is the one that cannot be re-fetched")
+        XCTAssertEqual(memory.writes, 1)
+
+        // And it is recorded as our own doing, in the language the rest of the readout uses.
+        let record = try XCTUnwrap(ClaudeProvider.refreshRecord(space.defaults))
+        XCTAssertEqual(record.outcome, "已续期")
+        XCTAssertEqual(record.count, 1, "the tally no longer depends on matching an English literal")
+    }
 }

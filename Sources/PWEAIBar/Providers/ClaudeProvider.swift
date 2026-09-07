@@ -286,10 +286,15 @@ actor ClaudeProvider {
     /// say which of the two rewrote it. Twice now that question has mattered and twice the
     /// honest answer was "cannot tell". This is the app stating, in its own store, what it did
     /// and when. A timestamp, an outcome and a count: no token, no account, no server body.
-    private func note(_ outcome: String) {
+    /// `success` is a parameter rather than a comparison against the outcome string, because
+    /// the string is display copy: it is printed, in Chinese, next to every failure phrase.
+    /// Deciding "did it work" by matching it against the literal `"saved"` entangled the counter
+    /// with the wording, so the first time anyone rephrased the success line the tally would
+    /// have silently stopped — and the line was the only English word in a Chinese readout.
+    private func note(_ outcome: String, success: Bool = false) {
         defaults.set(now().timeIntervalSince1970, forKey: "claudeRefreshAt")
         defaults.set(outcome, forKey: "claudeRefreshOutcome")
-        if outcome == "saved" {
+        if success {
             defaults.set(defaults.integer(forKey: "claudeRefreshCount") + 1, forKey: "claudeRefreshCount")
         }
     }
@@ -307,8 +312,14 @@ actor ClaudeProvider {
         guard let refresh = token.refreshToken, let persist = access.persist else { throw Blocker.expired }
         guard signature(try await candidates()) == expected else { throw Blocker.credentialsChanged }
         try check(version)
+        // The last cancellation check is the one above, before the exchange. Once this call
+        // returns, the server may already have retired the refresh token Claude Code is holding
+        // and handed us the only copy of its replacement — so everything from here to the write
+        // is cleanup that runs whether or not anyone still wants the reading. There used to be
+        // a `check(version)` on the very next line, and it was reached first: the reader taps
+        // 「重新连接」, `invalidate()` bumps the revision and cancels the task, and the
+        // replacement is dropped before the response has even been parsed.
         let (data, response) = try await request(ClaudeUsageClient.refresh(token: refresh))
-        try check(version)
         guard let http = response as? HTTPURLResponse else { throw Blocker.invalidResponse }
         if http.statusCode == 400 || http.statusCode == 401 {
             let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
@@ -327,8 +338,22 @@ actor ClaudeProvider {
             rejected[token.generation] = .invalidResponse
             note("回复看不懂"); throw Blocker.invalidResponse
         }
-        guard signature(try await candidates()) == expected else { throw Blocker.credentialsChanged }
-        try check(version)
+        // No cancellation check, and no second read of the candidates, between here and the
+        // write below. That is deliberate, and it is the whole point of this fix.
+        //
+        // The exchange has already happened. If the server rotated the refresh token, the copy
+        // Claude Code is still holding may be dead already, and the only copy of its replacement
+        // is the one in memory right here. From this line on, writing it back is not part of
+        // producing a result for the caller — it is cleanup that has to run whether or not
+        // anyone still wants the result. Cancellation used to abandon it: the user tapping
+        // 「重新连接」 in settings bumps `revision`, and the two `check(version)` calls plus the
+        // `await candidates()` that used to sit here gave that a window several seconds wide
+        // in which to log them out of their own CLI.
+        //
+        // Nothing safe is given up. The re-read this replaces was redundant with the store's
+        // own compare-and-swap: `save(_:expected:)` reads the record again and refuses to write
+        // unless it still matches, which is the check that actually protects a concurrent
+        // change by the CLI. Cancellation is not a concurrent change; it is us losing interest.
         let saved: Bool
         do { saved = try await offActor { try persist(rotated, token) } }
         catch {
@@ -339,9 +364,10 @@ actor ClaudeProvider {
             // least the app can do is leave a note saying it is what happened.
             note("换到了但写不回去"); throw Blocker.storage
         }
-        try check(version)
         guard saved else { note("写回时凭据已被改动"); throw Blocker.credentialsChanged }
-        note("saved")
+        note("已续期", success: true)
+        // Now that the replacement is safely on disk, losing interest is free again.
+        try check(version)
         return rotated
     }
 

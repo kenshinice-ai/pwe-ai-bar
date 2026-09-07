@@ -51,6 +51,12 @@ enum ClaudeUsageMapper {
         var spend: ClaudeSpend?
     }
 
+    /// One parser for every money figure in this response. Always POSIX: the digits arrive
+    /// from JSON, not from a person, so the reader's locale has no business in them.
+    private static func cents(_ value: Double) -> Decimal? {
+        Decimal(string: String(value), locale: Locale(identifier: "en_US_POSIX"))
+    }
+
     static func map(_ root: [String: Any], at now: Date) throws -> Result {
         var rows: [String: QuotaWindow] = [:]
         for key in root.keys.sorted() where key == "five_hour" || key == "seven_day" || key.hasPrefix("seven_day_") {
@@ -95,14 +101,20 @@ enum ClaudeUsageMapper {
         }
         var spend: ClaudeSpend?
         if let extra = root["extra_usage"] as? [String: Any], extra["is_enabled"] as? Bool == true {
+            // Both figures come from the same field of the same response and must be read the
+            // same way. `used_credits` was parsed against en_US_POSIX and `monthly_limit`
+            // against no locale at all, which Foundation resolves to the current one — so on a
+            // machine whose locale writes decimals with a comma, the amount spent parsed and
+            // the cap silently did not, and the panel said 「未提供上限」 about a server that
+            // had provided one.
             guard let used = ClaudeValue.number(extra["used_credits"]), used >= 0,
-                  let decimal = Decimal(string: String(used), locale: Locale(identifier: "en_US_POSIX")) else {
+                  let decimal = Self.cents(used) else {
                 throw Failure.invalidResponse
             }
             var limit: Decimal?
             if let value = extra["monthly_limit"], !(value is NSNull) {
                 guard let amount = ClaudeValue.number(value), amount >= 0 else { throw Failure.invalidResponse }
-                if amount > 0 { limit = Decimal(string: String(amount)).map { $0 / 100 } }
+                if amount > 0 { limit = Self.cents(amount).map { $0 / 100 } }
             }
             spend = ClaudeSpend(usedUSD: decimal / 100, limitUSD: limit)
         }
