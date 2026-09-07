@@ -293,13 +293,24 @@ enum Probe {
         snap.events = [AgentEvent(id: "s", provider: .claude, kind: .finished,
                                   text: String(repeating: "很长的等待说明文字，", count: 12),
                                   at: Date().addingTimeInterval(-45))]
-        snap.trophy = Trophy(
-            days: 365, turns: 1_234_567, equivalentUSD: 987_654.32, subscriptionUSD: 243.33,
-            byModel: [("claude-opus-5", 1_200_000, 900_000), ("claude-fable-5-1", 34_567, 87_654.32)],
-            byDay: (0..<30).map { ("2026-08-\($0 + 1)", Double($0) * 137.4) },
-            byHour: (0..<24).map { (Date().addingTimeInterval(Double($0 - 23) * 3600),
-                                    Double(($0 * 7) % 13) * 12.5) },
-            tokens: (999_999_999, 888_888_888, 777_777_777, 6_666_666_666))
+        // Four heterogeneous tuple literals inferred inside one call expression: Swift 6.3's
+        // type-checker gives up on it and fails the whole target. It happened to compile on the
+        // toolchain this was written against, which is the only reason it shipped that way.
+        // Naming each array with its element type takes the inference away entirely.
+        let byModel: [(model: String, turns: Int, usd: Double)] = [
+            ("claude-opus-5", 1_200_000, 900_000), ("claude-fable-5-1", 34_567, 87_654.32),
+        ]
+        let byDay: [(day: String, usd: Double)] =
+            (0..<30).map { ("2026-08-\($0 + 1)", Double($0) * 137.4) }
+        let byHour: [(hour: Date, usd: Double)] = (0..<24).map { (i: Int) -> (Date, Double) in
+            let at = Date().addingTimeInterval(Double(i - 23) * 3600)
+            return (at, Double((i * 7) % 13) * 12.5)
+        }
+        let tokens: (input: Int, output: Int, cacheWrite: Int, cacheRead: Int) =
+            (999_999_999, 888_888_888, 777_777_777, 6_666_666_666)
+        snap.trophy = Trophy(days: 365, turns: 1_234_567, equivalentUSD: 987_654.32,
+                             subscriptionUSD: 243.33, byModel: byModel, byDay: byDay,
+                             byHour: byHour, tokens: tokens)
 
         let store = Store()
         store.injectForTesting(snap)
