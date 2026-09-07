@@ -150,36 +150,13 @@ enum Probe {
         }
     }
 
-    /// `--cred` — where the token would come from, and whether asking costs a dialog.
-    /// Deliberately does not read the shared item, so running it can never raise a prompt.
+    /// Metadata only; this command does not retrieve tokens or validate network access.
     static func credentials() {
-        let own = Credentials.hasOwnToken
-        let shared = Credentials.sharedItemExists()
-        let refused = UserDefaults.standard.bool(forKey: "keychainRefused")
-        let optedIn = UserDefaults.standard.bool(forKey: "sharedKeychainOptIn")
-
-        print("PWE AI Bar — 凭据\n" + String(repeating: "─", count: 52))
-        print("自有长期令牌   \(own ? "有" : "无")")
-        print("Claude 钥匙串  \(shared ? "存在" : "不存在（没登录过）")")
-        print("已授权读取     \(optedIn ? "是" : "否——不会主动去读")")
-        print("曾被拒绝       \(refused ? "是" : "否")")
-        print("")
-
-        if own {
-            print("当前来源：自有长期令牌。永远不会弹框。")
-        } else if !shared {
-            print("当前来源：本地估算。先运行 claude auth login。")
-        } else if !optedIn {
-            print("当前来源：本地估算——有总量和战绩，没有百分比。")
-            print("这是默认状态，且不会有任何弹框。想要真实额度，二选一：")
-            print("  零弹框   claude setup-token | \"…/PWEAIBar\" --token -")
-            print("  一次弹框 面板点「启用」，在框里选「始终允许」")
-        } else if refused {
-            print("当前来源：本地估算。授权被拒过，不会再自动询问。")
-            print("设置 → 额度数据来源 → 授权钥匙串，可以重来。")
-        } else {
-            print("当前来源：Claude Code 的钥匙串。已授权，读取时不再弹框。")
-        }
+        print("PWE AI Bar — 凭据配置")
+        print("手动令牌记录：\(Credentials.hasStoredOwnToken ? "有" : "无")")
+        print("默认复用 Claude Code 登录。实际来源和成功时间以额度面板为准。")
+        print("可用 refresh token 会用于续期并安全写回原来源；失败需重新登录。")
+        print("钥匙串访问由 macOS 控制，本命令不验证是否获准。")
     }
 
     /// `--stress DIR` renders the panel against data designed to break it: every bucket the
@@ -198,51 +175,30 @@ enum Probe {
     /// Written because the answer turned out to be genuinely surprising: the credential Claude
     /// Code keeps in the keychain sat expired for twelve hours while Claude Code itself ran the
     /// whole time, and no surface in the app could tell you that was what had happened.
-    static func credentials() async {
-        func line(_ k: String, _ v: String) { print("  \(k.padding(toLength: 14, withPad: " ", startingAt: 0))\(v)") }
-        let f = DateFormatter(); f.dateFormat = "MM-dd HH:mm:ss"
-        let now = Date()
+    static func credentials() async { await quotaStatus(readOnly: false) }
 
-        print("PWE AI Bar — 凭据自检\n" + String(repeating: "─", count: 58))
-        for (name, token) in [("Claude Code 钥匙串", Credentials.claudeCodeCredential()),
-                              ("本 app 长期令牌", Credentials.ownToken())] {
-            print("\n\(name)")
-            guard let token else { line("状态", "没有找到"); continue }
-            line("来源", token.source.rawValue)
-            line("长度", "\(token.value.count) 字符")
-            if let expiry = token.expiresAt {
-                let gone = expiry <= now
-                line("到期", "\(f.string(from: expiry))  \(gone ? "已过期 \(Int(now.timeIntervalSince(expiry) / 60)) 分钟" : "还有 \(Int(expiry.timeIntervalSince(now) / 60)) 分钟")")
-            } else {
-                line("到期", "凭据里没有记到期时间")
-            }
-
-            var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
-            request.setValue("Bearer \(token.value)", forHTTPHeaderField: "Authorization")
-            request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-            request.setValue(ClaudeProvider.userAgent, forHTTPHeaderField: "User-Agent")
-            request.timeoutInterval = 15
-            do {
-                let (data, response) = try await URLSession.shared.data(for: request)
-                let http = response as? HTTPURLResponse
-                line("接口返回", "\(http?.statusCode ?? -1)")
-                if let retry = http?.value(forHTTPHeaderField: "Retry-After") {
-                    line("Retry-After", retry)
-                }
-                if http?.statusCode == 200 {
-                    let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-                    let count = (root["limits"] as? [[String: Any]])?.count ?? 0
-                    line("读到", "\(count) 个额度窗口")
-                } else {
-                    // Error bodies carry the reason and no secrets; the token is only ever in
-                    // the request header, never in a response.
-                    line("正文", String(String(data: data, encoding: .utf8) ?? "").prefix(300).description)
-                }
-            } catch {
-                line("接口返回", "请求失败：\(error.localizedDescription)")
-            }
+    /// Uses the same pipeline as the app; output contains no credentials, account IDs or bodies.
+    static func quotaStatus(readOnly: Bool) async {
+        var access = ClaudeProvider.Access.live
+        if readOnly { access.persist = nil }
+        let provider = ClaudeProvider(access: access)
+        let reading = await provider.windows(force: true)
+        let details = await provider.details
+        let state = await provider.blocker
+        print("PWE AI Bar — Claude 额度检查（\(readOnly ? "不续期" : "正常续期")）")
+        print("状态：\(state.message)")
+        print("来源：\(details.source.rawValue)")
+        print("有效窗口：\(reading.windows.count)，旧读数：\(reading.stale ? "是" : "否")")
+        print("成功获取：\(details.lastSuccessAt != nil ? "是" : "否")")
+        // The one question the credential itself cannot answer. Claude Code writes the same
+        // keychain item, and the rotation preserves every field it does not own, so after the
+        // fact there is no telling from the record which of the two rewrote it.
+        if let r = ClaudeProvider.refreshRecord() {
+            let f = DateFormatter(); f.dateFormat = "MM-dd HH:mm:ss"
+            print("本 app 续期：\(f.string(from: r.at)) · \(r.outcome) · 累计成功 \(r.count) 次")
+        } else {
+            print("本 app 续期：还没有过（钥匙串的更新都不是我们做的）")
         }
-        print("")
     }
 
     static func endurance(into dir: String) {
@@ -418,8 +374,8 @@ enum Probe {
             case .needsSetup: why = "未授权（面板点「启用真实额度」，或用 --token 设长期令牌）"
             case .notLoggedIn: why = "未登录（运行 claude auth login）"
             case .keychainRefused: why = "钥匙串拒绝（重新运行 claude auth login 即可重建授权）"
-            case .unauthorized, .forbidden, .network: why = blocker.message
-            case .expired: why = "凭据过期（本 app 不续期；claude setup-token 存一个长期令牌）"
+            case .unauthorized, .forbidden, .network, .storage, .invalidResponse, .credentialsChanged: why = blocker.message
+            case .expired: why = "凭据过期且无法续期，请重新登录 Claude Code"
             case .rateLimited(let d): why = "限流至 \(f(d))"
             }
             print("登录        \(loggedIn ? "是" : "否")     数据陈旧  \(stale ? "是" : "否")")

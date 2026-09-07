@@ -15,6 +15,29 @@ private actor SuspendedHTTP {
 }
 
 final class StoreTests: XCTestCase {
+    @MainActor func testClaudePublishesBeforeSlowCodexAndStatistics() async throws {
+        let space = try TestSpace(); let clock = TestClock(); let credential = FakeCredential()
+        let p = provider(space, clock: clock, credential: credential,
+                         http: HTTPStub([(200, #"{"five_hour":{"utilization":7.4}}"#, [:])]))
+        var localCalled = false
+        let store = Store(claude: p,
+                          rules: RuleEngine(defaults: space.defaults, away: { false }, remaining: { true }),
+                          readEvents: { [] },
+                          readLocal: { localCalled = true; return .init(trophy: Trophy(), context: nil, lastTurnAt: nil) },
+                          readCodex: { try? await Task.sleep(nanoseconds: 600_000_000); return ([], nil) },
+                          deliver: { _, _ in false }, tracks: { (true, true) }, tracksExtra: { _ in false },
+                          observe: { $0 })
+        store.refresh()
+        for _ in 0..<20 {
+            if !store.snapshot.windows(of: .claude).isEmpty { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(store.snapshot.windows(of: .claude).first?.percent, 7.4)
+        XCTAssertFalse(localCalled, "Claude must publish before unrelated work finishes")
+        store.stop()
+        try await Task.sleep(nanoseconds: 650_000_000)
+    }
+
     @MainActor func testHookEventReachesDeliveryWhileQuotaRequestIsSuspended() async throws {
         let space = try TestSpace(); let credential = FakeCredential(); let suspended = SuspendedHTTP()
         let p = ClaudeProvider(defaults: space.defaults, cacheURL: space.root.appendingPathComponent("quota.json"),

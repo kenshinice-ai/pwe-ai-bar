@@ -13,12 +13,17 @@ VERSION="$(cat VERSION 2>/dev/null || echo 0.1.0)"
 CONFIG="${1:-release}"
 
 echo "▸ Building ($CONFIG)…"
-swift build -c "$CONFIG" > /dev/null
+BUILD_ARGS=(-c "$CONFIG")
+[[ -n "${PWEBAR_BUILD_ROOT:-}" ]] && BUILD_ARGS+=(--scratch-path "$PWEBAR_BUILD_ROOT")
+[[ -n "${PWEBAR_CACHE_PATH:-}" ]] && BUILD_ARGS+=(--cache-path "$PWEBAR_CACHE_PATH")
+[[ "${PWEBAR_DISABLE_SANDBOX:-0}" == 1 ]] && BUILD_ARGS+=(--disable-sandbox)
+swift build "${BUILD_ARGS[@]}" > /dev/null
 
-BIN=".build/$CONFIG/PWEAIBar"
+BIN_DIR="$(swift build "${BUILD_ARGS[@]}" --show-bin-path)"
+BIN="$BIN_DIR/PWEAIBar"
 [[ -f "$BIN" ]] || { echo "✗ $BIN not found"; exit 1; }
 
-APP="build/$APP_NAME.app"
+APP="${PWEBAR_APP_OUTPUT:-build/$APP_NAME.app}"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
@@ -26,7 +31,7 @@ cp "$BIN" "$APP/Contents/MacOS/PWEAIBar"
 
 # SPM emits resources as a bundle beside the binary; carry it along or the fonts, the price
 # list and the hook script all go missing at runtime.
-for b in ".build/$CONFIG"/*.bundle; do
+for b in "$BIN_DIR"/*.bundle; do
   [[ -e "$b" ]] && cp -R "$b" "$APP/Contents/Resources/"
 done
 
@@ -70,9 +75,12 @@ PLIST
 # about the keychain: macOS grants access to a *signature*, so an ad-hoc build gets a fresh
 # identity on every compile and re-asks for permission to read the Claude Code credential every
 # single time. A stable Apple Development identity makes that grant stick across rebuilds.
+IDENTITY="${PWEBAR_SIGN_IDENTITY:-}"
+if [[ -z "$IDENTITY" ]]; then
 IDENTITY="$(security find-identity -v -p codesigning \
   | grep -E "Developer ID Application|Apple Development" | grep -v CSSMERR | head -1 \
   | sed -E 's/.*"(.*)".*/\1/' || true)"
+fi
 [[ -z "$IDENTITY" ]] && IDENTITY="-"
 codesign --force --deep --sign "$IDENTITY" "$APP" 2>/dev/null || \
   codesign --force --deep --sign - "$APP" 2>/dev/null || true

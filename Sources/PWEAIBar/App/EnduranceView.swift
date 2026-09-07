@@ -206,11 +206,11 @@ struct EnduranceView: View {
             } else {
                 // We know the trip and not the fuel. A dashed centre line is the instrument's
                 // way of saying the measurement is missing, rather than reading as empty.
-                Rectangle().fill(Theme.text2.opacity(0.5))
-                    .frame(width: W, height: 1).offset(y: 10.5)
-                    .mask(HStack(spacing: 3) {
-                        ForEach(0..<49, id: \.self) { _ in Rectangle().frame(width: 3) }
-                    }.frame(width: W, alignment: .leading))
+                Capsule().fill(Color.red)
+                    .frame(width: W, height: 10).offset(y: 6)
+                    // mask removed for probe
+
+
             }
 
             // Start line.

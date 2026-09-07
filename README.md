@@ -37,8 +37,8 @@ PWE Studio 菜单栏家族的第四位，接在 Loan Bar、Lumen Bar、MAC MONIT
 open "build/PWE AI Bar.app"
 ```
 
-**不会有任何授权弹框，也不用做任何设置。** 只要这台机器上 `claude` 登录过，
-额度就直接读得到——为什么不用输密码，见下面「额度数据从哪来」。
+已登录 Claude Code 时，应用尝试复用本机登录，无需重新输入账户密码。
+令牌仍需有效且有额度读取权限；钥匙串是否允许访问由 macOS 决定。
 
 会话事件要装 hook：设置 → 会话事件 → 安装。三个钩子，以合并方式写进
 `~/.claude/settings.json`，不覆盖你已有的配置：
@@ -65,50 +65,27 @@ open "build/PWE AI Bar.app"
 投递失败按一分钟间隔重试；点击打开应用不会把同一事件重新通知。
 系统接受通知不代表用户已阅读，真实推送服务送达也不在此确认范围内。
 
-## 额度数据从哪来
+## Claude 额度数据从哪来
 
-钥匙串是按「条目 + 哪个程序」授权的，不是按「哪个用户」。关键在于
-**Claude Code 的凭据是它自己调 `/usr/bin/security` 写进去的**——所以那个条目的
-访问列表上写着的程序是 `security`，不是 `claude`，更不是我们。
+在线读取 `https://api.anthropic.com/api/oauth/usage`，显示服务端原始五小时、周窗口和模型独立额度；面板保留一位小数。额外消费单独显示，不能当作订阅剩余比例或可退余额。
 
-于是分岔就在这里：
+应用先查配置目录对应的 Claude Code 钥匙串/凭据文件。已知同账户的候选可在认证失败后继续尝试；无法确认账户一致时停止自动切换。保存高级手动令牌意味着明确选择该令牌，清除或“重新连接”恢复官方登录来源。一般不需要手动输入令牌，`setup-token` 的长期有效性也不等于具备额度读取权限。
 
-| 怎么读 | 结果 |
-|---|---|
-| 自己调 `SecItemCopyMatching` | 名单外的程序在敲门，macOS 弹授权框 |
-| 跑 `security find-generic-password` | 名单上的程序在敲门，**静默返回** |
+可用 refresh token 在临近到期或 401 时最多续期一次。仅更新原来源、保留未知 JSON 字段；写回前重新比较凭据，钥匙串通过系统 API 更新，不把秘密放进进程参数。保存失败停止继续轮换并提示重新登录。官方 CLI 与本应用没有共同的跨进程锁，所以冲突或 macOS 拒绝写入时仍需要恢复官方登录。
 
-我们走第二条。代价是一个约 20 ms 的子进程，换来的是：不弹框、不用点「始终允许」、
-换签名重新编译也不会重问、也不需要 `claude setup-token`。没有任何越权——
-是你自己的凭据，在你自己的机器上，从你自己的 CLI 装好的那扇门进去。
+Claude 额度只保留内存快照，旧版未绑定账户的磁盘 quota-cache 不再读取。凭据世代变化会隔离额度、历史和提醒基线；断网/限流保留同来源旧读数并标时间，重置已过显示“待确认”。手动刷新跳过普通缓存周期，但遵守 `Retry-After`。Claude 结果独立发布，不等待其他工具和本地统计完成。
 
-读取顺序：
-
-1. **Claude Code 的钥匙串条目**（`security`，静默）——CLI 一直在续期的那份
-2. `~/.claude/.credentials.json`——钥匙串不可用时 CLI 会退到这里
-3. **本 app 自己的长期令牌**——`claude setup-token` 存进我们自己创建的条目
-
-第 3 条是给没装 Claude Code 的机器用的退路，不是首选：静态令牌可能早被撤销，
-而且 `SecItemCopyMatching` 在本机实测过 4 秒、10 秒、84 秒三种成绩。没存过令牌时
-根本不碰钥匙串。
+诊断命令不输出令牌、账号标识或服务器正文：
 
 ```bash
-# 只在需要退路时用
-claude setup-token | "build/PWE AI Bar.app/Contents/MacOS/PWEAIBar" --token -
+"build/PWE AI Bar.app/Contents/MacOS/PWEAIBar" --cred
+"build/PWE AI Bar.app/Contents/MacOS/PWEAIBar" --credentials-read-only
+"build/PWE AI Bar.app/Contents/MacOS/PWEAIBar" --credentials
 ```
 
-`CLAUDE_CONFIG_DIR` 会把凭据挪到带路径摘要后缀的服务名下，两个名字都试。
-凭据里记了 scopes 而其中没有 `user:profile` 的，直接判定读不了额度。
+`--cred` 只显示配置说明；`--credentials-read-only` 查询但不轮换令牌；`--credentials` 使用应用的完整查询/续期流程。实际钥匙串授权、网络和账户权限仍由本机及供应商决定。
 
-### User-Agent 不是装饰
-
-这是 Claude Code 自己的私有接口。**用别的 User-Agent 请求会被限流**——
-这个 app 用 URLSession 默认 UA 跑了一整天，几乎全天被 429 挡住，
-而同一台机器上的 AI Usage 一次没被挡。现在按实际装着的版本发
-`claude-code/<version>`（从 `@anthropic-ai/claude-code/package.json` 读，读不到才回落到固定值）。
-
-轮询也放慢了：平静 5 分钟、预警 2.5 分钟、接近上限或临近重置才 1 分钟。
-`Retry-After` 支持秒数和 HTTP 日期，两者都没有就退 5 分钟，且跨重启保留。
+实施交接与验收：[Claude usage handoff](docs/CLAUDE_USAGE_IMPLEMENTATION_HANDOFF_2026-09-07.md)。新版 Claude status line 转交尚未接入，也不会自动升级 CLI。
 
 ## 设计要点
 

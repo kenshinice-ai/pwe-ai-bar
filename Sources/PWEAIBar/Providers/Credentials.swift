@@ -1,25 +1,16 @@
 import CryptoKit
 import Foundation
 import Security
+import LocalAuthentication
 
-/// Where the Claude token comes from, and why none of it needs a password.
-///
-/// The keychain grants access per *item* and per *program*. Claude Code's credential item is
-/// created by the CLI shelling out to `/usr/bin/security`, so the program on that item's access
-/// list is `/usr/bin/security` itself — not `claude`, and certainly not us. Calling
-/// `SecItemCopyMatching` from this app is therefore a stranger knocking, and macOS puts the
-/// access dialog on screen. Asking the *same* way Claude Code wrote it — running
-/// `security find-generic-password` — is the program already on the list, and it is silent.
-///
-/// That is the whole trick, and it is the one AI Usage uses. It costs a subprocess (~20 ms) and
-/// buys: no dialog, no "Always Allow", no re-prompt when the build's signature changes, and no
-/// `claude setup-token` step. Nothing here is privileged — it is the user's own credential, read
-/// on the user's own machine, through the door the user's own CLI installed.
-///
-/// Two fallbacks stay behind it: the credentials file Claude Code writes when the keychain is
-/// unavailable, and a long-lived token from `claude setup-token` kept in an item *this app*
-/// creates, which is preferred when present because an app is always trusted for its own items.
+/// Compatibility accessors for manually stored tokens and explicit shared-keychain access.
+/// The live quota provider uses ClaudeCredentialStore for exact-source discovery and rotation.
+/// Keychain access can be refused or require system authorization; it is never bypassed.
 enum Credentials {
+
+    static func noninteractiveContext() -> LAContext {
+        let context = LAContext(); context.interactionNotAllowed = true; return context
+    }
 
     private static let ownService = "PWE AI Bar"
     private static let ownAccount = "claude-usage-token"
@@ -37,9 +28,20 @@ enum Credentials {
         let value: String
         let expiresAt: Date?
         let source: Source
+        var refreshToken: String? = nil
+        var scopes: [String]? = nil
+        var document: Data? = nil
+        var origin: ClaudeCredentialStore.Origin? = nil
+        var accountKey: String? = nil
+        var plan: String? = nil
+
+        var hasUsageScope: Bool { scopes?.isEmpty != false || scopes!.contains("user:profile") }
+        var generation: String {
+            ClaudeValue.fingerprint(Data((origin?.key ?? source.rawValue).utf8) + (document ?? Data(value.utf8)))
+        }
     }
 
-    // MARK: Our own item — no dialog, ever
+    // MARK: Manually stored credential
 
     /// Set once when a token is stored, so the common case — nobody ran `claude setup-token` —
     /// never touches the keychain at all.
@@ -64,6 +66,7 @@ enum Credentials {
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecUseAuthenticationContext as String: Credentials.noninteractiveContext(),
         ]
         var item: CFTypeRef?
         guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess,
@@ -71,8 +74,7 @@ enum Credentials {
         return String(data: data, encoding: .utf8)
     }
 
-    /// Reads the item this app created. An application is implicitly on the access list of its
-    /// own keychain items, so this cannot raise a prompt.
+    /// Noninteractive read; failures are surfaced by the provider or explicit setup flow.
     static func ownToken() -> Token? {
         guard mayHaveOwnToken else { return nil }
         let q: [String: Any] = [
@@ -81,6 +83,7 @@ enum Credentials {
             kSecAttrAccount as String: ownAccount,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecUseAuthenticationContext as String: Credentials.noninteractiveContext(),
         ]
         var item: CFTypeRef?
         guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess,
@@ -91,8 +94,8 @@ enum Credentials {
         return Token(value: value, expiresAt: nil, source: .ownToken)
     }
 
-    private static func remember(_ stored: Bool) {
-        UserDefaults.standard.set(stored, forKey: ownFlag)
+    private static func remember(_ stored: Bool, defaults: UserDefaults) {
+        defaults.set(stored, forKey: ownFlag)
     }
 
     enum SaveResult: Equatable {
@@ -111,7 +114,7 @@ enum Credentials {
     }
 
     @discardableResult
-    static func storeOwnToken(_ value: String, operations: Operations = .live) -> SaveResult {
+    static func storeOwnToken(_ value: String, operations: Operations = .live, defaults: UserDefaults = .standard) -> SaveResult {
         let base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: ownService,
@@ -120,12 +123,12 @@ enum Credentials {
         if value.isEmpty {
             let result = operations.delete(base as CFDictionary)
             guard result == errSecSuccess || result == errSecItemNotFound else { return .failed(result) }
-            remember(false)
+            remember(false, defaults: defaults)
             return .cleared
         }
         let update = [kSecValueData as String: Data(value.utf8)]
         let result = operations.update(base as CFDictionary, update as CFDictionary)
-        if result == errSecSuccess { remember(true); return .saved }
+        if result == errSecSuccess { remember(true, defaults: defaults); return .saved }
         guard result == errSecItemNotFound else { return .failed(result) }
         var add = base
         add[kSecValueData as String] = Data(value.utf8)
@@ -133,7 +136,7 @@ enum Credentials {
         add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         let added = operations.add(add as CFDictionary)
         guard added == errSecSuccess else { return .failed(added) }
-        remember(true)
+        remember(true, defaults: defaults)
         return .saved
     }
 
@@ -188,17 +191,16 @@ enum Credentials {
     /// the access dialog on screen when the app is not on the item's access list.
     static func readShared() -> Token? {
         for service in sharedServiceCandidates() {
-            let q: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: service,
-                kSecReturnData as String: true,
-                kSecMatchLimit as String: kSecMatchLimitOne,
-            ]
+            let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                   kSecAttrService as String: service, kSecAttrAccount as String: NSUserName(),
+                                   kSecReturnData as String: true, kSecReturnAttributes as String: true,
+                                   kSecMatchLimit as String: kSecMatchLimitOne]
             var item: CFTypeRef?
             guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess,
-                  let data = item as? Data, let text = String(data: data, encoding: .utf8),
-                  let token = parse(text, source: .sharedKeychain) else { continue }
-            return token
+                  let record = item as? [String: Any], let data = record[kSecValueData as String] as? Data,
+                  let account = record[kSecAttrAccount as String] as? String else { continue }
+            return ClaudeCredentialStore.decode(String(decoding: data, as: UTF8.self), source: .sharedKeychain,
+                                                 origin: .keychain(service: service, account: account))
         }
         return nil
     }
@@ -206,26 +208,11 @@ enum Credentials {
     /// `security -w` prints the raw value, but falls back to hex when the bytes are not printable
     /// text — a credential that happens to contain one is otherwise silently unreadable.
     static func parse(_ text: String, source: Source) -> Token? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        let data = Data(trimmed.utf8)
-        guard let root = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])
-                ?? hexDecoded(trimmed).flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })
-        else { return nil }
-
-        let node = (root["claudeAiOauth"] as? [String: Any]) ?? root
-        guard let value = (node["accessToken"] as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
-        // An empty or missing scope list means the CLI never recorded one; only a populated list
-        // that leaves out profile access proves this token cannot read usage.
-        if let scopes = node["scopes"] as? [String], !scopes.isEmpty,
-           !scopes.contains("user:profile") { return nil }
-        let millis = (node["expiresAt"] as? NSNumber)?.doubleValue
-        let exp = (millis?.isFinite ?? false) ? Date(timeIntervalSince1970: millis! / 1000) : nil
-        return Token(value: value, expiresAt: exp, source: source)
+        guard let token = ClaudeCredentialStore.decode(text, source: source), token.hasUsageScope else { return nil }
+        return token
     }
 
-    private static func hexDecoded(_ text: String) -> Data? {
+    static func hexDecoded(_ text: String) -> Data? {
         var hex = Substring(text)
         if hex.hasPrefix("0x") || hex.hasPrefix("0X") { hex = hex.dropFirst(2) }
         guard !hex.isEmpty, hex.count.isMultiple(of: 2), hex.allSatisfy(\.isHexDigit) else { return nil }
@@ -270,38 +257,56 @@ enum Credentials {
 typealias ProcessLine = ([String]) -> String?
 
 enum Subprocess {
+    private final class Output: @unchecked Sendable {
+        let lock = NSLock()
+        var data = Data()
+        var overflow = false
+        func append(_ chunk: Data) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            if data.count + chunk.count > 1_048_576 { overflow = true; return false }
+            data.append(chunk)
+            return true
+        }
+    }
+
     static let line: ProcessLine = { argv in
         guard let first = argv.first else { return nil }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: first)
         process.arguments = Array(argv.dropFirst())
-        let out = Pipe(), err = Pipe()
-        process.standardOutput = out; process.standardError = err
         process.standardInput = FileHandle.nullDevice
+        let stdout = Pipe(), stderr = Pipe()
+        process.standardOutput = stdout; process.standardError = stderr
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
         guard (try? process.run()) != nil else { return nil }
-
-        // Read while it runs: a pipe that fills up deadlocks a process waiting to write.
-        let group = DispatchGroup()
-        var data = Data()
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            data = out.fileHandleForReading.readDataToEndOfFile(); group.leave()
+        let out = Output(), err = Output(), drained = DispatchGroup()
+        for (pipe, buffer) in [(stdout, out), (stderr, err)] {
+            drained.enter()
+            DispatchQueue.global(qos: .utility).async {
+                defer { drained.leave() }
+                while true {
+                    let chunk = pipe.fileHandleForReading.availableData
+                    if chunk.isEmpty { break }
+                    if !buffer.append(chunk) {
+                        process.terminate(); break
+                    }
+                }
+            }
         }
-        group.enter()
-        DispatchQueue.global(qos: .utility).async {
-            _ = err.fileHandleForReading.readDataToEndOfFile(); group.leave()
+        let timedOut = exited.wait(timeout: .now() + 5) == .timedOut
+        if timedOut || process.isRunning {
+            process.terminate()
+            if exited.wait(timeout: .now() + 0.1) == .timedOut, process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+                _ = exited.wait(timeout: .now() + 1)
+            }
         }
-        // The only way `security` blocks this long is an access dialog we did not expect.
-        // Kill it rather than leave a sheet sitting on the user's screen.
-        let deadline = DispatchTime.now() + 5
-        let queue = DispatchQueue.global(qos: .utility)
-        let watchdog = DispatchWorkItem { if process.isRunning { process.terminate() } }
-        queue.asyncAfter(deadline: deadline, execute: watchdog)
-        process.waitUntilExit()
-        watchdog.cancel()
-        group.wait()
-    guard process.terminationStatus == 0 else { return nil }
-    return String(data: data, encoding: .utf8)
+        guard drained.wait(timeout: .now() + 1) == .success,
+              !process.isRunning, !timedOut, process.terminationStatus == 0 else { return nil }
+        out.lock.lock(); defer { out.lock.unlock() }
+        err.lock.lock(); defer { err.lock.unlock() }
+        guard !out.overflow, !err.overflow else { return nil }
+        return String(data: out.data, encoding: .utf8)
     }
 }
-

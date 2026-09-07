@@ -49,6 +49,7 @@ enum PWEAIBarMain {
             }
             value = value.trimmingCharacters(in: .whitespacesAndNewlines)
             let ok = Credentials.storeOwnToken(value).succeeded
+            if ok { UserDefaults.standard.set(!value.isEmpty, forKey: "claudeManualTokenSelected") }
             print(value.isEmpty ? (ok ? "已清除令牌" : "清除失败")
                                 : (ok ? "已保存令牌，额度有效性将在应用中验证" : "保存失败"))
             return
@@ -71,6 +72,14 @@ enum PWEAIBarMain {
            i + 1 < CommandLine.arguments.count {
             Theme.registerFonts()
             Probe.stress(into: CommandLine.arguments[i + 1])
+            return
+        }
+        if CommandLine.arguments.contains("--credentials-read-only") {
+            let sem = DispatchSemaphore(value: 0)
+            Task { @MainActor in await Probe.quotaStatus(readOnly: true); sem.signal() }
+            while sem.wait(timeout: .now()) == .timedOut {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            }
             return
         }
         if CommandLine.arguments.contains("--cred") {

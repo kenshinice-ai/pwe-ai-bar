@@ -72,6 +72,12 @@ struct QuotaWindow: Identifiable {
     /// What this window has actually read, most recent last. Empty until `History` has seen it
     /// more than once; nothing downstream may require it.
     var samples: [History.Sample] = []
+    /// Opaque source/account generation; never a token or user identifier.
+    var observationNamespace: String? = nil
+    var observationKey: String {
+        let base = "\(provider.rawValue):\(id)"
+        return observationNamespace.map { base + ":" + $0 } ?? base
+    }
 
     /// When the window opened, which its own length tells us without any history.
     func windowStart(at now: Date) -> Date? {
@@ -193,6 +199,7 @@ struct AgentEvent: Identifiable, Codable {
 /// Everything the interface draws, assembled once per refresh.
 struct Snapshot {
     var windows: [QuotaWindow] = []
+    var claudeDetails = ClaudeProvider.Details()
     var contextPercent: Double?
     var events: [AgentEvent] = []
     var trophy: Trophy = Trophy()
