@@ -1,7 +1,8 @@
 # PWE AI Bar — 接手说明
 
-最后更新 2026-09-07。分支 `forecast-engine`，默认分支 `main`。
-8,200 行 Swift，108 个测试，`swift test` 约 14 秒。
+最后更新 2026-09-07 深夜。分支 `forecast-engine` 与 `main` 同步，版本 `0.1.0`。
+约 8,400 行 Swift，113 个测试，`swift test` 约 14 秒。经过两轮云端深度审阅（55 + 48 个 agent），
+提出的十二条全部落地。
 
 macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。看八家 AI 编码工具的额度；
 真正花力气的只有两件事——**读到 Claude 和 Codex 的真实数字**，以及**回答「按这个节奏，到不到得了重置」**。
@@ -22,7 +23,7 @@ macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。
 
 `Providers/Credentials.swift`、`Providers/ClaudeCredentialStore.swift`。
 
-### 二、令牌自己续期
+### 二、令牌自己续期（改这里之前请读完整节）
 
 Claude Code 会把这条钥匙串记录**晾着**——本机实测过一次，过期后放了 32 小时没管，面板因此显示了
 一整天前的数字。所以我们自己续：拿记录里的 refresh token，在到期前几分钟 POST
@@ -36,7 +37,26 @@ Claude Code 会把这条钥匙串记录**晾着**——本机实测过一次，�
 2. **写回前再比一次**（`ClaudeCredentialStore.save(_:expected:)`）。凭据在我们换令牌的这几百毫秒里
    被 CLI 改过，就放弃，不要覆盖。
 3. **写回失败不要重试轮换**。交换已经发生了，如果服务端轮换了 refresh token，Claude Code 手里那份
-   可能已经作废——这是这套机制唯一关不上的风险窗口，见下面「已知风险」。
+   可能已经作废。
+
+**下面四条是不变量，不是风格偏好。破坏其中任何一条，代价是把用户从他自己的 Claude Code 里登出。**
+
+4. **换发返回之后，到写回之前，不许有任何取消检查、也不许重读凭据。** 一旦 POST 返回，服务端
+   可能已经作废了 CLI 手里那份，而替代品的唯一一份就在内存里。写回不是「为调用方生产结果」的
+   一部分，是无论还有没有人要结果都必须跑完的收尾。
+5. **换发整段跑在非结构化 `Task` 里**（`exchange`），因为非结构化任务不继承取消。`invalidate()`
+   会 `task?.cancel()`，而 URLSession 尊重取消——不这样做，一次设置里的「重新连接」就能在 POST
+   途中把它拆掉，替代品装在没人在听的响应里。
+6. **同一份凭据同时只能有一次换发在途**（`rotations` 按 generation 索引）。被取消的任务不等于
+   已停下的任务，下一次 `windows()` 会从磁盘读到那份还没写回的旧凭据，拿同一个 refresh token
+   再换一次；第二次的 `invalid_grant` 到达时，第一次换来的替代品可能已经是唯一能用的凭据。
+7. **写回之后再 `check(version)`。** 那时候丢弃结果是免费的。
+
+这四条各有一个会失败的回归测试，都在 `ClaudeUsageTests`：
+`testARotationIsWrittenBackEvenIfTheAppStopsCaringMidFlight`、
+`testCancellingTheReadingDoesNotCancelTheExchange`、
+`testTwoFetchesNeverSpendTheSameRefreshTokenTwice`。改动这一段之后它们必须仍然通过，
+而且**撤掉你的改动它们必须失败**——我验过每一个。
 
 `Providers/ClaudeUsageClient.swift`、`ClaudeCredentialStore.swift`、`ClaudeProvider.rotate`。
 
@@ -101,14 +121,29 @@ swift test                      # 108 个
 并且会覆写共享的 `~/Library/Caches/PWE AI Bar/history.json`。两个写者会互相覆盖，别在 app 运行时
 连着跑它们来分析历史。这是已知问题，还没修。
 
-签名与公证在另一台机器上做（私钥在那边），本机只做 ad-hoc。
+### 发版（在另一台机器上做）
+
+Developer ID 私钥只在发版机上，本机 `build-app.sh` 出来的是 ad-hoc 签名，Gatekeeper 在别的机器
+上一律拒绝。发版机上：
+
+```bash
+./scripts/package.sh              # 构建 + Developer ID 签名 + dmg
+./scripts/package.sh --notarize   # 再提交 Apple 公证并 staple
+```
+
+Team ID `2SQV3H5MH9`，版本号取自 `VERSION`（现在是 `0.1.0`，要发就先改它）。脚本自己会挑
+`Developer ID Application` 身份；挑不到就退回 ad-hoc 并把警告打出来——**看到 `(ad-hoc)` 就说明
+你在错的机器上**。产物在 `dist/`。
+
+发版机上先跑一遍 `swift test`（113 个）再打包。
 
 ---
 
 ## 已验证 / 未验证
 
-**已验证**：真实只读查询成功；面板读到 Claude 周窗口、五小时、上下文三行实况；108 个测试通过（删掉 18 个只打印不断言的探针之后）；
-钥匙串条目在多轮读写后 accessToken / refreshToken / scopes 完整；续航仪 14 个状态明暗两套渲染无溢出。
+**已验证**：真实只读查询成功；面板读到 Claude 周窗口、五小时、上下文三行实况；113 个测试通过；
+钥匙串条目在多轮读写后 accessToken / refreshToken / scopes 完整；续航仪 14 个状态明暗两套渲染无溢出；
+两轮云端审阅的十二条全部修复，其中六条配了先失败后通过的回归测试。
 
 **未验证，且要说清楚**：
 
@@ -124,7 +159,12 @@ swift test                      # 108 个
 
 ## 已知风险与待办
 
-- **写回失败的窗口**（见上，机制二第 3 条）。关不上，只能记录：失败会写进 `claudeRefreshOutcome`。
+- **写回失败的窗口**（机制二第 3 条）。窗口已经被收到最窄——换发与写回之间不再有任何可取消点，
+  也不会有第二次换发——但如果磁盘/钥匙串写入本身失败，交换已经发生这件事无法撤销。只能记录：
+  失败会写进 `claudeRefreshOutcome`，`--credentials-read-only` 会打印出来。
+- **`offActor` 的 15 秒超时会把一次慢成功报成失败**。超时后继续跑的那次写入仍可能成功，而我们
+  已经记了「换到了但写不回去」并把这份凭据标成 `.storage` 拒绝。下一次凭据变化会自愈（`adopt`
+  清空 `rejected`），所以留着没修，但报出来的话不准。
 - **history.json 双写者**（见上）。修法是 History 写之前先读回来合并，或者自检子命令改用独立缓存目录。
 - **周窗口上的区间带只有约 11pt 宽**。七天的横轴上本来就该窄，信息由尺寸线和结论句承担，不打算改。
 - `.fallsShort` 的大数字取自 `enduranceLow`、缺口取自 `enduranceHigh`，两者相加不等于 trip。
