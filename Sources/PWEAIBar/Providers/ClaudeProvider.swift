@@ -266,6 +266,30 @@ actor ClaudeProvider {
         return (cache, cache.contains(where: \.isStale))
     }
 
+    /// A record of our own token refreshes, kept because the alternative is guesswork.
+    ///
+    /// Claude Code writes the same keychain item this app does, and the rotation deliberately
+    /// preserves every field it does not own — so after the fact the credential itself cannot
+    /// say which of the two rewrote it. Twice now that question has mattered and twice the
+    /// honest answer was "cannot tell". This is the app stating, in its own store, what it did
+    /// and when. A timestamp, an outcome and a count: no token, no account, no server body.
+    private func note(_ outcome: String) {
+        defaults.set(now().timeIntervalSince1970, forKey: "claudeRefreshAt")
+        defaults.set(outcome, forKey: "claudeRefreshOutcome")
+        if outcome == "saved" {
+            defaults.set(defaults.integer(forKey: "claudeRefreshCount") + 1, forKey: "claudeRefreshCount")
+        }
+    }
+
+    nonisolated static func refreshRecord(_ d: UserDefaults = .standard)
+        -> (at: Date, outcome: String, count: Int)? {
+        let stamp = d.double(forKey: "claudeRefreshAt")
+        guard stamp > 0 else { return nil }
+        return (Date(timeIntervalSince1970: stamp),
+                d.string(forKey: "claudeRefreshOutcome") ?? "未知",
+                d.integer(forKey: "claudeRefreshCount"))
+    }
+
     private func rotate(_ token: Credentials.Token, expected: String, version: Int) async throws -> Credentials.Token {
         guard let refresh = token.refreshToken, let persist = access.persist else { throw Blocker.expired }
         guard signature(try await candidates()) == expected else { throw Blocker.credentialsChanged }
@@ -275,22 +299,36 @@ actor ClaudeProvider {
         guard let http = response as? HTTPURLResponse else { throw Blocker.invalidResponse }
         if http.statusCode == 400 || http.statusCode == 401 {
             let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            if body?["error"] as? String == "invalid_grant" || http.statusCode == 401 { throw Blocker.expired }
+            if body?["error"] as? String == "invalid_grant" || http.statusCode == 401 {
+                note("凭据已失效"); throw Blocker.expired
+            }
             rejected[token.generation] = .invalidResponse
+            note("换发被拒 \(http.statusCode)")
             throw Blocker.invalidResponse
         }
         try checkHTTP(http)
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw Blocker.invalidResponse }
         let rotated: Credentials.Token
         do { rotated = try ClaudeCredentialStore.rotated(token, response: object, now: now()) }
-        catch { rejected[token.generation] = .invalidResponse; throw Blocker.invalidResponse }
+        catch {
+            rejected[token.generation] = .invalidResponse
+            note("回复看不懂"); throw Blocker.invalidResponse
+        }
         guard signature(try await candidates()) == expected else { throw Blocker.credentialsChanged }
         try check(version)
         let saved: Bool
         do { saved = try await offActor { try persist(rotated, token) } }
-        catch { rejected[token.generation] = .storage; throw Blocker.storage }
+        catch {
+            rejected[token.generation] = .storage
+            // The dangerous one, and the reason it is recorded rather than merely thrown: the
+            // exchange has already happened, so if the server rotated the refresh token then
+            // the copy Claude Code still holds may now be dead. Nothing here can undo that; the
+            // least the app can do is leave a note saying it is what happened.
+            note("换到了但写不回去"); throw Blocker.storage
+        }
         try check(version)
-        guard saved else { throw Blocker.credentialsChanged }
+        guard saved else { note("写回时凭据已被改动"); throw Blocker.credentialsChanged }
+        note("saved")
         return rotated
     }
 
@@ -360,10 +398,29 @@ actor ClaudeProvider {
         rejected = [:]; retryNetworkAt = nil; blocker = .none
     }
 
+    /// How long the last reading stays good for.
+    ///
+    /// This used to shorten as the situation got worse: sixty seconds the moment any window
+    /// went hot, or a reset came within a quarter of an hour. That is the wrong instinct
+    /// wearing the clothes of diligence, and it cost a day of readings.
+    ///
+    /// A window that is spent has one thing left to say and it has already said it — the reset
+    /// time, which is a fact in hand, not a number to go and re-read. Polling it every minute
+    /// learns nothing and spends the only budget that matters: this endpoint answers "how much
+    /// is left", and asking 1,440 times a day is how the app collected an hour-long Retry-After
+    /// and then showed a figure that was thirty-three hours old. Hardest polling, at exactly
+    /// the moment its reader cared most, producing the least information it has ever produced.
+    ///
+    /// So the cadence follows whether the number *can* have moved, not how alarming it looks:
+    /// a spent window waits for its own rollover and adds a beat; an imminent reset is worth
+    /// catching promptly, and two minutes is prompt; everything else is five minutes, which the
+    /// event loop shortens on its own the moment a turn actually lands.
     private func ttl() -> TimeInterval {
-        let soon = cache.compactMap(\.resetsAt).map { $0.timeIntervalSince(now()) }.filter { $0 > 0 }.min() ?? .infinity
-        let band = cache.map(\.band).max() ?? .calm
-        return band == .hot || soon < 900 ? 60 : band == .warm ? 150 : 300
+        let soon = cache.compactMap(\.resetsAt).map { $0.timeIntervalSince(now()) }
+            .filter { $0 > 0 }.min() ?? .infinity
+        if cache.contains(where: \.confirmedExhausted) { return max(60, min(soon + 20, 900)) }
+        if soon < 300 { return 120 }
+        return 300
     }
 
     private func staleReading() -> Reading {
