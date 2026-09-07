@@ -95,7 +95,10 @@ echo
 echo "── tests ─────────────────────────────────────────────────"
 # Never a release off an unproven tree. The forecast engine and the credential rotation both
 # have regression tests that fail if their invariants are broken; that is the whole point.
-swift test 2>&1 | tail -3
+# `tail -3` here used to show only the swift-testing summary — "0 tests in 0 suites" — while
+# the line that says 116 XCTest cases passed scrolled off. The gate was right and the report
+# was misleading, which is its own kind of wrong.
+swift test 2>&1 | grep -E "Executed [0-9]+ tests|error:" | tail -3
 
 echo
 echo "── version $VERSION ──────────────────────────────────────"
