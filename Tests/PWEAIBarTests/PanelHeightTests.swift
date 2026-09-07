@@ -3,23 +3,27 @@ import SwiftUI
 import XCTest
 @testable import PWEAIBar
 
-/// The panel has to fit on the screen it pops out of.
+/// The panel has to fit the screen it pops out of — and, just as importantly, it has to *ask*
+/// for the height it needs.
 ///
-/// `SettingsView` learned this once already — eight providers pushed it past 960 pt and the
-/// rows below the fold became unreachable, which is why it has a `ScrollView` and a cap. The
-/// panel has the same shape (a section per active provider, plus the chart and the score row
-/// in full mode) and never got the same treatment: it grew until its top — the header, the
-/// provider picker and the endurance block, which is the entire point of the app — was pushed
-/// off the screen by a popover AppKit had nowhere left to put.
+/// The first fix here wrapped the middle in a `ScrollView` unconditionally and capped the whole
+/// panel. It passed a test that measured `NSHostingView.fittingSize` in isolation, and it was
+/// wrong in the app: a `ScrollView` asks for no height at all, so the popover had nothing
+/// pushing it open and simply kept whatever size it had — around 300 pt — with the entire panel
+/// scrolling inside it. Two more releases went out before that was understood, because the test
+/// never put the view in a window and never let a layout pass run.
+///
+/// So these tests do. `NSHostingController` in a real window, the run loop pumped, and the
+/// question asked of `fittingSize` — which is what a popover consults when it opens.
 final class PanelHeightTests: XCTestCase {
 
-    /// The smallest Mac still sold is 1440 x 900 points; the menu bar and the popover's own
-    /// beak and margins take roughly forty of them.
-    static let smallestUsableScreen: CGFloat = 860
+    /// The smallest Mac still sold is 1440 x 900 points.
+    static let smallScreen: CGFloat = 860
+    /// What Lee's display actually has, and the case that must not scroll.
+    static let roomyScreen: CGFloat = 1334
 
-    /// What the panel measures with everything switched on. Not a budget — a fact to compare
-    /// the two screens against, so both claims below are about the same number.
-    @MainActor private func measuredHeight() throws -> CGFloat {
+    @MainActor private func panel(usableHeight: CGFloat)
+        throws -> (fitting: CGFloat, opened: CGFloat, scrolls: Bool) {
         let space = try TestSpace()
         let prefs = Prefs(defaults: space.defaults)
         prefs.panelMode = .full
@@ -38,15 +42,13 @@ final class PanelHeightTests: XCTestCase {
 
         var snap = Snapshot()
         let at = Date()
-        // Every provider the settings screen can switch on, each with the rows it actually
-        // draws. This is the worst case the panel has to survive, not a hypothetical one.
+        // Every provider the settings screen can switch on. The worst case, not a hypothetical.
         for (provider, channel) in [(Provider.claude, Channel.week), (.claude, .session),
                                     (.codex, .codex), (.cursor, .other), (.copilot, .other),
                                     (.devin, .other), (.grok, .other), (.antigravity, .other)] {
             snap.windows.append(QuotaWindow(id: "\(provider)-\(channel)", provider: provider,
                                             channel: channel, title: "周窗口", percent: 72,
-                                            severity: .normal,
-                                            resetsAt: at.addingTimeInterval(86400)))
+                                            severity: .normal, resetsAt: at.addingTimeInterval(86400)))
         }
         snap.contextPercent = 23.5
         let byHour: [(hour: Date, usd: Double)] = (0..<24).map { (i: Int) -> (Date, Double) in
@@ -58,47 +60,60 @@ final class PanelHeightTests: XCTestCase {
 
         _ = NSApplication.shared
         Theme.registerFonts()
-        let panel = PanelView(store: store, prefs: prefs, onTrophy: {}, onSettings: {},
-                              onOpen: { _ in }, onEnableQuota: {})
-        let host = NSHostingView(rootView: AnyView(panel))
-        host.frame = NSRect(x: 0, y: 0, width: Theme.panelWidth, height: host.fittingSize.height)
-        host.layoutSubtreeIfNeeded()
-        defer { store.stop() }
-        XCTAssertNotNil(host.descendantScrollView(),
-                        "no scroller means whatever does not fit is simply gone")
-        return host.fittingSize.height
+        let view = PanelView(store: store, prefs: prefs, onTrophy: {}, onSettings: {},
+                             onOpen: { _ in }, onEnableQuota: {}, usableHeight: usableHeight)
+        let controller = NSHostingController(rootView: AnyView(view))
+        // A popover opens at whatever size it has and only grows if the content insists. Start
+        // the window deliberately short, the way the panel first opens before any reading has
+        // arrived, so a layout that cannot insist shows up as a failure here.
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: Theme.panelWidth, height: 300),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentViewController = controller
+        window.orderBack(nil)
+        for _ in 0..<30 { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+        let fitting = controller.view.fittingSize.height
+        // What the short window actually became. This is the number that was wrong in the app
+        // and right in the old test: `fittingSize` reports an unconstrained fit either way, so
+        // it cannot tell a layout that insists on its height from one that quietly accepts
+        // whatever it is given. Only the window can.
+        let opened = window.contentView?.frame.height ?? 0
+        let scrolls = controller.view.descendantScrollView() != nil
+        window.orderOut(nil)
+        store.stop()
+        return (fitting, opened, scrolls)
     }
 
-    /// On a small screen the panel is capped, and what the cap hides is still reachable.
-    @MainActor func testOnASmallScreenThePanelIsCappedAndStillScrollable() throws {
-        let height = try measuredHeight()
-        let cap = PanelView.ceiling(usableHeight: Self.smallestUsableScreen)
-        print("panel height with every provider, full mode: \(height) pt")
-        XCTAssertLessThanOrEqual(cap, Self.smallestUsableScreen,
-                                 "the cap has to fit the screen it was computed from")
-        XCTAssertLessThan(cap, height,
-                          "on a 1440 x 900 Mac the panel genuinely does not fit — that is the case "
-                          + "the scroller exists for")
-    }
-
-    /// And on a screen with room, nothing scrolls: it all just shows.
+    /// On a display with room, the whole panel shows and nothing scrolls.
     ///
-    /// The first cut of this fix also capped at 860 pt on the grounds that a taller popover
-    /// "stops being a menu-bar panel". That is taste, not a constraint, and on the 1334 pt
-    /// display it was actually running on it hid 474 pt of room the reader had — turning a fix
-    /// for unreachable content into a scrollbar nobody needed. The limit is the screen.
-    @MainActor func testOnAScreenWithRoomTheWholePanelShowsWithoutScrolling() throws {
-        let height = try measuredHeight()
-        let cap = PanelView.ceiling(usableHeight: 1334)
-        XCTAssertGreaterThanOrEqual(cap, height,
-                                    "\(height) pt of panel against a \(cap) pt cap on a 1334 pt "
-                                    + "screen — the reader is being made to scroll for nothing")
+    /// This is the one that was broken in 1.0.1 and 1.0.2: the panel stayed at about 300 pt and
+    /// cut a provider row in half, on a screen with 1334 pt of space.
+    @MainActor func testOnARoomyScreenTheWholePanelShowsAndNothingScrolls() throws {
+        let (fitting, opened, scrolls) = try panel(usableHeight: Self.roomyScreen)
+        print("roomy screen: fits \(fitting) pt, window opened to \(opened) pt, scrolls = \(scrolls)")
+        XCTAssertFalse(scrolls, "there is room for all of it — a scroller here is the bug")
+        XCTAssertGreaterThan(opened, 600,
+                             "a 300 pt window stayed at \(opened) pt: nothing is asking it to open "
+                             + "to the height the content needs, which is exactly what the reader "
+                             + "sees as a panel cut off mid-row")
+        XCTAssertEqual(opened, fitting, accuracy: 1, "it opened to something other than its own fit")
+        XCTAssertLessThanOrEqual(fitting, PanelView.ceiling(usableHeight: Self.roomyScreen))
+    }
+
+    /// And on a screen too small for it, it is capped and what the cap hides stays reachable.
+    @MainActor func testOnASmallScreenThePanelIsCappedAndStaysScrollable() throws {
+        let (fitting, _, scrolls) = try panel(usableHeight: Self.smallScreen)
+        let cap = PanelView.ceiling(usableHeight: Self.smallScreen)
+        print("small screen: panel fits at \(fitting) pt against a \(cap) pt cap, scrolls = \(scrolls)")
+        XCTAssertLessThanOrEqual(fitting, cap,
+                                 "\(fitting) pt against a \(cap) pt screen — the overflow goes off "
+                                 + "the top, taking the header and the endurance block with it")
+        XCTAssertTrue(scrolls, "capped with no scroller means everything past the cap is simply gone")
     }
 }
 
 private extension NSView {
-    /// Depth-first search for a real `NSScrollView` in the hosted hierarchy. SwiftUI's
-    /// `ScrollView` is backed by one, so its absence means the panel cannot be scrolled.
+    /// Depth-first search for a real `NSScrollView`. SwiftUI's `ScrollView` is backed by one, so
+    /// its presence or absence is the honest answer to "does this panel scroll".
     func descendantScrollView() -> NSScrollView? {
         if let me = self as? NSScrollView { return me }
         for child in subviews { if let found = child.descendantScrollView() { return found } }

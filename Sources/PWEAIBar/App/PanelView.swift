@@ -19,6 +19,11 @@ struct PanelView: View {
     var onSettings: () -> Void
     var onOpen: (Provider) -> Void
     var onEnableQuota: () -> Void
+    /// The screen height to size against. Nil asks the real screen; tests state one.
+    var usableHeight: CGFloat? = nil
+
+    @State private var middleHeight: CGFloat = 0
+    @State private var chromeHeight: CGFloat = 0
 
     private var snap: Snapshot { store.snapshot }
 
@@ -46,25 +51,47 @@ struct PanelView: View {
         return max(420, usable - 32)
     }
 
+    /// How much height the middle may take before it has to scroll.
+    private var room: CGFloat {
+        // The two rules either side of the middle are a point each.
+        max(200, Self.ceiling(usableHeight: usableHeight) - chromeHeight - 2)
+    }
+
+    /// Only true once both measurements are in, so the first pass renders unscrolled and
+    /// measures honestly rather than deciding from a zero.
+    private var mustScroll: Bool { chromeHeight > 0 && middleHeight > room }
+
     var body: some View {
         VStack(spacing: 0) {
             // Header and footer stay put. The gear is the only way into settings and the footer
             // carries the trophy link and how fresh the reading is; neither may scroll away.
-            header
+            header.measuring(ChromeHeight.self)
             rule
-            scrolling
+            // A ScrollView asks for no height at all, so making one unconditionally was what
+            // actually broke this: the popover had nothing pushing it open and simply kept the
+            // size it happened to have — about 300 pt — while the whole panel scrolled inside
+            // it. Raising the cap could not help, because the cap was never what it hit.
+            //
+            // Measured: a plain column pushes a 300 pt window out to the 870 pt it needs; the
+            // same column inside a ScrollView lets it collapse to 70, the header and footer
+            // alone. So the scroller only appears when it is genuinely needed, and when it does
+            // it gets a fixed height, which is a constraint the popover does respect.
+            if mustScroll { scroller } else { measuredMiddle }
             rule
-            footer
+            footer.measuring(ChromeHeight.self)
         }
         .frame(width: Theme.panelWidth)
-        .frame(maxHeight: Self.ceiling())
         .background(Theme.surface)
+        .onPreferenceChange(MiddleHeight.self) { middleHeight = $0 }
+        .onPreferenceChange(ChromeHeight.self) { chromeHeight = $0 }
     }
 
-    private var scrolling: some View {
-        let content = ScrollView { middle }
-        // Without this a panel that already fits rubber-bands when you flick it, which reads as
-        // a bug in the one surface that is supposed to feel fixed to the menu bar.
+    private var measuredMiddle: some View { middle.measuring(MiddleHeight.self) }
+
+    private var scroller: some View {
+        let content = ScrollView { measuredMiddle }.frame(height: room)
+        // Without this a panel that only just overflows rubber-bands when you flick it, which
+        // reads as a bug in the one surface that is supposed to feel fixed to the menu bar.
         if #available(macOS 14.0, *) { return AnyView(content.scrollBounceBehavior(.basedOnSize)) }
         return AnyView(content)
     }
@@ -717,5 +744,24 @@ struct PanelView: View {
             return "$" + (Self.grouped.string(from: NSNumber(value: v)) ?? String(Int(v)))
         }
         return String(format: "$%.2f", v)
+    }
+}
+
+/// The natural height of everything between the header and the footer.
+enum MiddleHeight: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+/// The header and the footer together — summed, because they are measured separately.
+enum ChromeHeight: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value += nextValue() }
+}
+
+private extension View {
+    /// Reports this view's laid-out height through `key`, without affecting its layout.
+    func measuring<K: PreferenceKey>(_ key: K.Type) -> some View where K.Value == CGFloat {
+        background(GeometryReader { g in Color.clear.preference(key: key, value: g.size.height) })
     }
 }
