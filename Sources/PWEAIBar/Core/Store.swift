@@ -12,6 +12,7 @@ import SwiftUI
 final class Store: ObservableObject {
 
     @Published private(set) var snapshot = Snapshot()
+    @Published private(set) var claudeRefreshing = false
     @Published private(set) var loggedIn = true
     @Published private(set) var blocker: ClaudeProvider.Blocker = .none
 
@@ -67,6 +68,8 @@ final class Store: ObservableObject {
     }
     private var timer: Timer?
     private var inFlight = false
+    private var sweepVersion = 0
+    private var claudeUpdateVersion = 0
     private var lastActivity = Date()
 
     /// Live, idle, and asleep are three different jobs. 20 s keeps the bar honest while you work;
@@ -119,21 +122,23 @@ final class Store: ObservableObject {
         timer = t
     }
 
-    func refresh() {
+    func refresh(forceClaude: Bool = false) {
         // One sweep at a time. Clicking the icon asks for a refresh, and a burst of clicks
         // used to stack sweeps that each re-read the whole log tree.
-        guard !inFlight else { return }
+        guard !inFlight else { if forceClaude { refreshClaudeOnly() }; return }
         inFlight = true
+        sweepVersion += 1
+        let sweep = sweepVersion
         Task { @MainActor in
-            defer { inFlight = false }
+            defer { if sweep == sweepVersion { inFlight = false } }
             var snap = Snapshot()
 
             if tracks().claude {
-                let (windows, stale) = await claude.windows()
-                snap.windows += windows
-                snap.stale = stale
-                loggedIn = await claude.loggedIn
-                blocker = await claude.blocker
+                await updateClaude(force: forceClaude)
+            } else {
+                snapshot.windows.removeAll { $0.provider == .claude }
+                snapshot.claudeDetails = .init(); snapshot.plans[.claude] = nil
+                snapshot.stale = false
             }
             if tracks().codex {
                 let (rows, plan) = await readCodex()
@@ -170,6 +175,10 @@ final class Store: ObservableObject {
             let local = await readLocal()
             snap.trophy = local.trophy
             snap.contextPercent = local.context
+            snap.windows += snapshot.windows(of: .claude)
+            snap.claudeDetails = snapshot.claudeDetails
+            snap.plans[.claude] = snapshot.plans[.claude]
+            snap.stale = snapshot.stale
             snap.events = snapshot.events
             snap.updatedAt = Date()
 
@@ -180,10 +189,41 @@ final class Store: ObservableObject {
             let recentEvent = snap.events.first.map { Date().timeIntervalSince($0.at) < 300 } ?? false
             if recentTurn || recentEvent { lastActivity = Date() }
 
+            guard sweep == sweepVersion else { return }
             snapshot = snap
             onSnapshot?(snap)
             dispatchAlerts()
         }
+    }
+
+    /// Claude publishes independently of slow providers and transcript statistics.
+    private func updateClaude(force: Bool) async {
+        claudeRefreshing = true
+        claudeUpdateVersion += 1
+        let update = claudeUpdateVersion
+        let reading = await claude.windows(force: force)
+        let details = await claude.details
+        let windows = await observe(reading.windows)
+        let login = await claude.loggedIn
+        let failure = await claude.blocker
+        guard update == claudeUpdateVersion else { return }
+        loggedIn = login; blocker = failure
+        if tracks().claude {
+            snapshot.windows.removeAll { $0.provider == .claude }
+            snapshot.windows += windows
+            snapshot.claudeDetails = details
+            snapshot.plans[.claude] = details.plan
+            snapshot.stale = reading.stale
+            onSnapshot?(snapshot)
+            dispatchAlerts()
+        }
+        claudeRefreshing = false
+    }
+
+    func refreshClaudeOnly() {
+        guard tracks().claude, !claudeRefreshing else { return }
+        claudeRefreshing = true
+        Task { await updateClaude(force: true) }
     }
 
     /// Only used by `--stress`, which needs a snapshot that real data will never produce.
@@ -193,6 +233,8 @@ final class Store: ObservableObject {
     }
 
     func stop() {
+        sweepVersion += 1; claudeUpdateVersion += 1
+        inFlight = false; claudeRefreshing = false
         timer?.invalidate(); timer = nil
         eventTimer?.invalidate(); eventTimer = nil
     }
@@ -230,14 +272,14 @@ final class Store: ObservableObject {
     }
 
     func saveToken(_ t: String) async -> ClaudeProvider.TokenUpdate {
+        claudeUpdateVersion += 1
         let result = await claude.useOwnToken(t)
-        blocker = await claude.blocker
-        loggedIn = await claude.loggedIn
-        refresh()
+        await updateClaude(force: false)
         return result
     }
 
     func enableRealQuota() {
-        Task { await claude.enableSharedKeychain(); refresh() }
+        claudeUpdateVersion += 1
+        Task { await claude.enableSharedKeychain(); await updateClaude(force: true) }
     }
 }

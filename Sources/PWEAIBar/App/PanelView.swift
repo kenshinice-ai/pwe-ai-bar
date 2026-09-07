@@ -81,7 +81,7 @@ struct PanelView: View {
             Button(action: onSettings) {
                 Image(systemName: "gearshape").font(.system(size: 11))
             }
-            .buttonStyle(.plain).foregroundStyle(Theme.text2)
+            .buttonStyle(.plain).foregroundStyle(Theme.text2).accessibilityLabel("设置")
         }
         .padding(.horizontal, Theme.s3).padding(.vertical, 11)
     }
@@ -99,7 +99,7 @@ struct PanelView: View {
                 // axis now says it, and saying it twice on one screen made the panel look like
                 // it was arguing with itself.
                 HStack(alignment: .firstTextBaseline, spacing: Theme.s2) {
-                    Text(Readout.text(p, remaining: prefs.showRemaining)).font(Theme.figures(36))
+                    Text(Readout.panelText(p, remaining: prefs.showRemaining)).font(Theme.figures(36))
                         .foregroundStyle(Theme.health(p.band, dark: isDark))
                     Spacer()
                     if p.resetsAt == nil, let note = resetText(p) {
@@ -184,14 +184,14 @@ struct PanelView: View {
                 // Re-logging in rewrites the keychain item through `security`, which is the one
                 // program allowed to read it back; editing an ACL by hand is four dialogs deep.
                 return ("钥匙串拒绝了访问", "重新运行 claude auth login 即可重建授权")
-            case .unauthorized, .forbidden, .network:
+            case .unauthorized, .forbidden, .network, .storage, .invalidResponse, .credentialsChanged:
                 return ("额度连接需要处理", store.blocker.message)
             case .expired:
                 // The old wording said opening Claude Code would renew it. Measured on this
                 // machine: the credential sat expired for seven and a half hours while Claude
                 // Code ran the whole time — the CLI does not rewrite that item on every refresh,
                 // so the advice sent people to do something that would not have worked.
-                return ("Claude 凭据已过期", "本 app 不替你续期。终端跑 claude setup-token，把结果贴进设置")
+                return ("Claude 凭据已过期", store.blocker.message)
             case .rateLimited(let until):
                 let m = max(1, Int(until.timeIntervalSinceNow / 60))
                 return ("接口限流中", "\(m) 分钟后自动重试")
@@ -211,7 +211,7 @@ struct PanelView: View {
             if store.blocker == .needsSetup || store.blocker == .keychainRefused {
                 Button("改用钥匙串授权") { onEnableQuota() }
                     .font(Theme.sans(11.5))
-                    .help("正常情况下用不到。会弹一次 macOS 授权框，选「始终允许」后不再询问")
+                    .help("重新连接已保存的 Claude Code 登录；macOS 可能请求钥匙串授权")
             }
         }
     }
@@ -252,6 +252,23 @@ struct PanelView: View {
             ForEach(rows(for: p)) { w in
                 windowRow(w)
             }
+
+            if p == .claude {
+                HStack {
+                    Text(claudeStatus).font(Theme.sans(10)).foregroundStyle(Theme.text2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 4)
+                    Button(store.claudeRefreshing ? "更新中…" : "刷新") { store.refreshClaudeOnly() }
+                        .font(Theme.sans(11)).disabled(store.claudeRefreshing)
+                        .accessibilityLabel("刷新 Claude 额度")
+                }
+                if let spend = snap.claudeDetails.spend {
+                    Text("额外消费 $" + NSDecimalNumber(decimal: spend.usedUSD).stringValue
+                         + (spend.limitUSD.map { " / 本期上限 $" + NSDecimalNumber(decimal: $0).stringValue } ?? "（未提供上限）"))
+                        .font(Theme.sans(10.5)).foregroundStyle(Theme.text2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             // A provider that failed keeps its heading and says why. Dropping the section
             // instead is indistinguishable from never having turned it on, and the one thing
             // someone needs at that moment is which of those two it is.
@@ -270,6 +287,12 @@ struct PanelView: View {
         .padding(.horizontal, Theme.s3).padding(.vertical, 11)
     }
 
+    private var claudeStatus: String {
+        let age = snap.claudeDetails.lastSuccessAt.map { ago($0) + "成功获取" } ?? "尚无成功读数"
+        let source = snap.claudeDetails.source == .ownToken ? "手动令牌" : "Claude Code 登录"
+        return source + " · " + age + (snap.stale ? " · 旧读数" : "")
+    }
+
     private func ctaRow(_ cta: (text: String, button: String?)) -> some View {
         HStack(spacing: Theme.s2) {
             Text(cta.text).font(Theme.sans(11)).foregroundStyle(Theme.text2)
@@ -280,7 +303,7 @@ struct PanelView: View {
                     if title == "管理凭据" { onSettings() } else { onEnableQuota() }
                 }
                     .font(Theme.sans(11))
-                    .help(title == "管理凭据" ? "打开设置以更换或清除令牌" : "会弹一次 macOS 钥匙串授权，选「始终允许」后不再询问")
+                    .help(title == "管理凭据" ? "打开设置以更换或清除令牌" : "重新连接 Claude Code 登录，macOS 可能请求授权")
             }
         }
     }
@@ -297,7 +320,7 @@ struct PanelView: View {
                 HStack(spacing: 4) {
                     ProviderMarkView(provider: w.provider, tint: Theme.text2)
                         .frame(width: 10, height: 10)
-                    Text(Readout.text(w, remaining: prefs.showRemaining))
+                    Text(Readout.panelText(w, remaining: prefs.showRemaining))
                         .font(Theme.figures(11.5, 500))
                         .foregroundStyle(Theme.health(w.band, dark: isDark))
                 }
@@ -317,8 +340,10 @@ struct PanelView: View {
     /// Nil once real quota is flowing.
     private var claudeCallToAction: (text: String, button: String?)? {
         switch store.blocker {
-        case .unauthorized, .forbidden, .expired: return (store.blocker.message, "管理凭据")
-        case .network: return (store.blocker.message, nil)
+        case .unauthorized, .forbidden, .expired, .storage, .credentialsChanged: return (store.blocker.message, "管理凭据")
+        case .network, .invalidResponse: return (store.blocker.message, nil)
+        case .rateLimited(let until):
+            return ("接口限流中，\(max(1, Int(ceil(until.timeIntervalSinceNow / 60)))) 分钟后可重试", nil)
         default: break
         }
         guard snap.windows(of: .claude).isEmpty else { return nil }
@@ -326,7 +351,7 @@ struct PanelView: View {
         case .needsSetup:      return ("只有本地估算，读不到 Claude Code 凭据", "处理")
         case .keychainRefused: return ("钥匙串授权被拒过", "重新授权")
         case .notLoggedIn:     return ("先在终端运行 claude auth login", nil)
-        case .expired, .unauthorized, .forbidden, .network: return (store.blocker.message, "管理凭据")
+        case .expired, .unauthorized, .forbidden, .network, .storage, .invalidResponse, .credentialsChanged: return (store.blocker.message, "管理凭据")
         case .rateLimited(let until):
             return ("接口限流中，\(max(1, Int(until.timeIntervalSinceNow / 60))) 分钟后重试", nil)
         case .none:            return nil
@@ -343,7 +368,7 @@ struct PanelView: View {
                 .lineLimit(1).truncationMode(.tail)
                 .frame(width: 66, alignment: .leading)
             track(w).frame(maxWidth: .infinity)
-            Text(Readout.text(w, remaining: prefs.showRemaining)).font(Theme.figures(11.5, 600))
+            Text(Readout.panelText(w, remaining: prefs.showRemaining)).font(Theme.figures(11.5, 600))
                 .foregroundStyle(Theme.health(w.band, dark: isDark))
                 .lineLimit(1).minimumScaleFactor(0.8)
                 .frame(width: 52, alignment: .trailing)
@@ -465,7 +490,7 @@ struct PanelView: View {
     /// "turn this on" row lives, and hiding it would hide the only way forward.
     private var activeProviders: [Provider] {
         Provider.allCases.filter {
-            !rows(for: $0).isEmpty || snap.connections[$0] != nil
+            !rows(for: $0).isEmpty || snap.connections[$0] != nil || ($0 == .claude && snap.claudeDetails.spend != nil)
                 || ($0 == .claude && claudeCallToAction != nil)
         }
     }

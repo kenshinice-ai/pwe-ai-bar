@@ -1,0 +1,28 @@
+Claude usage verification — 2026-09-07
+
+baseline.log
+Build complete! (20.48 sec.)
+	 Executed 106 tests, with 0 failures (0 unexpected) in 26.121 (26.133) seconds
+	 Executed 106 tests, with 0 failures (0 unexpected) in 26.121 (26.135) seconds
+
+verified-tests.log
+Build complete! (12.11 sec.)
+	 Executed 120 tests, with 0 failures (0 unexpected) in 26.206 (26.221) seconds
+	 Executed 120 tests, with 0 failures (0 unexpected) in 26.206 (26.222) seconds
+
+verified-release.log
+Build complete! (27.10 sec.)
+
+package.log
+▸ Signed with: -
+▸ Done: build/claude-review/PWE AI Bar.app
+
+codesign --verify --deep --strict: exit 0
+git diff --check: exit 0
+Protected EnduranceView and four ZZ scratch tests: SHA-256 unchanged
+
+PWE AI Bar — Claude 额度检查（不续期）
+状态：已验证，额度连接正常
+来源：claudeKeychain
+有效窗口：2，旧读数：否
+成功获取：是

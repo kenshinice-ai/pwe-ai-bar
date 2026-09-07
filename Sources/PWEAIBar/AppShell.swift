@@ -182,7 +182,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = nil
     }
 
-    @objc private func refreshNow() { store.refresh() }
+    @objc private func refreshNow() { store.refresh(forceClaude: true) }
 
     // MARK: Windows
 

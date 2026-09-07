@@ -4,6 +4,46 @@ import XCTest
 @testable import PWEAIBar
 
 final class RenderingTests: XCTestCase {
+    @MainActor func testClaudeQuotaSuccessAndRateLimitCardsRender() async throws {
+        let space = try TestSpace(); let prefs = Prefs(defaults: space.defaults)
+        prefs.panelMode = .standard
+        let at = Date()
+        let auth = ClaudeProvider.Access(own: { nil }, claudeCode: {
+            Credentials.Token(value: "synthetic", expiresAt: nil, source: .claudeKeychain, plan: "pro")
+        }, sharedExists: { false }, shared: { nil }, save: { _ in .failed(-1) })
+        let body = """
+        {"five_hour":{"utilization":7.4,"resets_at":\(at.addingTimeInterval(3600).timeIntervalSince1970)},
+         "seven_day":{"utilization":18.2,"resets_at":\(at.addingTimeInterval(5*86400).timeIntervalSince1970)},
+         "seven_day_sonnet":{"utilization":22.5,"resets_at":\(at.addingTimeInterval(5*86400).timeIntervalSince1970)},
+         "extra_usage":{"is_enabled":true,"used_credits":1234,"monthly_limit":5000}}
+        """
+        let http = HTTPStub([(200, body, [:]), (429, "{}", ["Retry-After": "120"])])
+        let p = ClaudeProvider(defaults: space.defaults, access: auth, request: { try await http.send($0) })
+        let store = Store(claude: p, rules: RuleEngine(defaults: space.defaults, away: { false }, remaining: { true }),
+                          readEvents: { [] }, readLocal: { .init(trophy: Trophy(), context: nil, lastTurnAt: nil) },
+                          readCodex: { ([], nil) }, deliver: { _, _ in XCTFail("No real notifications"); return false },
+                          tracks: { (true, false) }, tracksExtra: { _ in false }, observe: { $0 })
+        let output = ProcessInfo.processInfo.environment["PWEBAR_TEST_ARTIFACTS"].map { URL(fileURLWithPath: $0) } ?? space.root
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        _ = NSApplication.shared; Theme.registerFonts()
+        for stale in [false, true] {
+            store.refresh(forceClaude: true)
+            for _ in 0..<80 {
+                if store.snapshot.claudeDetails.lastSuccessAt != nil && store.snapshot.stale == stale && !store.claudeRefreshing { break }
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
+            XCTAssertEqual(store.snapshot.stale, stale)
+            XCTAssertEqual(store.snapshot.windows(of: .claude).count, 3)
+            XCTAssertEqual(store.snapshot.claudeDetails.spend?.usedUSD, Decimal(string: "12.34"))
+            for dark in [false, true] {
+                let panel = PanelView(store: store, prefs: prefs, onTrophy: {}, onSettings: {}, onOpen: { _ in }, onEnableQuota: {})
+                try render(AnyView(panel), width: Theme.panelWidth, dark: dark,
+                           output: output.appendingPathComponent("claude-\(stale ? "stale" : "live")-\(dark ? "dark" : "light").png"))
+            }
+        }
+        store.stop()
+    }
+
     @MainActor func testSyntheticCredentialStatesAndPendingQuotaRender() async throws {
         let space = try TestSpace(); let prefs = Prefs(defaults: space.defaults)
         let clock = TestClock(); let credential = FakeCredential()

@@ -75,7 +75,7 @@ final class RuleEngine {
             changed = true
         }
         for w in snap.windows {
-            let key = "\(w.provider.rawValue):\(w.id)"
+            let key = w.observationKey
             // Migrate the old per-window promises, including Claude's two historical aliases.
             let aliases = [w.id] + (w.id == "five_hour" ? ["session"] : w.id == "seven_day" ? ["weekly_all"] : [])
             for alias in aliases {
@@ -171,7 +171,7 @@ final class RuleEngine {
             guard alert.kind == .reset else { return true }
             // A delayed delivery must still be true when retried. Missing data keeps it queued.
             return snap.windows.contains { w -> Bool in
-                let key: String = "\(w.provider.rawValue):\(w.id)"
+                let key: String = w.observationKey
                 guard key == alert.subject, w.percent != nil, w.band == .calm else { return false }
                 guard w.canNotify(at: date) else { return false }
                 return !(w.provider == .claude && snap.stale)
