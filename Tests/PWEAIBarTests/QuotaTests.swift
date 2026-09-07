@@ -222,7 +222,7 @@ final class QuotaTests: XCTestCase {
 
     /// A weekly window is seven days long whichever way the reading arrives, including out of
     /// the disk cache — without that, the projection silently stops working after a restart.
-    func testWindowLengthsSurviveParsingAndTheDiskCache() async throws {
+    func testWindowLengthsSurviveMemoryCache() async throws {
         let space = try TestSpace(); let clock = TestClock(); let credential = FakeCredential()
         let body = #"{"limits":[{"kind":"session","percent":40,"resets_at":"2027-01-15T08:00:00Z"},"#
             + #"{"kind":"weekly_all","percent":10,"resets_at":"2027-01-20T08:00:00Z"}]}"#
@@ -231,10 +231,8 @@ final class QuotaTests: XCTestCase {
         let first = await p.windows()
         XCTAssertEqual(first.windows.map(\.windowLength), [5 * 3600, 7 * 86400])
 
-        let restart = provider(space, clock: clock, credential: credential, http: http)
-        let cached = await restart.windows()
-        XCTAssertEqual(cached.windows.map(\.windowLength), [5 * 3600, 7 * 86400],
-                       "a length lost on reload is a projection that quietly stops working")
+        let cached = await p.windows()
+        XCTAssertEqual(cached.windows.map(\.windowLength), [5 * 3600, 7 * 86400])
     }
 
     /// From the audit: a failed refresh used to overwrite the *success* time, so a miss extended

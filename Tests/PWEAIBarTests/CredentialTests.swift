@@ -4,25 +4,27 @@ import XCTest
 @testable import PWEAIBar
 
 final class CredentialTests: XCTestCase {
-    func testUpdateFailureNeverDeletesOrAdds() {
+    func testUpdateFailureNeverDeletesOrAdds() throws {
+        let space = try TestSpace()
         var adds = 0; var deletes = 0
         let operations = Credentials.Operations(update: { _, _ in errSecAuthFailed },
             add: { _ in adds += 1; return errSecSuccess }, delete: { _ in deletes += 1; return errSecSuccess })
-        XCTAssertEqual(Credentials.storeOwnToken("synthetic", operations: operations), .failed(errSecAuthFailed))
+        XCTAssertEqual(Credentials.storeOwnToken("synthetic", operations: operations, defaults: space.defaults), .failed(errSecAuthFailed))
         XCTAssertEqual(adds, 0); XCTAssertEqual(deletes, 0)
     }
 
-    func testInsertOnlyWhenMissingAndDeleteFailuresSurface() {
+    func testInsertOnlyWhenMissingAndDeleteFailuresSurface() throws {
+        let space = try TestSpace()
         var adds = 0
         let operations = Credentials.Operations(update: { _, _ in errSecItemNotFound },
             add: { _ in adds += 1; return errSecNotAvailable }, delete: { _ in errSecAuthFailed })
-        XCTAssertEqual(Credentials.storeOwnToken("synthetic", operations: operations), .failed(errSecNotAvailable))
+        XCTAssertEqual(Credentials.storeOwnToken("synthetic", operations: operations, defaults: space.defaults), .failed(errSecNotAvailable))
         XCTAssertEqual(adds, 1)
-        XCTAssertEqual(Credentials.storeOwnToken("", operations: operations), .failed(errSecAuthFailed))
+        XCTAssertEqual(Credentials.storeOwnToken("", operations: operations, defaults: space.defaults), .failed(errSecAuthFailed))
         var absent = operations; absent.delete = { _ in errSecItemNotFound }
-        XCTAssertEqual(Credentials.storeOwnToken("", operations: absent), .cleared)
+        XCTAssertEqual(Credentials.storeOwnToken("", operations: absent, defaults: space.defaults), .cleared)
         var update = operations; update.update = { _, _ in errSecSuccess }
-        XCTAssertEqual(Credentials.storeOwnToken("replacement", operations: update), .saved)
+        XCTAssertEqual(Credentials.storeOwnToken("replacement", operations: update, defaults: space.defaults), .saved)
         XCTAssertEqual(adds, 1)
     }
 
@@ -153,7 +155,7 @@ final class CredentialTests: XCTestCase {
         let blocker = await p.blocker; XCTAssertEqual(blocker, .network)
     }
 
-    func testParsingAndDiskCachePreserveGrader() async throws {
+    func testGraderSurvivesMemoryCacheButRestartRequiresNewObservation() async throws {
         for server in [true, false] {
             let space = try TestSpace(); let clock = TestClock(); let credential = FakeCredential()
             let body = server
@@ -163,11 +165,13 @@ final class CredentialTests: XCTestCase {
             let p = provider(space, clock: clock, credential: credential, http: http)
             let first = await p.windows()
             XCTAssertEqual(first.windows.first?.band, .hot)   // 96% either way; see QuotaTests
-            let restart = provider(space, clock: clock, credential: credential, http: http)
-            let cached = await restart.windows()
+            let cached = await p.windows()
             XCTAssertEqual(cached.windows.first?.gradedBy, server ? .server : .local)
             XCTAssertEqual(cached.windows.first?.band, first.windows.first?.band)
-            let count = await http.count; XCTAssertEqual(count, 1)
+            let restart = provider(space, clock: clock, credential: credential, http: http)
+            let cold = await restart.windows()
+            XCTAssertTrue(cold.windows.isEmpty, "an unbound disk cache is never a new account observation")
+            let count = await http.count; XCTAssertEqual(count, 2)
         }
     }
 
@@ -217,7 +221,7 @@ final class CredentialTests: XCTestCase {
         let before = credential.ownReads
         clock.date.addTimeInterval(3600)
         _ = await p.windows()
-        XCTAssertEqual(credential.ownReads, before, "the stored token is read once, not per refresh")
+        XCTAssertGreaterThan(credential.ownReads, before, "recheck source changes instead of trusting a token forever")
     }
 
     /// With nothing to fall through to, an expired credential is still an expired credential —
@@ -234,7 +238,7 @@ final class CredentialTests: XCTestCase {
         XCTAssertTrue(reading.stale)
         let blocker = await p.blocker
         XCTAssertEqual(blocker, .expired)
-        XCTAssertTrue(blocker.message.contains("setup-token"),
+        XCTAssertTrue(blocker.message.contains("重新登录"),
                       "the remedy has to be one that actually works")
         let count = await http.count
         XCTAssertEqual(count, 0, "an expired credential is not worth a request")

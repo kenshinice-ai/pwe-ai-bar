@@ -41,7 +41,7 @@ actor History {
             .appendingPathComponent("PWE AI Bar/history.json")
     }
 
-    static func key(_ w: QuotaWindow) -> String { "\(w.provider.rawValue):\(w.id)" }
+    static func key(_ w: QuotaWindow) -> String { w.observationKey }
 
     /// Records what each window reads now, and returns the same windows with a measured pace
     /// attached where there is enough history to measure one.

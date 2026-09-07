@@ -103,7 +103,7 @@ struct SettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                     HStack(spacing: Theme.s1 + 1) {
-                        SecureField("粘贴 claude setup-token 生成的令牌", text: $token)
+                        SecureField("高级选项：粘贴有额度读取权限的令牌", text: $token)
                             .textFieldStyle(.roundedBorder).font(Theme.sans(11.5))
                         Button(tokenEditor.isSaving ? "验证中…" : tokenEditor.hasToken && token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "清除" : "保存") {
                             Task { @MainActor in
@@ -120,7 +120,7 @@ struct SettingsView: View {
                         // useful thing to say at that point is where it lives and how to remove it.
                         Text(tokenEditor.hasToken
                              ? "令牌保存在本 app 的钥匙串中，仍可能失效或被撤销。可直接粘贴新令牌更换，或清空输入后点「清除」。"
-                             : "一般不需要填。额度直接读 Claude Code 自己的凭据，不弹框。只有这台机器没登录 Claude Code 时，才用 claude setup-token 生成一个粘进来。")
+                             : "通常无需填写。自动复用 Claude Code 登录；可续期时更新原凭据。手动令牌必须通过额度接口验证，长期有效不代表具备用量权限。")
                             .font(Theme.sans(10.5)).foregroundStyle(Theme.text2)
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: Theme.s1)
@@ -183,15 +183,15 @@ struct SettingsView: View {
     /// where someone's credential is being read from.
     private var sourceLine: String {
         if states[.claude] == "已登录" {
-            return "正在直接读 Claude Code 自己的凭据，不需要授权，也不会弹框。"
+            return "已发现 Claude Code 登录条目；实际连接与系统访问结果请查看额度面板。"
         }
         if tokenEditor.hasToken {
-            return "读不到 Claude Code 的凭据，改用下面保存的令牌。"
+            return "已保存高级手动令牌；其权限和有效性由额度接口验证。"
         }
         if prefs.sharedKeychainOptIn {
             return "已选择钥匙串授权，连接结果请查看额度面板。"
         }
-        return "还没找到 Claude Code 的登录信息，只有本地估算。"
+        return "未发现可用的 Claude Code 登录信息；请先运行 claude auth login。"
     }
 
     /// One line per provider, whether or not it is here. A tool that is installed but signed

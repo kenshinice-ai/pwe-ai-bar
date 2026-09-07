@@ -1,0 +1,5 @@
+PWE AI Bar — Claude 额度检查（不续期）
+状态：已验证，额度连接正常
+来源：claudeKeychain
+有效窗口：2，旧读数：否
+成功获取：是

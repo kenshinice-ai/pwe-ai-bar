@@ -16,6 +16,17 @@ import Foundation
 /// written, or the mark and the figure would contradict each other.
 enum Readout {
 
+    static func panelText(_ w: QuotaWindow, remaining: Bool) -> String {
+        guard w.provider == .claude, !w.confirmedExhausted, let percent = w.percent else {
+            return text(w, remaining: remaining)
+        }
+        let value = min(100, max(0, remaining ? 100 - percent : percent))
+        if value == value.rounded() { return "\(Int(value))%" }
+        if remaining, value < 0.1 { return "<0.1%" }
+        if !remaining, value > 99.9 { return ">99.9%" }
+        return String(format: "%.1f%%", value)
+    }
+
     static func text(_ w: QuotaWindow, remaining: Bool) -> String {
         // The one state where a number is the wrong answer. "100%" and "0%" are the same fact
         // written two ways, and both need reading twice; at a glance in a menu bar, neither
