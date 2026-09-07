@@ -3,3 +3,10 @@ build/
 dist/
 .DS_Store
 *.xcuserstate
+
+# iCloud Drive conflict copies. This repository lives in iCloud, and the file provider
+# resolves a two-machine conflict by writing "Forecast 2.swift" beside "Forecast.swift".
+# SwiftPM does not compile them, so nothing breaks — they just get committed by anything
+# that stages broadly, which is how 3,444 lines of them reached the v1.0.0 tag.
+* [0-9].*
+* [0-9]

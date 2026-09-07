@@ -72,6 +72,18 @@ echo "✓ notarisation credentials: profile \"$NOTARY_PROFILE\""
   echo "✗ working tree is dirty — commit or stash first:"; git status --short; exit 1; }
 echo "✓ working tree clean"
 
+# This repository lives in iCloud Drive, whose file provider resolves a two-machine conflict
+# by writing "Forecast 2.swift" beside "Forecast.swift". SwiftPM does not compile them, so the
+# build stays correct and nothing warns — they are invisible until something stages broadly.
+# The v1.0.0 commit carried fourteen of them, 3,444 lines, into the published tag.
+CONFLICTS=$(git ls-files | grep -E ' [0-9]\.[A-Za-z0-9]+$' || true)
+[[ -z "$CONFLICTS" ]] || {
+  echo "✗ iCloud conflict copies are tracked in this repository:"
+  sed 's/^/    /' <<<"$CONFLICTS"
+  echo "  Delete them (git rm) before releasing — .gitignore keeps new ones out."
+  exit 1; }
+echo "✓ no iCloud conflict copies tracked"
+
 gh auth status >/dev/null 2>&1 || { echo "✗ gh is not authenticated (run: gh auth login)"; exit 1; }
 echo "✓ gh authenticated"
 
@@ -119,7 +131,10 @@ MOUNT=""
 echo
 echo "── publish ───────────────────────────────────────────────"
 sed -i '' -E "s/^  version \".*\"/  version \"$VERSION\"/; s/^  sha256 \".*\"/  sha256 \"$SHA\"/" "$CASK"
-git add -A
+# Exactly the two files this script is allowed to change. `git add -A` here is what swept the
+# iCloud conflict copies into v1.0.0: a release commit must contain the version bump and the
+# cask and nothing else, so that `git show` on a tag is readable a year later.
+git add VERSION "$CASK"
 git commit -q -m "Release $VERSION"
 git tag -a "v$VERSION" -m "PWE AI Bar $VERSION"
 git push -q origin HEAD
