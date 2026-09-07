@@ -308,7 +308,7 @@ struct Forecast: Equatable {
         case .spent: return "已用尽"
         case .fallsShort(let gap): return "缺口 \(Forecast.span(gap))"
         case .tooClose: return "临界，说不准"
-        case .makesIt(let spare): return "到点至少剩 \(Int(spare.rounded(.down)))%"
+        case .makesIt(let spare): return "到点至少剩 \(Forecast.spare(spare))"
         case .sampling: return "还在采样"
         case .blind(let since): return "\(Forecast.span(since))没有新读数"
         case .noTimeline(.noReset): return "这个额度没有重置时间，算不出续航"
@@ -350,6 +350,17 @@ struct Forecast: Equatable {
         // would turn the floor into a claim — the one thing this function exists to prevent.
         guard seconds >= grain else { return seconds }
         return (seconds / grain).rounded(.down) * grain
+    }
+
+    /// The margin left at the reset, floored so it stays a guarantee — but never floored onto
+    /// the boundary. `Int(0.9)` is 0, and 「到点至少剩 0%」 under a full amber bar says the tank
+    /// is empty when the verdict it belongs to says the opposite. Zero is reserved for zero,
+    /// the same rule the alert thresholds already follow.
+    static func spare(_ percent: Double) -> String {
+        guard percent.isFinite, percent > 0 else { return "0%" }
+        if percent < 0.1 { return "<0.1%" }
+        if percent < 1 { return String(format: "%.1f%%", (percent * 10).rounded(.down) / 10) }
+        return "\(Int(percent.rounded(.down)))%"
     }
 
     static func percentPerHour(_ perHour: Double) -> String {

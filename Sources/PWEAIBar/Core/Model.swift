@@ -251,6 +251,28 @@ struct Snapshot {
             }
     }
 
+    /// The window the stage shows, honouring a reader's pin.
+    ///
+    /// `protagonist` answers the question the app assumes you have — what is closest to
+    /// stopping you. That is the right default and the wrong answer about half the time you
+    /// deliberately open the panel, because you came to look at one particular tool. A pin says
+    /// which one.
+    ///
+    /// A pin that matches nothing on screen is ignored rather than obeyed. Pinning a provider
+    /// and then untracking it, or pinning one whose reading has not arrived yet, must not leave
+    /// the stage blank — it falls back to the automatic choice and the pin quietly waits.
+    func hero(pinnedTo provider: Provider?) -> QuotaWindow? {
+        guard let provider else { return protagonist }
+        let mine = windows.filter {
+            $0.provider == provider && ($0.percent != nil || $0.severity == .critical)
+        }
+        guard !mine.isEmpty else { return protagonist }
+        return mine.max { a, b in
+            if abs(a.strain - b.strain) > 0.001 { return a.strain < b.strain }
+            return b.isActive
+        }
+    }
+
     /// What each provider calls the plan this account is on. Shown as-is: it is their word for
     /// their own product, and translating "team" into anything else would be inventing meaning.
     var plans: [Provider: String] = [:]

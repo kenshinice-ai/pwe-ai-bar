@@ -94,34 +94,15 @@ struct PanelView: View {
             if let a = snap.attention {
                 waitingStage(a)
             } else if let p = focused {
-                // Two halves, in the order they are asked: where you are, then where you are
-                // heading. The reset time used to sit beside the figure; the instrument's own
-                // axis now says it, and saying it twice on one screen made the panel look like
-                // it was arguing with itself.
-                HStack(alignment: .firstTextBaseline, spacing: Theme.s2) {
-                    Text(Readout.panelText(p, remaining: prefs.showRemaining)).font(Theme.figures(36))
-                        .foregroundStyle(Theme.health(p.band, dark: isDark))
-                    Spacer()
-                    if p.resetsAt == nil, let note = resetText(p) {
-                        Text(note).font(Theme.sans(11)).foregroundStyle(Theme.text2)
-                    }
-                }
-                track(p).padding(.top, 11)
-                HStack(spacing: 5) {
-                    ProviderMarkView(provider: p.provider,
-                                     tint: p.confirmedExhausted ? Theme.health(.hot, dark: isDark) : Theme.text2)
-                        .frame(width: 10, height: 10)
-                    // Spent is a state, not a reading: "剩余" under a zero is the wrong caption,
-                    // and how long you are stopped for is the only thing left worth saying.
-                    Text(p.confirmedExhausted
-                         ? "\(p.provider.name) · \(p.title) · \(waitText(p))"
-                         : "\(p.provider.name) · \(p.title) · \(prefs.showRemaining ? Readout.label.remaining : Readout.label.used)")
-                        .font(Theme.sans(11))
-                        .foregroundStyle(p.confirmedExhausted ? Theme.text : Theme.text2)
-                        .lineLimit(1).truncationMode(.tail)
-                }
-                .padding(.top, Theme.s2)
-                EnduranceView(window: p, now: Date()).padding(.top, 13)
+                // Three lines, in the order they are asked: which tool, how full, how long.
+                // The percentage used to be the 36-point headline here and the countdown sat
+                // under it at 24 — two figures about one window, both leaning red, and nothing
+                // telling the eye which to read. The percentage was also the one of the two
+                // already printed verbatim in the section below. So the unique number takes the
+                // large type now, and the percentage keeps its health colour on the name line.
+                focusBar
+                identityLine(p).padding(.top, 9)
+                EnduranceView(window: p, now: Date(), prominent: true).padding(.top, 7)
             } else {
                 emptyState
             }
@@ -311,15 +292,21 @@ struct PanelView: View {
     /// Everything that is not the headline, on one line, each with its provider's silhouette
     /// so a glance still says whose number it is.
     private var minorRow: some View {
+        // Two named windows rather than three anonymous ones. Three fitted only as bare
+        // percentages, and with two of Claude's windows side by side under the same silhouette
+        // there was nothing on the line saying which 90% was the weekly and which the session.
+        // A number you cannot attribute is not a smaller reading, it is a different one.
         let others = snap.windows
-            .filter { $0.id != snap.protagonist?.id }
+            .filter { $0.id != focused?.id }
             .sorted { $0.strain > $1.strain }
-            .prefix(3)
+            .prefix(2)
         return HStack(spacing: Theme.s3) {
             ForEach(Array(others.enumerated()), id: \.offset) { _, w in
                 HStack(spacing: 4) {
                     ProviderMarkView(provider: w.provider, tint: Theme.text2)
                         .frame(width: 10, height: 10)
+                    Text(w.title).font(Theme.sans(10)).foregroundStyle(Theme.text2)
+                        .lineLimit(1)
                     Text(Readout.panelText(w, remaining: prefs.showRemaining))
                         .font(Theme.figures(11.5, 500))
                         .foregroundStyle(Theme.health(w.band, dark: isDark))
@@ -434,7 +421,113 @@ struct PanelView: View {
     /// hero — 124pt that could not be asked anything, and the per-feather hover that was meant
     /// to fix it turned out fiddly to operate. The mark stays in the header as identity, where
     /// it is a signature rather than an instrument.
-    private var focused: QuotaWindow? { snap.protagonist }
+    private var focused: QuotaWindow? { snap.hero(pinnedTo: pinnedProvider) }
+
+    /// Every provider with a reading worth putting on the stage.
+    private var focusableProviders: [Provider] {
+        Provider.allCases.filter { p in
+            snap.windows.contains { $0.provider == p && ($0.percent != nil || $0.severity == .critical) }
+        }
+    }
+
+    /// The pin, if it still points at something. A provider that was pinned and then untracked,
+    /// or one whose first reading has not landed yet, reads as no pin at all rather than as an
+    /// empty stage.
+    private var pinnedProvider: Provider? {
+        guard let p = Provider(rawValue: prefs.focusProvider) else { return nil }
+        return focusableProviders.contains(p) ? p : nil
+    }
+
+    /// Which tool the stage is about — chosen, rather than assumed.
+    ///
+    /// The automatic pick answers the question the app assumes you have: what is closest to
+    /// stopping you. That is the right default and about half the time it is not why you opened
+    /// the panel — you came to look at one particular tool. The marks are the control because
+    /// eight full names do not fit across 308 points, and the line directly underneath says the
+    /// chosen one's name in full, so nothing here has to be decoded from a silhouette.
+    ///
+    /// 「自动」 sits on the same row as the rest rather than in a separate switch: "whichever is
+    /// worst" is one of the choices, not the absence of one.
+    private var focusBar: some View {
+        let pinned = pinnedProvider
+        return HStack(spacing: 10) {
+            focusChip("自动", selected: pinned == nil) { prefs.focusProvider = "" }
+            ForEach(focusableProviders, id: \.self) { p in
+                Button {
+                    // Tapping the one already chosen releases the pin: the way back to
+                    // automatic is the same gesture that left it.
+                    prefs.focusProvider = (pinned == p) ? "" : p.rawValue
+                } label: {
+                    ProviderMarkView(provider: p, tint: pinned == p ? Theme.accent : Theme.text2)
+                        .frame(width: 13, height: 13)
+                        .padding(.bottom, 3)
+                        .overlay(alignment: .bottom) { underline(pinned == p) }
+                }
+                .buttonStyle(.plain)
+                .help(p.name)
+                .accessibilityLabel(pinned == p ? "\(p.name)，已选中" : p.name)
+            }
+            Spacer(minLength: Theme.s1)
+            // The one place the panel says which way its percentages read. It used to be a
+            // single grey word at the tail of a three-part subtitle, and the lean mode dropped
+            // even that — so the same "90%" meant "nearly gone" or "plenty left" depending on a
+            // setting the panel never mentioned anywhere the reader was looking. Now it is
+            // always on screen, and tapping it is the shortest way to change it.
+            Button { prefs.showRemaining.toggle() } label: {
+                Text(prefs.showRemaining ? Readout.label.remaining : Readout.label.used)
+                    .font(Theme.sans(10)).foregroundStyle(Theme.text2)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .overlay(Capsule().stroke(Theme.hairline, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .help("切换百分比的口径：剩余 / 已用")
+            .accessibilityLabel("百分比口径，当前 \(prefs.showRemaining ? Readout.label.remaining : Readout.label.used)")
+        }
+        .frame(height: 17)
+    }
+
+    private func focusChip(_ label: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label).font(Theme.sans(10, selected ? 600 : 400))
+                .foregroundStyle(selected ? Theme.accent : Theme.text2)
+                .padding(.bottom, 3)
+                .overlay(alignment: .bottom) { underline(selected) }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(selected ? "自动，已选中" : "自动")
+    }
+
+    /// Selection is carried by a rule under the mark rather than by a filled pill: a pill would
+    /// be the fifth rounded rectangle in a panel already made of bars, and at 13 points the
+    /// marks need the tint more than they need a container.
+    private func underline(_ on: Bool) -> some View {
+        Rectangle().fill(on ? Theme.accent : Color.clear).frame(height: 1.5)
+    }
+
+    /// Who the stage is about, and how full they are.
+    private func identityLine(_ p: QuotaWindow) -> some View {
+        HStack(spacing: 5) {
+            Text("\(p.provider.name) · \(p.title)")
+                .font(Theme.sans(11.5)).foregroundStyle(Theme.text)
+                .lineLimit(1).truncationMode(.tail)
+            // Spent is a state, not a reading: "剩余" over a zero is the wrong caption, and how
+            // long you are stopped for is the only thing left worth saying.
+            if p.confirmedExhausted {
+                Text(waitText(p)).font(Theme.sans(11))
+                    .foregroundStyle(Theme.health(.hot, dark: isDark))
+            } else {
+                Text(prefs.showRemaining ? Readout.label.remaining : Readout.label.used)
+                    .font(Theme.sans(11)).foregroundStyle(Theme.text2)
+                Text(Readout.panelText(p, remaining: prefs.showRemaining))
+                    .font(Theme.figures(15, 600))
+                    .foregroundStyle(Theme.health(p.band, dark: isDark))
+            }
+            Spacer(minLength: Theme.s1)
+            if p.resetsAt == nil, let note = resetText(p) {
+                Text(note).font(Theme.sans(11)).foregroundStyle(Theme.text2)
+            }
+        }
+    }
 
     private var contextWindow: QuotaWindow? {
         guard let c = snap.contextPercent else { return nil }

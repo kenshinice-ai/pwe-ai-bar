@@ -271,4 +271,24 @@ final class QuotaTests: XCTestCase {
         XCTAssertFalse(expired.first?.confirmedExhausted ?? true)
     }
 
+
+    /// The stage's pin. The automatic pick answers "what is closest to stopping you", which is
+    /// the right default and about half the time not why the panel was opened.
+    func testPinningTheStageToAProviderAndFallingBackWhenItIsNotThere() {
+        func window(_ p: Provider, _ id: String, _ percent: Double) -> QuotaWindow {
+            QuotaWindow(id: id, provider: p, channel: .session, title: id, percent: percent,
+                        resetsAt: Date().addingTimeInterval(3600), windowLength: 5 * 3600)
+        }
+        var snap = Snapshot()
+        snap.windows = [window(.claude, "five_hour", 20), window(.claude, "seven_day", 62),
+                        window(.codex, "codex_300", 95)]
+
+        XCTAssertEqual(snap.hero(pinnedTo: nil)?.id, "codex_300", "unpinned, the worst leads")
+        // Pinned to Claude, the worst *Claude* window leads — not the worst overall, and not
+        // simply the first one in the list.
+        XCTAssertEqual(snap.hero(pinnedTo: .claude)?.id, "seven_day")
+        // A pin that matches nothing on screen is ignored rather than obeyed: pinning a tool
+        // and then untracking it must not leave the stage blank.
+        XCTAssertEqual(snap.hero(pinnedTo: .cursor)?.id, "codex_300")
+    }
 }

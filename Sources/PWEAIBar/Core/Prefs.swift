@@ -43,6 +43,12 @@ final class Prefs: ObservableObject {
     /// Whether percentages read as "how much is left" rather than "how much is spent".
     /// Defaults to remaining — see `Readout` for why.
     @Published var showRemaining: Bool { didSet { d.set(showRemaining, forKey: "showRemaining") } }
+    /// Which provider the stage is pinned to, or empty for "whichever is closest to stopping
+    /// you". Pinning exists because the automatic choice answers the question the app thinks
+    /// you have; sometimes you came to look at one particular tool and the worst window belongs
+    /// to another one. Stored as a raw value so an unknown provider from a future build reads
+    /// back as no pin rather than as a crash.
+    @Published var focusProvider: String { didSet { d.set(focusProvider, forKey: "focusProvider") } }
     @Published var sound: Bool       { didSet { d.set(sound, forKey: "sound") } }
     @Published var pushURL: String   { didSet { d.set(pushURL, forKey: "pushURL") } }
     @Published var launchAtLogin: Bool {
@@ -55,6 +61,7 @@ final class Prefs: ObservableObject {
         // the recoverable mistake; starting quiet means most people never learn there is more.
         menuBarMode = MenuBarMode(rawValue: d.string(forKey: "menuBarMode") ?? "") ?? .full
         panelMode   = PanelMode(rawValue: d.string(forKey: "panelMode") ?? "") ?? .standard
+        focusProvider = d.string(forKey: "focusProvider") ?? ""
         let saved = AlertPlacement(rawValue: d.string(forKey: "placement") ?? "") ?? .menubar
         // A setting carried over from a Mac that had a notch would silently deliver nothing here.
         placement = (saved == .notch && !Prefs.hasNotch) ? .menubar : saved

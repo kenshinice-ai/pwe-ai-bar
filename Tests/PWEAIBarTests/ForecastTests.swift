@@ -225,6 +225,16 @@ final class ForecastTests: XCTestCase {
         XCTAssertEqual(f.headline, Forecast.floorToGrain(try! XCTUnwrap(f.enduranceLow)))
     }
 
+    /// Found on live data the moment the stage started leading with the countdown: a Codex
+    /// window with 5% left and nothing being spent read 「到点至少剩 0%」 in grey, under a full
+    /// amber bar and beside a line saying 剩余 5%. The margin was 0.9 and `Int` took it to zero.
+    func testASubOnePercentMarginNeverPrintsAsZero() {
+        XCTAssertEqual(Forecast.spare(0.9), "0.9%")
+        XCTAssertEqual(Forecast.spare(0.04), "<0.1%")
+        XCTAssertEqual(Forecast.spare(0), "0%", "zero is reserved for zero")
+        XCTAssertEqual(Forecast.spare(17.8), "17%", "above one it is still a floor")
+    }
+
     func testTheGrainOnlyEverRoundsDown() {
         XCTAssertEqual(Forecast.floorToGrain(3540), 3300, "under an hour, five-minute grain")
         XCTAssertEqual(Forecast.floorToGrain(21540), 20700, "under six hours, quarter-hour grain")

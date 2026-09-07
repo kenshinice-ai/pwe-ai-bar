@@ -39,6 +39,10 @@ import SwiftUI
 struct EnduranceView: View {
     let window: QuotaWindow
     let now: Date
+    /// Set when this is the panel's headline rather than a detail. The duration then takes the
+    /// large type, because on the stage it is the only figure that appears nowhere else — the
+    /// percentage it used to sit under is printed again in the provider section below.
+    var prominent: Bool = false
     @Environment(\.colorScheme) private var colorScheme
 
     private var isDark: Bool { colorScheme == .dark }
@@ -46,6 +50,13 @@ struct EnduranceView: View {
     /// The rule's width. The stage's own padding is 16pt a side; 12 of the remaining 308 are
     /// kept at the right so the gate's knock-out and its label have somewhere to bleed.
     private static let ruleWidth: CGFloat = 296
+
+    /// The shortest the fuel is ever drawn. Three minutes of a four-hour trip is 1.3% of the
+    /// rule — a two-point sliver with a nine-point needle hanging off the left edge, which read
+    /// as an empty tank under a full-width red line: the exact picture 「已用尽」 draws. Almost
+    /// empty and empty are different facts and have to look different. Six points is the least
+    /// that still reads as a bar, and the figure beside it carries the precision.
+    private static let minimumFuel: CGFloat = 6
 
     private var forecast: Forecast { window.forecast(at: now) }
 
@@ -56,7 +67,7 @@ struct EnduranceView: View {
         return VStack(alignment: .leading, spacing: 0) {
             heading(f).frame(height: 11)
             Spacer().frame(height: 6)
-            reading(f).frame(height: 30, alignment: .bottom)
+            reading(f).frame(height: prominent ? 42 : 30, alignment: .bottom)
             Spacer().frame(height: 5)
             if let plan = plan(f) {
                 rule(plan, f).frame(height: 24, alignment: .top)
@@ -65,7 +76,8 @@ struct EnduranceView: View {
                 collapsed(f)
             }
         }
-        .frame(height: f.hasTimeline ? 90 : 58, alignment: .top)
+        .frame(height: f.hasTimeline ? (prominent ? 102 : 90) : (prominent ? 70 : 58),
+               alignment: .top)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(f.spoken)
     }
@@ -156,7 +168,8 @@ struct EnduranceView: View {
         HStack(alignment: .firstTextBaseline, spacing: 2) {
             ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
                 Text(part.text)
-                    .font(part.isNumber ? Theme.figures(24, 600) : Theme.sans(12, 500))
+                    .font(part.isNumber ? Theme.figures(prominent ? 36 : 24, 600)
+                                        : Theme.sans(prominent ? 14 : 12, 500))
                     .foregroundStyle(Theme.text)
             }
         }
@@ -188,20 +201,26 @@ struct EnduranceView: View {
                 dimension(from: 0, to: W, colour: hot)
             } else if let certain = plan.certain, let possible = plan.possible {
                 // The stretch that holds under every rate the readings allow.
+                let fuel = max(Self.minimumFuel, certain)
                 Capsule().fill(Theme.accent)
-                    .frame(width: max(2, certain), height: 10).offset(y: 6)
+                    .frame(width: fuel, height: 10).offset(y: 6)
                 // And the stretch that holds only under the kind ones. Drawn as a lighter
                 // continuation of the same bar rather than a second colour, because it is the
                 // same fuel, less certainly.
-                if possible > certain + 0.5 {
+                if possible > fuel + 0.5 {
                     Capsule().fill(Theme.accent.opacity(0.42))
-                        .frame(width: possible - certain, height: 10)
-                        .offset(x: certain, y: 6)
+                        .frame(width: possible - fuel, height: 10)
+                        .offset(x: fuel, y: 6)
                 }
                 // A gap that survives the most optimistic reading is the only gap worth a
                 // colour, so the dimension line starts at the far end of the band.
                 if possible < W - 0.5 {
-                    dimension(from: possible, to: W, colour: hot)
+                    // Coloured by the verdict, not by the geometry. The gap can exist under
+                    // every rate we measured and still not be claimed — that is exactly what
+                    // 「临界，说不准」 is, a shortfall the evidence has not watched long enough
+                    // to assert — and a red line beside that sentence is the drawing making a
+                    // claim the words refuse to.
+                    dimension(from: max(possible, fuel), to: W, colour: colour(f.tone))
                 }
             } else {
                 // We know the trip and not the fuel. A dashed centre line is the instrument's
@@ -238,7 +257,10 @@ struct EnduranceView: View {
                     .fill(plan.measured ? Theme.accent : Color.clear)
                     .overlay(NeedleShape().stroke(Theme.accent, lineWidth: 1))
                     .frame(width: 9, height: 7)
-                    .offset(x: certain - 4.5, y: -1)
+                    // Kept inside the rule. Pointing at a position 1% along the axis put half
+                    // the needle outside the drawing and the other half on top of the start
+                    // line, so the mark that says "here" landed on the mark that says "now".
+                    .offset(x: min(W - 9, max(0, max(Self.minimumFuel, certain) - 4.5)), y: -1)
             }
         }
         .frame(width: W, height: 24, alignment: .topLeading)
@@ -259,9 +281,10 @@ struct EnduranceView: View {
         let W = Self.ruleWidth
         let certain = plan.certain
         ZStack(alignment: .topLeading) {
-            if certain == nil || (certain ?? 0) > 51 {
-                Text("现在").font(Theme.sans(9.5)).foregroundStyle(Theme.text2)
-            }
+            // Unconditional. It used to yield its place whenever the dry-time label wanted the
+            // room, which left a *future* clock time sitting at the axis origin — the one point
+            // on the rule that is definitionally not the future.
+            Text("现在").font(Theme.sans(9.5)).foregroundStyle(Theme.text2)
             Text(Forecast.resetLabel(window.resetsAt, trip: plan.trip))
                 .font(Theme.sans(9.5)).foregroundStyle(Theme.text2)
                 .frame(width: W, alignment: .trailing)
@@ -270,13 +293,16 @@ struct EnduranceView: View {
             // Coloured by the same band as the verdict. It marks where the fastest rate the
             // readings allow runs the tank dry — a fact in both cases, but under 「临界，说不准」
             // a red timestamp is the axis making a claim the sentence beside it refuses to.
-            if let certain, certain < W - 1, certain <= 209, f.headlineIsEndurance,
+            // And only where it can sit under its own mark: crowded against the origin it was
+            // labelling the wrong end of the axis. Dropping it loses nothing — the headline is
+            // the same figure and the verdict line says the same thing in words.
+            if let certain, certain > 51, certain <= 209, certain < W - 1, f.headlineIsEndurance,
                let headline = f.headline {
                 Text("\(Forecast.clock(now.addingTimeInterval(headline))) 见底")
                     .font(Theme.sans(9.5)).foregroundStyle(colour(f.tone))
                     .fixedSize()
-                    .frame(width: 90, alignment: certain < 51 ? .leading : .center)
-                    .offset(x: certain < 51 ? 0 : certain - 45)
+                    .frame(width: 90, alignment: .center)
+                    .offset(x: certain - 45)
             }
         }
         .frame(width: W, alignment: .topLeading)
