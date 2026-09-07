@@ -16,7 +16,14 @@ APP_NAME="PWE AI Bar"
 TEAM_ID="2SQV3H5MH9"
 VERSION="$(cat VERSION)"
 DIST="dist"
-STAGE="$DIST/stage"
+
+# Everything that carries a signature is assembled outside the repository. iCloud Drive's file
+# provider keeps re-attaching com.apple.FinderInfo to anything it manages, and codesign refuses
+# to sign or verify a bundle carrying it — strip-then-sign is a race you lose intermittently.
+# Only the finished disk image comes back into dist/.
+WORK="${TMPDIR:-/tmp}/pweaibar-release"
+BUILT="${TMPDIR:-/tmp}/pweaibar-build/$APP_NAME.app"
+STAGE="$WORK/stage"
 
 NOTARIZE=0
 [[ "${1:-}" == "--notarize" ]] && NOTARIZE=1
@@ -40,10 +47,12 @@ if [[ "$KIND" != "developer-id" ]]; then
 WARN
 fi
 
-./scripts/build-app.sh release
-APP="build/$APP_NAME.app"
+PWEBAR_APP_OUTPUT="$BUILT" ./scripts/build-app.sh release
+APP="$BUILT"
 mkdir -p "$DIST"
-DMG="$DIST/$APP_NAME $VERSION.dmg"
+# Hyphenated, not "PWE AI Bar 1.0.0.dmg": GitHub mangles spaces in a release asset name and a
+# Homebrew cask would then need a percent-encoded url. The volume name keeps the spaces.
+DMG="$DIST/${APP_NAME// /-}-$VERSION.dmg"
 
 echo "▸ Signing…"
 if [[ "$IDENTITY" == "-" ]]; then
@@ -91,10 +100,11 @@ SESSION ALERTS
 A Paradise Production
 READ
 
-hdiutil create -volname "$APP_NAME" -srcfolder "$STAGE" -ov -format UDZO "$DMG" > /dev/null
+IMAGE="$WORK/image.dmg"
+hdiutil create -volname "$APP_NAME" -srcfolder "$STAGE" -ov -format UDZO "$IMAGE" > /dev/null
 rm -rf "$STAGE"
-[[ "$IDENTITY" != "-" ]] && codesign --force --sign "$IDENTITY" --timestamp "$DMG"
-echo "▸ Done: $DMG"
+# The image is signed too, so the download itself carries a valid signature.
+[[ "$IDENTITY" == "-" ]] || codesign --force --sign "$IDENTITY" --timestamp "$IMAGE"
 
 if [[ "$NOTARIZE" == "1" ]]; then
   [[ "$KIND" == "developer-id" ]] || { echo "✗ Notarisation needs a Developer ID identity."; exit 1; }
@@ -103,8 +113,21 @@ if [[ "$NOTARIZE" == "1" ]]; then
   #     --apple-id <apple-id> --team-id 2SQV3H5MH9 --password <app-specific-password>
   PROFILE="${NOTARY_PROFILE:-PWE_NOTARY}"
   echo "▸ Submitting to Apple (profile: $PROFILE)…"
-  xcrun notarytool submit "$DMG" --keychain-profile "$PROFILE" --wait
-  xcrun stapler staple "$DMG"
-  xcrun stapler validate "$DMG"
-  echo "▸ Notarised and stapled: $DMG"
+  # --wait exits 0 on a finished submission whatever Apple decided, so the status has to be
+  # read rather than inferred; on a rejection the log is the only thing that says why.
+  SUBMIT="$(xcrun notarytool submit "$IMAGE" --keychain-profile "$PROFILE" --wait 2>&1)"
+  echo "$SUBMIT" | sed 's/^/    /'
+  if ! grep -q "status: Accepted" <<<"$SUBMIT"; then
+    ID="$(grep -m1 "  id: " <<<"$SUBMIT" | awk '{print $2}')"
+    echo "✗ Apple did not accept the disk image."
+    [[ -n "$ID" ]] && xcrun notarytool log "$ID" --keychain-profile "$PROFILE" 2>&1 | sed 's/^/    /'
+    exit 1
+  fi
+  xcrun stapler staple "$IMAGE"
+  xcrun stapler validate "$IMAGE"
 fi
+
+cp "$IMAGE" "$DMG"
+rm -f "$IMAGE"
+echo "▸ Done: $DMG"
+echo "    $(du -h "$DMG" | cut -f1)   sha256 $(shasum -a 256 "$DMG" | cut -c1-16)…"

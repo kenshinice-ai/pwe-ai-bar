@@ -127,15 +127,21 @@ Developer ID 私钥只在发版机上，本机 `build-app.sh` 出来的是 ad-ho
 上一律拒绝。发版机上：
 
 ```bash
-./scripts/package.sh              # 构建 + Developer ID 签名 + dmg
-./scripts/package.sh --notarize   # 再提交 Apple 公证并 staple
+scripts/release.sh 1.0.1          # 全流程，见下
+scripts/package.sh --notarize     # 只要一个签好名公证过的本地 dmg
 ```
 
-Team ID `2SQV3H5MH9`，版本号取自 `VERSION`（现在是 `0.1.0`，要发就先改它）。脚本自己会挑
-`Developer ID Application` 身份；挑不到就退回 ad-hoc 并把警告打出来——**看到 `(ad-hoc)` 就说明
-你在错的机器上**。产物在 `dist/`。
+`release.sh` 的顺序是：预检（身份、公证凭据、干净的树、`gh`、标签没被占）· `swift test` ·
+写 VERSION · 构建 · Developer ID 签名 · 公证 · staple · Gatekeeper 判决（dmg 和里面的 app 各一次）·
+提交打标签推送 · GitHub Release · **把已发布的那份下回来核对校验和与 Gatekeeper** · 更新
+Homebrew cask 并推 tap。中途失败会把 VERSION 和 cask 还原。**版本号只写在 `VERSION` 里**，
+`Info.plist` 由 `build-app.sh` 从它生成，所以不存在两处对不上。
 
-发版机上先跑一遍 `swift test`（113 个）再打包。
+Team ID `2SQV3H5MH9`，产物在 `dist/`。签名和打包都在 `$TMPDIR` 里做，只有做好的 dmg 回到
+`dist/`——iCloud 的文件提供者会不停给仓库里的文件盖 `com.apple.FinderInfo`，而 codesign 拒绝
+带着它的 bundle，先清再签是个会间歇性输掉的竞态。
+
+站点不在这个仓库里，`release.sh` 不碰它：`cd '../PWE Loan Bar' && ./site/deploy.sh`。
 
 ---
 

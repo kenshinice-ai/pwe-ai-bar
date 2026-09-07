@@ -227,14 +227,21 @@ BIN="build/PWE AI Bar.app/Contents/MacOS/PWEAIBar"
 本机产物 Gatekeeper 在别的机器上一定拦。
 
 ```bash
-./scripts/package.sh --notarize
+scripts/release.sh 1.0.1            # 全流程
+scripts/release.sh 1.0.1 notes.md   # 自己写发布说明，而不是从提交生成
 ```
 
-需要先建一次公证凭据：
+预检 · `swift test` · 改 VERSION · 构建 · Developer ID 签名 · 公证 · staple ·
+Gatekeeper 判决 · 打标签 · GitHub Release · **把发出去的那份下回来重新验一遍** ·
+更新 Homebrew cask。任何一步失败就停，并且把 VERSION 和 cask 还原，不留残骸。
+
+只想要一个本地 dmg 的话，`scripts/package.sh [--notarize]` 是 release.sh 里的构建那一段。
+
+需要先建一次公证凭据（只有你能做，那是你的 Apple 账号）：
 
 ```bash
 xcrun notarytool store-credentials PWE_NOTARY --team-id 2SQV3H5MH9 \
-  --apple-id <apple-id> --password <app-specific-password>
+  --apple-id <apple-id>
 ```
 
 ## 结构
