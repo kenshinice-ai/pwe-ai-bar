@@ -100,8 +100,14 @@ struct ClaudeCredentialStore {
         let organization = root["organization"] as? [String: Any] ?? [:]
         let organizationID = ClaudeValue.text(node["organizationUuid"]) ?? ClaudeValue.text(organization["uuid"])
         let identity = accountID.map { $0 + ":" + (organizationID ?? "unknown-organization") }
+        // Deliberately lenient where `expiresAt` above is strict: a malformed access-token
+        // expiry means the record cannot be trusted at all, but this field is one we only
+        // started reading in 1.0.1. Refusing a whole credential over a value we never needed
+        // before would turn an improvement into an outage. Unreadable simply means unknown.
+        let refreshExpiry = ClaudeValue.number(node["refreshTokenExpiresAt"])
         return Credentials.Token(value: token, expiresAt: expiry.map { Date(timeIntervalSince1970: $0 / 1000) },
                                  source: source, refreshToken: ClaudeValue.text(node["refreshToken"]),
+                                 refreshExpiresAt: refreshExpiry.map { Date(timeIntervalSince1970: $0 / 1000) },
                                  scopes: scopes, document: document, origin: origin,
                                  accountKey: identity.map { ClaudeValue.fingerprint(Data($0.utf8)) },
                                  plan: ClaudeValue.text(node["subscriptionType"]))

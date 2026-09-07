@@ -51,10 +51,12 @@ private final class Counter: @unchecked Sendable {
 
 final class ClaudeUsageTests: XCTestCase {
     private let date = Date(timeIntervalSince1970: 1_800_000_000)
-    private func auth(_ value: String = "first", expiry: Double = 1_800_003_600, scope: String = "user:profile", account: String = "A") -> String {
-        """
+    private func auth(_ value: String = "first", expiry: Double = 1_800_003_600, scope: String = "user:profile", account: String = "A",
+                      refreshExpiry: Double? = nil) -> String {
+        let refreshLine = refreshExpiry.map { ",\"refreshTokenExpiresAt\":\($0 * 1000)" } ?? ""
+        return """
         {"account":{"uuid":"\(account)"},"futureRoot":{"keep":true},"claudeAiOauth":{
-          "accessToken":"\(value)","refreshToken":"refresh-\(value)","expiresAt":\(expiry * 1000),
+          "accessToken":"\(value)","refreshToken":"refresh-\(value)","expiresAt":\(expiry * 1000)\(refreshLine),
           "scopes":["\(scope)"],"subscriptionType":"pro","futureField":[1,2,3]}}
         """
     }
@@ -455,5 +457,65 @@ final class ClaudeUsageTests: XCTestCase {
 
         XCTAssertEqual(refreshes.value, 1, "the same refresh token must not be presented twice")
         XCTAssertEqual(memory.writes, 1)
+    }
+
+    /// A refresh token the record itself says is dead is not worth presenting.
+    ///
+    /// Found on a real machine: the CLI credential had been sitting untouched since the first of
+    /// the month, both tokens long past their dates, and the app's only contribution was to POST
+    /// a four-day-dead refresh token and report back "凭据已失效" — true, unhelpful, and one
+    /// network round-trip the reader waited for. The record carried `refreshTokenExpiresAt` the
+    /// whole time.
+    ///
+    /// Two things are asserted here because both matter: the exchange does not happen, and the
+    /// sentence the reader gets names the date and the command that fixes it.
+    func testADeadRefreshTokenIsNotSpentOnADoomedExchange() async throws {
+        let space = try TestSpace(); let memory = ClaudeMemory()
+        let died = date.timeIntervalSince1970 - 4 * 86400
+        memory.put("/synthetic/auth.json",
+                   auth(expiry: date.timeIntervalSince1970 - 5 * 86400, refreshExpiry: died))
+        let http = HTTPStub([(200, #"{"access_token":"never","expires_in":3600}"#, [:])])
+        let provider = ClaudeProvider(defaults: space.defaults, access: memory.access,
+                                      now: { self.date }, request: { try await http.send($0) })
+
+        _ = await provider.windows()
+
+        let count = await http.count
+        XCTAssertEqual(count, 0, "the record said the refresh token was dead — nothing to ask the server")
+        XCTAssertEqual(memory.writes, 0, "and nothing was written over the reader's own credential")
+
+        let blocker = await provider.blocker
+        XCTAssertTrue(blocker.isExpired)
+        XCTAssertTrue(blocker.message.contains("claude auth login"),
+                      "the message has to end in something the reader can paste: \(blocker.message)")
+        XCTAssertFalse(blocker.message.contains("凭据已失效"),
+                       "that was the old wording, and it told the reader nothing")
+    }
+
+    /// The gate must not fire on an expiry we may have outdated ourselves.
+    ///
+    /// `refreshTokenExpiresAt` describes the refresh token Claude Code wrote. Once this app has
+    /// swapped one successfully the field may describe a token that no longer exists, and
+    /// refusing to renew a live credential on the strength of a stale date would be far worse
+    /// than one wasted request. So the skip is gated on never having rotated — and this is the
+    /// test that says so.
+    func testAnExpiryThisAppMayHaveOutdatedIsStillWorthTrying() async throws {
+        let space = try TestSpace(); let memory = ClaudeMemory()
+        space.defaults.set(1, forKey: "claudeRefreshCount")
+        memory.put("/synthetic/auth.json",
+                   auth(expiry: date.timeIntervalSince1970 - 5 * 86400,
+                        refreshExpiry: date.timeIntervalSince1970 - 4 * 86400))
+        let http = HTTPStub([
+            (200, #"{"access_token":"rotated","refresh_token":"rotated-refresh","expires_in":3600}"#, [:]),
+            (200, quota, [:]),
+        ])
+        let provider = ClaudeProvider(defaults: space.defaults, access: memory.access,
+                                      now: { self.date }, request: { try await http.send($0) })
+
+        let reading = await provider.windows()
+
+        let count = await http.count
+        XCTAssertEqual(count, 2, "a date we may have outdated is not evidence — ask the server")
+        XCTAssertFalse(reading.windows.isEmpty, "and the exchange succeeded, which is the point")
     }
 }

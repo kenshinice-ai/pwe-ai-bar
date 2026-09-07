@@ -237,9 +237,9 @@ final class CredentialTests: XCTestCase {
         let reading = await p.windows()
         XCTAssertTrue(reading.stale)
         let blocker = await p.blocker
-        XCTAssertEqual(blocker, .expired)
-        XCTAssertTrue(blocker.message.contains("重新登录"),
-                      "the remedy has to be one that actually works")
+        XCTAssertTrue(blocker.isExpired, "an expired credential blocks, whatever the record said")
+        XCTAssertTrue(blocker.message.contains("claude auth login"),
+                      "the remedy has to be one the reader can actually run: \(blocker.message)")
         let count = await http.count
         XCTAssertEqual(count, 0, "an expired credential is not worth a request")
     }

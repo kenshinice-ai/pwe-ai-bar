@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The panel. Three densities, two rules that hold across all of them.
@@ -21,10 +22,50 @@ struct PanelView: View {
 
     private var snap: Snapshot { store.snapshot }
 
+    /// How tall the popover is allowed to get.
+    ///
+    /// A popover cannot be taller than the screen it hangs from. With every provider switched on
+    /// and full mode showing the chart and the score row, the panel measures 913 pt — more than
+    /// a 1440 x 900 Mac has room for — and AppKit's answer is to put the overflow off the top of
+    /// the screen: the header, the provider picker and the endurance block, which is the whole
+    /// reason the app exists, all unreachable. Settings met this first at eight providers and
+    /// got a scroller; this is the same fix on the surface that matters more.
+    ///
+    /// `visibleFrame` already excludes the menu bar; the popover's beak and margins take a
+    /// little more. The 860 ceiling is what the smallest Mac still leaves, and no screen needs a
+    /// panel taller than that — past a point it stops being a menu-bar panel.
+    static var ceiling: CGFloat {
+        let usable = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame.height
+        return min((usable ?? 860) - 32, 860)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
+            // Header and footer stay put. The gear is the only way into settings and the footer
+            // carries the trophy link and how fresh the reading is; neither may scroll away.
             header
             rule
+            scrolling
+            rule
+            footer
+        }
+        .frame(width: Theme.panelWidth)
+        .frame(maxHeight: Self.ceiling)
+        .background(Theme.surface)
+    }
+
+    private var scrolling: some View {
+        let content = ScrollView { middle }
+        // Without this a panel that already fits rubber-bands when you flick it, which reads as
+        // a bug in the one surface that is supposed to feel fixed to the menu bar.
+        if #available(macOS 14.0, *) { return AnyView(content.scrollBounceBehavior(.basedOnSize)) }
+        return AnyView(content)
+    }
+
+    /// Everything between the header and the footer, in one column. The endurance stage leads,
+    /// so when the panel does have to scroll the headline is still what you land on.
+    private var middle: some View {
+        VStack(spacing: 0) {
             stage
             rule
 
@@ -52,13 +93,8 @@ struct PanelView: View {
                 chartSection
                 rule
                 scoreRow
-                rule
             }
-
-            footer
         }
-        .frame(width: Theme.panelWidth)
-        .background(Theme.surface)
     }
 
     private var rule: some View { Rectangle().fill(Theme.hairline).frame(height: 1) }
@@ -186,7 +222,7 @@ struct PanelView: View {
                 Text(fix).font(Theme.sans(11)).foregroundStyle(Theme.text2)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if store.blocker == .unauthorized || store.blocker == .forbidden || store.blocker == .expired {
+            if store.blocker == .unauthorized || store.blocker == .forbidden || store.blocker.isExpired {
                 Button("管理凭据", action: onSettings).font(Theme.sans(11.5))
             }
             if store.blocker == .needsSetup || store.blocker == .keychainRefused {

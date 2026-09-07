@@ -388,7 +388,7 @@ enum Probe {
             case .notLoggedIn: why = "未登录（运行 claude auth login）"
             case .keychainRefused: why = "钥匙串拒绝（重新运行 claude auth login 即可重建授权）"
             case .unauthorized, .forbidden, .network, .storage, .invalidResponse, .credentialsChanged: why = blocker.message
-            case .expired: why = "凭据过期且无法续期，请重新登录 Claude Code"
+            case .expired: why = blocker.message
             case .rateLimited(let d): why = "限流至 \(f(d))"
             }
             print("登录        \(loggedIn ? "是" : "否")     数据陈旧  \(stale ? "是" : "否")")

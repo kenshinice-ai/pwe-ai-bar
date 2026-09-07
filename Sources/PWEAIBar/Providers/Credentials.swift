@@ -29,6 +29,13 @@ enum Credentials {
         let expiresAt: Date?
         let source: Source
         var refreshToken: String? = nil
+        /// When the *refresh* token dies, from `refreshTokenExpiresAt` in Claude Code's record.
+        ///
+        /// Read, never written. Once this is past, the credential is beyond saving: presenting
+        /// the refresh token can only return `invalid_grant`, and the only fix is a new login.
+        /// Nil means the record did not say, which is not the same as "still good" — it means
+        /// try the exchange and let the server answer.
+        var refreshExpiresAt: Date? = nil
         var scopes: [String]? = nil
         var document: Data? = nil
         var origin: ClaudeCredentialStore.Origin? = nil

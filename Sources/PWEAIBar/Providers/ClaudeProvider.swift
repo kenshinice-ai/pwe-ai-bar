@@ -19,7 +19,10 @@ actor ClaudeProvider {
                                  persist: { try ClaudeCredentialStore().save($0, expected: $1) })
     }
     enum Blocker: Error, Equatable {
-        case none, needsSetup, notLoggedIn, keychainRefused, expired, unauthorized, forbidden, network
+        case none, needsSetup, notLoggedIn, keychainRefused, unauthorized, forbidden, network
+        /// The login is beyond renewal. Carries when the refresh token died, when the record
+        /// said so — the date is the difference between "何时" and a shrug.
+        case expired(Date?)
         case storage, invalidResponse, credentialsChanged
         case rateLimited(Date)
         var message: String {
@@ -28,7 +31,12 @@ actor ClaudeProvider {
             case .needsSetup: return "未能读取登录凭据，可在设置中重新连接"
             case .notLoggedIn: return "未找到凭据，请登录 Claude Code"
             case .keychainRefused: return "钥匙串访问失败或超时，请在设置中重新连接"
-            case .expired: return "登录已过期且无法续期，请在 Claude Code 重新登录"
+            case .expired(let at):
+                // Naming the date and the command is the whole improvement. "凭据已失效" is true
+                // and leaves the reader with nothing to do; this sentence ends in something they
+                // can paste. `claude auth login` is what rewrites the record the app reads.
+                guard let at else { return "登录已过期且无法续期 · 在终端运行 claude auth login" }
+                return "Claude Code 的登录已在 \(Blocker.stamp(at)) 过期 · 在终端运行 claude auth login"
             case .unauthorized: return "凭据已失效，请重新登录 Claude Code 或更换手动令牌"
             case .forbidden: return "凭据无权读取额度，请检查账户权限或重新登录"
             case .network: return "暂时无法获取新读数，稍后自动重试"
@@ -38,6 +46,15 @@ actor ClaudeProvider {
             case .rateLimited: return "接口限流中，将按服务端时间重试"
             }
         }
+
+        private static func stamp(_ date: Date) -> String {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "zh_Hans_CN")
+            f.setLocalizedDateFormatFromTemplate("MMMdHHmm")
+            return f.string(from: date)
+        }
+
+        var isExpired: Bool { if case .expired = self { return true }; return false }
     }
     enum TokenUpdate: Equatable {
         case saved(Blocker), cleared, failed(Int32)
@@ -200,7 +217,8 @@ actor ClaudeProvider {
                     guard candidate.hasUsageScope else { throw Blocker.forbidden }
                     if let error = rejected[candidate.generation] { throw error }
                     return try await probe(candidate, all: tokens, expected: expected, version: version)
-                } catch let error as Blocker where [.unauthorized, .expired, .forbidden].contains(error) {
+                } catch let error as Blocker where error == .unauthorized || error == .forbidden
+                                                     || error.isExpired {
                     rejected[candidate.generation] = error
                     lastFailure = error
                 }
@@ -237,7 +255,7 @@ actor ClaudeProvider {
             expected = signature(current)
             generation = expected
         }
-        if let expiry = token.expiresAt, expiry <= now() { throw Blocker.expired }
+        if let expiry = token.expiresAt, expiry <= now() { throw Blocker.expired(token.refreshExpiresAt) }
         details.source = token.source
         details.lastAttemptAt = now()
         var reply = try await request(ClaudeUsageClient.usage(token: token.value))
@@ -320,7 +338,26 @@ actor ClaudeProvider {
     private var rotations: [String: Task<Credentials.Token, Error>] = [:]
 
     private func rotate(_ token: Credentials.Token, expected: String, version: Int) async throws -> Credentials.Token {
-        guard let refresh = token.refreshToken, let persist = access.persist else { throw Blocker.expired }
+        guard let refresh = token.refreshToken, let persist = access.persist
+        else { throw Blocker.expired(token.refreshExpiresAt) }
+
+        // The record says when the refresh token dies. Presenting a dead one can only come back
+        // `invalid_grant`, so the round-trip buys nothing and the reader waits for it — and every
+        // exchange we do not start is one that cannot land in the window between a successful
+        // swap and a failed write-back, which is the one way this app could log someone out of
+        // their own CLI.
+        //
+        // Gated on never having rotated successfully, because in that case the stored expiry is
+        // certainly Claude Code's own and certainly describes the token in hand. Once we have
+        // swapped a token ourselves the field may describe a refresh token that no longer
+        // exists, and refusing to renew a live credential would be far worse than one wasted
+        // request. Nil, as always, means unknown: try it.
+        if let dies = token.refreshExpiresAt, dies <= now(),
+           defaults.integer(forKey: "claudeRefreshCount") == 0 {
+            note("登录已过期，未尝试换发")
+            throw Blocker.expired(dies)
+        }
+
         guard signature(try await candidates()) == expected else { throw Blocker.credentialsChanged }
         try check(version)
 
@@ -358,7 +395,7 @@ actor ClaudeProvider {
         if http.statusCode == 400 || http.statusCode == 401 {
             let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             if body?["error"] as? String == "invalid_grant" || http.statusCode == 401 {
-                note("凭据已失效"); throw Blocker.expired
+                note("凭据已失效"); throw Blocker.expired(token.refreshExpiresAt)
             }
             rejected[token.generation] = .invalidResponse
             note("换发被拒 \(http.statusCode)")
