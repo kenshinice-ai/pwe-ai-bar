@@ -109,8 +109,13 @@ struct EnduranceView: View {
             guard let t, t.isFinite else { return nil }
             return W * CGFloat(min(1, max(0, t / trip)))
         }
+        // The mark sits where its own label says it does. The needle used to be placed from the
+        // raw `enduranceLow` while the 「见底」 clock beside it was the *floored* headline — up
+        // to one grain apart, which on a weekly axis is six hours. A gauge whose pointer and
+        // whose caption name different moments is worse than one that names neither.
+        let shown = f.headlineIsEndurance ? f.headline : f.enduranceLow
         return Plan(trip: trip,
-                    certain: x(f.enduranceLow),
+                    certain: x(shown),
                     possible: f.enduranceHigh.map { $0.isFinite ? (x($0) ?? W) : W },
                     measured: f.evidence?.isMeasured ?? false,
                     ticks: Self.ticks(axis: trip, now: now, width: W))

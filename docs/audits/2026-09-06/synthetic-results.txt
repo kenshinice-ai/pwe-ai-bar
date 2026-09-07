@@ -1,8 +1,0 @@
-CODEX_FAILURE calls=2 percent=40.0 stale=false age=301.0
-CODEX_PAST_RESET calls=3 percent=40.0 stale=false resetPassed=true
-CODEX_99_6 exhausted=true
-OLD_OBSERVATION age=3600 stale=false burn=13.333333333333334 estimate=66.66666666666667
-HISTORY_OUT_OF_ORDER sampleCount=1 lastPercent=10.0 lastAtOffset=300.0
-EXTRA_FAILURE windowCount=0
-PANEL_ALL height=1030.0 width=340.0
-SYNTHETIC_LAYOUT coldMs=103.80358336260542 warmMedianMs=28.993541665840894 warmMaxMs=29.747416672762483

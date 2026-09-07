@@ -12,6 +12,11 @@ PWE Studio 菜单栏家族的第四位，接在 Loan Bar、Lumen Bar、MAC MONIT
 
 翼形仪表 · Claude 的五小时与周窗口 · Codex 状态 · 距重置倒计时。
 
+![面板](docs/panel.png)
+
+点开是一块倒计时：最上面一排挑看哪一家（或者交给「自动」——离拦住你最近的那个），
+下面那个最大的数字回答唯一要紧的问题——按这个节奏，到不到得了重置。
+
 ---
 
 ## 它做什么
@@ -85,7 +90,7 @@ Claude 额度只保留内存快照，旧版未绑定账户的磁盘 quota-cache 
 
 `--cred` 只显示配置说明；`--credentials-read-only` 查询但不轮换令牌；`--credentials` 使用应用的完整查询/续期流程。实际钥匙串授权、网络和账户权限仍由本机及供应商决定。
 
-实施交接与验收：[Claude usage handoff](docs/CLAUDE_USAGE_IMPLEMENTATION_HANDOFF_2026-09-07.md)。新版 Claude status line 转交尚未接入，也不会自动升级 CLI。
+接手请先读 [docs/HANDOFF.md](docs/HANDOFF.md)。新版 Claude status line 转交尚未接入，也不会自动升级 CLI。
 
 ## 设计要点
 

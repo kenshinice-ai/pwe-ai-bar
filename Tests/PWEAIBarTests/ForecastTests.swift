@@ -235,6 +235,39 @@ final class ForecastTests: XCTestCase {
         XCTAssertEqual(Forecast.spare(17.8), "17%", "above one it is still a floor")
     }
 
+    /// A ring that goes *down* is a window that rolled over mid-record. History clears the ring
+    /// when it sees that, but Forecast must not depend on being handed clean input: a negative
+    /// climb runs straight through `(Δp + 1) / S` into a negative rate, and a negative rate
+    /// divides remaining into a negative endurance, which reaches the view as a bar of negative
+    /// width. The fuzz suite never generates this — its samples only ever climb.
+    func testARingThatRanBackwardsProducesNoForecastRatherThanANegativeOne() {
+        let f = window(percent: 12, resetIn: 3 * 3600,
+                       samples: [(-3000, 88), (-1500, 90), (0, 12)]).forecast(at: now)
+        if let rate = f.rate {
+            XCTAssertGreaterThanOrEqual(rate.low, 0)
+            XCTAssertGreaterThanOrEqual(rate.high, rate.low)
+        }
+        if let low = f.enduranceLow { XCTAssertGreaterThanOrEqual(low, 0) }
+        if let high = f.enduranceHigh { XCTAssertFalse(high.isNaN) }
+        if case .fallsShort(let gap) = f.verdict { XCTAssertGreaterThan(gap, 0) }
+    }
+
+    /// The gauge draws its needle at the headline, not at the raw floor, so the mark and the
+    /// clock time printed beside it name the same moment. That only works because flooring can
+    /// never move the figure later than the thing it is a floor of.
+    func testTheFlooredHeadlineIsNeverLaterThanTheEnduranceItStandsFor() {
+        for f in [
+            window(percent: 70, resetIn: 2 * 3600).forecast(at: now),
+            window(percent: 40, resetIn: 6.5 * 86400, length: 7 * 86400,
+                   samples: [(-4 * 3600, 32), (0, 40)]).forecast(at: now),
+            window(percent: 99, resetIn: 3.8 * 3600).forecast(at: now),
+        ] where f.headlineIsEndurance {
+            let headline = try! XCTUnwrap(f.headline)
+            let low = try! XCTUnwrap(f.enduranceLow)
+            XCTAssertLessThanOrEqual(headline, low, "the needle must not point past its own floor")
+        }
+    }
+
     func testTheGrainOnlyEverRoundsDown() {
         XCTAssertEqual(Forecast.floorToGrain(3540), 3300, "under an hour, five-minute grain")
         XCTAssertEqual(Forecast.floorToGrain(21540), 20700, "under six hours, quarter-hour grain")

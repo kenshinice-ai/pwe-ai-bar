@@ -229,8 +229,17 @@ struct Forecast: Equatable {
         let recent = dedupe(w.samples.filter { newest.timeIntervalSince($0.at) <= horizon && $0.at <= now })
         if let first = recent.first, let last = recent.last, recent.count >= 2 {
             let span = last.at.timeIntervalSince(first.at)
-            if span >= shortestSpan {
-                let climb = last.percent - first.percent
+            let climb = last.percent - first.percent
+            // A ring that ran backwards is a window that rolled over inside the record, or a
+            // provider whose figure is derived from a *remaining* fraction and drifted down as
+            // its bucket regenerated. Either way it is not consumption. Left unguarded it runs
+            // straight through `(Δp + 1) / S` into a negative rate, and a negative rate divides
+            // the remaining percentage into a negative endurance — which reaches the panel as
+            // 「至少能跑 1 分 · 缺口 3 小时 28 分」 in hot red, over a window that has just reset.
+            // History clears the ring when it sees a drop; this is the same fact asserted where
+            // the arithmetic happens, because an estimator that depends on being handed clean
+            // input is an estimator with a hole in it.
+            if span >= shortestSpan, climb >= 0 {
                 let hours = span / 3600
                 return (Rate(low: max(0, climb - 1) / hours, high: (climb + 1) / hours),
                         .samples(span: span), nil, horizon)
