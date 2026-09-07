@@ -67,6 +67,8 @@ final class Store: ObservableObject {
         self.lastActivity = lastActivity
     }
     private var timer: Timer?
+    private var settleTimer: Timer?
+    private var lastSettleAt = Date.distantPast
     private var inFlight = false
     private var sweepVersion = 0
     private var claudeUpdateVersion = 0
@@ -237,6 +239,7 @@ final class Store: ObservableObject {
         inFlight = false; claudeRefreshing = false
         timer?.invalidate(); timer = nil
         eventTimer?.invalidate(); eventTimer = nil
+        settleTimer?.invalidate(); settleTimer = nil
     }
 
     private func pollEvents() {
@@ -248,10 +251,37 @@ final class Store: ObservableObject {
             if events.map(\.key) != snapshot.events.map(\.key) {
                 snapshot.events = events
                 lastActivity = Date()
+                scheduleSettle()
                 onSnapshot?(snapshot)
             }
             dispatchAlerts()
         }
+    }
+
+    /// A turn just landed, so the figure is about to move: ask again once the server has had a
+    /// moment to count it.
+    ///
+    /// The heartbeat is what stops the number going stale. This is what makes it arrive when
+    /// something actually happened, rather than on whatever grid the cache TTL was on — five
+    /// minutes late while you work, fifteen once the app had decided you were idle. It is also
+    /// the half of the cadence that lets the other half be slow: the provider can wait five
+    /// minutes between polls precisely because it no longer has to guess when a turn ended.
+    ///
+    /// Debounced, and deliberately not on the shorter side of it. A burst of tool calls is one
+    /// piece of news, not nine, and this app has already learned what happens to an endpoint
+    /// asked 1,440 times a day.
+    private func scheduleSettle() {
+        guard settleTimer == nil, Date().timeIntervalSince(lastSettleAt) > 90 else { return }
+        let t = Timer(timeInterval: 25, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.settleTimer = nil
+                self.lastSettleAt = Date()
+                self.refresh(forceClaude: true)
+            }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        settleTimer = t
     }
 
     private func dispatchAlerts() {

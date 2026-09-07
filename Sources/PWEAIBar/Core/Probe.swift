@@ -190,6 +190,15 @@ enum Probe {
         print("来源：\(details.source.rawValue)")
         print("有效窗口：\(reading.windows.count)，旧读数：\(reading.stale ? "是" : "否")")
         print("成功获取：\(details.lastSuccessAt != nil ? "是" : "否")")
+        // The one question the credential itself cannot answer. Claude Code writes the same
+        // keychain item, and the rotation preserves every field it does not own, so after the
+        // fact there is no telling from the record which of the two rewrote it.
+        if let r = ClaudeProvider.refreshRecord() {
+            let f = DateFormatter(); f.dateFormat = "MM-dd HH:mm:ss"
+            print("本 app 续期：\(f.string(from: r.at)) · \(r.outcome) · 累计成功 \(r.count) 次")
+        } else {
+            print("本 app 续期：还没有过（钥匙串的更新都不是我们做的）")
+        }
     }
 
     static func endurance(into dir: String) {

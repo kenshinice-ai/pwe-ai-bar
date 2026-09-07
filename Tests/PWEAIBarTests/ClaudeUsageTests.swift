@@ -97,6 +97,61 @@ final class ClaudeUsageTests: XCTestCase {
         let count = await http.count; XCTAssertEqual(count, 2)
     }
 
+    /// The cadence used to tighten as the news got worse — sixty seconds the moment any window
+    /// went hot. A spent window has nothing left to say until it rolls over, so that spent the
+    /// only budget that matters, 1,440 times a day, to learn nothing; the endpoint answered with
+    /// an hour-long Retry-After and the panel then showed a figure thirty-three hours old.
+    func testASpentWindowIsNotPolledUntilItRollsOver() async throws {
+        let space = try TestSpace(); let memory = ClaudeMemory()
+        memory.put("/synthetic/auth.json", auth())
+        let reset = date.timeIntervalSince1970 + 600
+        let body = """
+        {"five_hour":{"utilization":100,"resets_at":\(reset)},\
+        "seven_day":{"utilization":18.2,"resets_at":\(date.timeIntervalSince1970 + 400_000)}}
+        """
+        let http = HTTPStub([(200, body, [:]), (200, body, [:]), (200, body, [:])])
+        var clock = date
+        let provider = ClaudeProvider(defaults: space.defaults, access: memory.access,
+                                      now: { clock }, request: { try await http.send($0) })
+
+        let first = await provider.windows()
+        XCTAssertTrue(first.windows.contains { $0.confirmedExhausted })
+        var count = await http.count; XCTAssertEqual(count, 1)
+
+        // Two minutes on. The old rule would have gone back for a number that cannot have moved.
+        clock.addTimeInterval(120)
+        _ = await provider.windows()
+        count = await http.count
+        XCTAssertEqual(count, 1, "nothing can have changed while the window is spent")
+
+        // Past its own rollover there is finally something to learn.
+        clock.addTimeInterval(500)
+        _ = await provider.windows()
+        count = await http.count
+        XCTAssertEqual(count, 2, "the reset is the one moment worth asking about")
+    }
+
+    /// And the ordinary case is five minutes, which is what AI Usage ships as its default too —
+    /// the old sixty-second floor was the outlier, not the baseline.
+    func testAHealthyWindowRestsFiveMinutesAndAnImminentResetTwo() async throws {
+        let space = try TestSpace(); let memory = ClaudeMemory()
+        memory.put("/synthetic/auth.json", auth())
+        let far = #"{"five_hour":{"utilization":20,"resets_at":1800014400},"seven_day":{"utilization":18.2,"resets_at":1800400000}}"#
+        let http = HTTPStub([(200, far, [:]), (200, far, [:]), (200, far, [:])])
+        var clock = date
+        let provider = ClaudeProvider(defaults: space.defaults, access: memory.access,
+                                      now: { clock }, request: { try await http.send($0) })
+        _ = await provider.windows()
+        clock.addTimeInterval(280)
+        _ = await provider.windows()
+        var count = await http.count
+        XCTAssertEqual(count, 1, "under five minutes, the cached reading still stands")
+        clock.addTimeInterval(40)
+        _ = await provider.windows()
+        count = await http.count
+        XCTAssertEqual(count, 2, "past it, ask again")
+    }
+
     func test401RefreshAndConcurrentCLIChangeAreBounded() async throws {
         let space = try TestSpace(); let memory = ClaudeMemory()
         memory.put("/synthetic/auth.json", auth())
