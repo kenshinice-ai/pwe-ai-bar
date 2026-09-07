@@ -308,17 +308,51 @@ actor ClaudeProvider {
                 d.integer(forKey: "claudeRefreshCount"))
     }
 
+    /// Exchanges in flight, keyed by the credential each one started from.
+    ///
+    /// A refresh token is single-use in the worst case: present it twice and the second attempt
+    /// is `invalid_grant`, and by then the first attempt's replacement may be the only working
+    /// credential in existence. Two concurrent fetches can otherwise both reach the exchange
+    /// with the same token — `invalidate()` clears the memoised fetch and cancels it, but a
+    /// cancelled task is not a stopped one, so the next `windows()` starts a second fetch that
+    /// happily spends the same refresh token again. The second caller joins the first exchange
+    /// instead of racing it.
+    private var rotations: [String: Task<Credentials.Token, Error>] = [:]
+
     private func rotate(_ token: Credentials.Token, expected: String, version: Int) async throws -> Credentials.Token {
         guard let refresh = token.refreshToken, let persist = access.persist else { throw Blocker.expired }
         guard signature(try await candidates()) == expected else { throw Blocker.credentialsChanged }
         try check(version)
-        // The last cancellation check is the one above, before the exchange. Once this call
-        // returns, the server may already have retired the refresh token Claude Code is holding
-        // and handed us the only copy of its replacement — so everything from here to the write
-        // is cleanup that runs whether or not anyone still wants the reading. There used to be
-        // a `check(version)` on the very next line, and it was reached first: the reader taps
-        // 「重新连接」, `invalidate()` bumps the revision and cancels the task, and the
-        // replacement is dropped before the response has even been parsed.
+
+        // This is the last cancellation check before the exchange, and the exchange itself runs
+        // in an unstructured task on purpose: an unstructured `Task` does not inherit
+        // cancellation, so once the POST has started, nothing can stop it from running through
+        // to the write-back.
+        //
+        // That matters more than it looks. `invalidate()` — the reader tapping 「重新连接」 or
+        // saving a manual token — cancels the in-flight fetch, and URLSession honours
+        // cancellation: the refresh POST would be torn down mid-flight. If the server had
+        // already rotated the refresh token by then, its replacement arrives in a response
+        // nobody is listening for, Claude Code's stored copy is dead, and the reader is logged
+        // out of their own CLI by a settings tap. Losing interest in the *reading* must not be
+        // able to abandon the *credential*.
+        //
+        // `await work.value` is not a cancellation point, so this waits for the exchange to
+        // finish either way; the caller can be told the reading was cancelled afterwards.
+        if let inFlight = rotations[token.generation] { return try await inFlight.value }
+        let work = Task { try await self.exchange(token, refresh: refresh, persist: persist) }
+        rotations[token.generation] = work
+        defer { rotations[token.generation] = nil }
+        let fresh = try await work.value
+        // Now that the replacement is safely on disk, losing interest is free again.
+        try check(version)
+        return fresh
+    }
+
+    /// The exchange and the write-back, as one unit that always completes.
+    private func exchange(_ token: Credentials.Token, refresh: String,
+                          persist: @escaping (Credentials.Token, Credentials.Token) throws -> Bool)
+        async throws -> Credentials.Token {
         let (data, response) = try await request(ClaudeUsageClient.refresh(token: refresh))
         guard let http = response as? HTTPURLResponse else { throw Blocker.invalidResponse }
         if http.statusCode == 400 || http.statusCode == 401 {
@@ -338,22 +372,12 @@ actor ClaudeProvider {
             rejected[token.generation] = .invalidResponse
             note("回复看不懂"); throw Blocker.invalidResponse
         }
-        // No cancellation check, and no second read of the candidates, between here and the
-        // write below. That is deliberate, and it is the whole point of this fix.
-        //
-        // The exchange has already happened. If the server rotated the refresh token, the copy
-        // Claude Code is still holding may be dead already, and the only copy of its replacement
-        // is the one in memory right here. From this line on, writing it back is not part of
-        // producing a result for the caller — it is cleanup that has to run whether or not
-        // anyone still wants the result. Cancellation used to abandon it: the user tapping
-        // 「重新连接」 in settings bumps `revision`, and the two `check(version)` calls plus the
-        // `await candidates()` that used to sit here gave that a window several seconds wide
-        // in which to log them out of their own CLI.
-        //
-        // Nothing safe is given up. The re-read this replaces was redundant with the store's
-        // own compare-and-swap: `save(_:expected:)` reads the record again and refuses to write
-        // unless it still matches, which is the check that actually protects a concurrent
-        // change by the CLI. Cancellation is not a concurrent change; it is us losing interest.
+        // Nothing between the response and the write below re-reads the credential or checks
+        // for cancellation. The re-read that used to sit here was redundant with the store's own
+        // compare-and-swap — `save(_:expected:)` reads the record again and refuses to write
+        // unless it still matches, which is the check that actually protects against the CLI
+        // changing it underneath us. Cancellation is not a concurrent change; it is us losing
+        // interest, and losing interest must not cost anyone their login.
         let saved: Bool
         do { saved = try await offActor { try persist(rotated, token) } }
         catch {
@@ -366,8 +390,6 @@ actor ClaudeProvider {
         }
         guard saved else { note("写回时凭据已被改动"); throw Blocker.credentialsChanged }
         note("已续期", success: true)
-        // Now that the replacement is safely on disk, losing interest is free again.
-        try check(version)
         return rotated
     }
 

@@ -24,6 +24,31 @@ private final class ClaudeMemory: @unchecked Sendable {
     }
 }
 
+/// A one-shot latch usable from a `@Sendable` request stub.
+private final class Gate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var open_ = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    func open() {
+        lock.lock(); open_ = true; let pending = waiters; waiters = []; lock.unlock()
+        pending.forEach { $0.resume() }
+    }
+    func wait() async {
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if open_ { lock.unlock(); cont.resume(); return }
+            waiters.append(cont); lock.unlock()
+        }
+    }
+}
+
+private final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var n = 0
+    func bump() { lock.lock(); n += 1; lock.unlock() }
+    var value: Int { lock.lock(); defer { lock.unlock() }; return n }
+}
+
 final class ClaudeUsageTests: XCTestCase {
     private let date = Date(timeIntervalSince1970: 1_800_000_000)
     private func auth(_ value: String = "first", expiry: Double = 1_800_003_600, scope: String = "user:profile", account: String = "A") -> String {
@@ -348,5 +373,87 @@ final class ClaudeUsageTests: XCTestCase {
         let record = try XCTUnwrap(ClaudeProvider.refreshRecord(space.defaults))
         XCTAssertEqual(record.outcome, "已续期")
         XCTAssertEqual(record.count, 1, "the tally no longer depends on matching an English literal")
+    }
+
+    /// Cancelling the *reading* must not cancel the *exchange*.
+    ///
+    /// `invalidate()` cancels the in-flight fetch, and URLSession honours cancellation — so a
+    /// refresh POST would be torn down mid-flight. If the server had already rotated by then,
+    /// the replacement arrives in a response nobody is listening for and Claude Code's stored
+    /// copy is dead: a settings tap logs the reader out of their own CLI. The exchange therefore
+    /// runs in an unstructured task, which does not inherit cancellation.
+    func testCancellingTheReadingDoesNotCancelTheExchange() async throws {
+        let space = try TestSpace(); let memory = ClaudeMemory()
+        memory.put("/synthetic/auth.json", auth(expiry: date.timeIntervalSince1970 + 30))
+        let http = HTTPStub([
+            (200, #"{"access_token":"rotated","refresh_token":"rotated-refresh","expires_in":3600}"#, [:]),
+            (200, quota, [:]),
+        ])
+        let reached = Gate(), release = Gate()
+        let provider = ClaudeProvider(defaults: space.defaults, access: memory.access,
+                                      now: { self.date }, request: { request in
+            if request.url == ClaudeUsageClient.refreshURL {
+                reached.open()
+                await release.wait()
+                // URLSession tears a request down when its task is cancelled; the stub models
+                // that, because without it this test passes against the very code it exists to
+                // catch. Inside the unstructured exchange task this is never cancelled.
+                try Task.checkCancellation()
+            }
+            return try await http.send(request)
+        })
+
+        let reading = Task { await provider.windows() }
+        await reached.wait()
+        // The real cancellation path, and the only one that reaches the exchange: `invalidate()`
+        // cancels the memoised fetch task. Cancelling the *caller* never could — `windows()`
+        // hands the work to an unstructured task of its own — which is why this test models the
+        // settings tap rather than a caller losing patience.
+        await provider.enableSharedKeychain()
+        release.open()            // the server answers anyway
+        _ = await reading.value
+
+        let stored = try XCTUnwrap(memory.get("/synthetic/auth.json"))
+        let oauth = try XCTUnwrap((try JSONSerialization.jsonObject(with: Data(stored.utf8))
+                                   as? [String: Any])?["claudeAiOauth"] as? [String: Any])
+        XCTAssertEqual(oauth["refreshToken"] as? String, "rotated-refresh",
+                       "a cancelled reading must not cost the reader their login")
+        XCTAssertEqual(memory.writes, 1)
+    }
+
+    /// A refresh token is single-use in the worst case, and the second attempt's `invalid_grant`
+    /// arrives after the first attempt's replacement has become the only working credential.
+    /// Two fetches must never both spend it: the second joins the first exchange.
+    func testTwoFetchesNeverSpendTheSameRefreshTokenTwice() async throws {
+        let space = try TestSpace(); let memory = ClaudeMemory()
+        memory.put("/synthetic/auth.json", auth(expiry: date.timeIntervalSince1970 + 30))
+        let http = HTTPStub([
+            (200, #"{"access_token":"rotated","refresh_token":"rotated-refresh","expires_in":3600}"#, [:]),
+            (200, quota, [:]), (200, quota, [:]),
+        ])
+        let reached = Gate(), release = Gate()
+        let refreshes = Counter()
+        let provider = ClaudeProvider(defaults: space.defaults, access: memory.access,
+                                      now: { self.date }, request: { request in
+            if request.url == ClaudeUsageClient.refreshURL {
+                refreshes.bump()
+                reached.open()
+                await release.wait()
+            }
+            return try await http.send(request)
+        })
+
+        let first = Task { await provider.windows() }
+        await reached.wait()
+        // The reader reconnects: the memoised fetch is dropped and cancelled, and a second one
+        // starts against a credential the first exchange has not written back yet.
+        await provider.enableSharedKeychain()
+        let second = Task { await provider.windows() }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        release.open()
+        _ = await first.value; _ = await second.value
+
+        XCTAssertEqual(refreshes.value, 1, "the same refresh token must not be presented twice")
+        XCTAssertEqual(memory.writes, 1)
     }
 }
