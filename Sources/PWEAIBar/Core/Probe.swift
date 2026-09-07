@@ -151,7 +151,9 @@ enum Probe {
     }
 
     /// Metadata only; this command does not retrieve tokens or validate network access.
-    static func credentials() {
+    /// `--cred`: what the setup is, in words. Named apart from `credentials()` because two
+    /// functions differing only by `async` is a coin toss at the call site.
+    static func credentialsHelp() {
         print("PWE AI Bar — 凭据配置")
         print("手动令牌记录：\(Credentials.hasStoredOwnToken ? "有" : "无")")
         print("默认复用 Claude Code 登录。实际来源和成功时间以额度面板为准。")

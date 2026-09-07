@@ -230,11 +230,18 @@ struct EnduranceView: View {
             } else {
                 // We know the trip and not the fuel. A dashed centre line is the instrument's
                 // way of saying the measurement is missing, rather than reading as empty.
-                Capsule().fill(Color.red)
-                    .frame(width: W, height: 10).offset(y: 6)
-                    // mask removed for probe
-
-
+                // Stroked with a dash pattern rather than masked by a row of rectangles. The
+                // masking version drew nothing at all: its rectangles were given a width and no
+                // height, so inside a width-constrained stack they collapsed and the mask came
+                // out empty. The line had been invisible in both appearances since it was
+                // written — which is presumably why someone once replaced it with a solid red
+                // bar to see where it was supposed to be, and left that behind.
+                Path { path in
+                    path.move(to: CGPoint(x: 0, y: 0.5))
+                    path.addLine(to: CGPoint(x: W, y: 0.5))
+                }
+                .stroke(Theme.text2.opacity(0.55), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                .frame(width: W, height: 1).offset(y: 10.5)
             }
 
             // Start line.

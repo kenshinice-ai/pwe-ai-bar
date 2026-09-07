@@ -74,9 +74,11 @@ struct QuotaWindow: Identifiable {
     var samples: [History.Sample] = []
     /// Opaque source/account generation; never a token or user identifier.
     var observationNamespace: String? = nil
+    /// The key without an account on the end — also the key everything used before accounts
+    /// were separated, which is why the alert rules still have to know it exists.
+    var observationBase: String { "\(provider.rawValue):\(id)" }
     var observationKey: String {
-        let base = "\(provider.rawValue):\(id)"
-        return observationNamespace.map { base + ":" + $0 } ?? base
+        observationNamespace.map { observationBase + ":" + $0 } ?? observationBase
     }
 
     /// When the window opened, which its own length tells us without any history.

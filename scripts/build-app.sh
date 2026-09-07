@@ -17,9 +17,11 @@ BUILD_ARGS=(-c "$CONFIG")
 [[ -n "${PWEBAR_BUILD_ROOT:-}" ]] && BUILD_ARGS+=(--scratch-path "$PWEBAR_BUILD_ROOT")
 [[ -n "${PWEBAR_CACHE_PATH:-}" ]] && BUILD_ARGS+=(--cache-path "$PWEBAR_CACHE_PATH")
 [[ "${PWEBAR_DISABLE_SANDBOX:-0}" == 1 ]] && BUILD_ARGS+=(--disable-sandbox)
-swift build "${BUILD_ARGS[@]}" > /dev/null
-
+# One pass, not two. Asking for --show-bin-path is itself a build invocation: it re-resolves
+# and re-parses the package graph every time the app is assembled, for a path that the same
+# arguments already determine.
 BIN_DIR="$(swift build "${BUILD_ARGS[@]}" --show-bin-path)"
+swift build "${BUILD_ARGS[@]}" > /dev/null
 BIN="$BIN_DIR/PWEAIBar"
 [[ -f "$BIN" ]] || { echo "✗ $BIN not found"; exit 1; }
 

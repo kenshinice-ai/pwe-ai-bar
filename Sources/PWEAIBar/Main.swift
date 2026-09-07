@@ -83,7 +83,7 @@ enum PWEAIBarMain {
             return
         }
         if CommandLine.arguments.contains("--cred") {
-            Probe.credentials()
+            Probe.credentialsHelp()
             return
         }
         if CommandLine.arguments.contains("--probe") {

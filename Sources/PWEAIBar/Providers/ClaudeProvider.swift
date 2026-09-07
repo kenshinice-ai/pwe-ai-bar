@@ -143,10 +143,23 @@ actor ClaudeProvider {
         ClaudeValue.fingerprint(Data(tokens.map(\.generation).joined(separator: ":").utf8))
     }
 
-    private func adopt(_ signature: String) {
+    private func adopt(_ signature: String, identity: String?) {
         guard generation != signature else { return }
         generation = signature
-        historyNamespace = signature
+        // Keyed on *who* the credential belongs to, not on the bytes of the credential.
+        //
+        // `signature` fingerprints the whole document, so a routine access-token rotation —
+        // which Claude Code performs roughly hourly under load, and which this app now performs
+        // itself — changed it, and with it every window's `observationKey`. The sample ring and
+        // every pending reset promise were orphaned once an hour by an event that is not a
+        // change of account at all: the forecast fell back to the whole-window average, and the
+        // "you can start again" alert was left waiting on a key nobody would write to again.
+        //
+        // `accountKey` is the fingerprint of account uuid + organisation uuid that `sameIdentity`
+        // already trusts to decide whether two credentials are the same person. Nil when the
+        // document carries no identity, which puts the keys back to their bare form — stable,
+        // and no worse than before accounts were separated at all.
+        historyNamespace = identity
         cache = []; details = Details(); retryNetworkAt = nil
         // Rejected generations are only needed until discovery changes; bounded to one set.
         rejected = [:]
@@ -167,7 +180,7 @@ actor ClaudeProvider {
             let tokens = try await candidates()
             try check(version)
             let expected = signature(tokens)
-            adopt(expected)
+            adopt(expected, identity: tokens.first?.accountKey)
             guard let first = tokens.first else { throw Blocker.notLoggedIn }
             if let until = retryAfter { throw Blocker.rateLimited(until) }
             if !force, let retryNetworkAt, retryNetworkAt > now() { return staleReading() }
@@ -352,7 +365,14 @@ actor ClaudeProvider {
         if let error = error as? Blocker { return error }
         if let error = error as? ClaudeCredentialStore.Failure {
             switch error {
-            case .denied: return .keychainRefused
+            case .denied:
+                // Latched, and only here. A refusal is a decision the reader made, and asking
+                // again every five minutes for the rest of the day is how an app teaches people
+                // to click Deny on reflex. The timeout path throws the same blocker and must
+                // *not* latch — a keychain that was slow once is not a keychain that said no.
+                // 设置 → 重新连接 clears it (`enableSharedKeychain`).
+                defaults.set(true, forKey: "keychainRefused")
+                return .keychainRefused
             case .ambiguous, .changed: return .credentialsChanged
             case .malformed: return .invalidResponse
             case .storage: return .storage

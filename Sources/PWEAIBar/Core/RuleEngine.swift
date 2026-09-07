@@ -77,7 +77,12 @@ final class RuleEngine {
         for w in snap.windows {
             let key = w.observationKey
             // Migrate the old per-window promises, including Claude's two historical aliases.
-            let aliases = [w.id] + (w.id == "five_hour" ? ["session"] : w.id == "seven_day" ? ["weekly_all"] : [])
+            // `observationBase` is the key this window had before readings were separated by
+            // account. Without it in the list, the first reading that arrives with an account
+            // attached silently abandons every promise made under the old key — including the
+            // one alert people actually wait for, "你可以继续了".
+            let aliases = [w.id, w.observationBase]
+                + (w.id == "five_hour" ? ["session"] : w.id == "seven_day" ? ["weekly_all"] : [])
             for alias in aliases {
                 if let old = state.pendingResets.removeValue(forKey: alias) {
                     state.pendingResets[key] = state.pendingResets[key] ?? old; changed = true

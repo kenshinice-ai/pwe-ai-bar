@@ -275,4 +275,33 @@ final class ClaudeUsageTests: XCTestCase {
         let linked = ClaudeCredentialStore(services: [], path: link.path)
         XCTAssertThrowsError(try linked.load())
     }
+
+    /// Also from the cloud review, and the worse of the two. The namespace that separates one
+    /// account's readings from another's was a fingerprint of the whole credential *document*,
+    /// so a routine access-token rotation — Claude Code does one about hourly, and this app now
+    /// does them too — minted a new namespace, a new `observationKey`, and orphaned the sample
+    /// ring and every pending reset promise. Once an hour, the forecast fell back to the
+    /// whole-window average and the alert state started again from nothing.
+    func testAnExternalTokenRotationIsNotANewAccount() async throws {
+        let space = try TestSpace(); let memory = ClaudeMemory()
+        memory.put("/synthetic/auth.json", auth("first"))
+        let http = HTTPStub([(200, quota, [:]), (200, quota, [:])])
+        var clock = date
+        let provider = ClaudeProvider(defaults: space.defaults, access: memory.access,
+                                      now: { clock }, request: { try await http.send($0) })
+        let before = await provider.windows().windows.first?.observationNamespace
+        XCTAssertNotNil(before, "an identified account still gets its own namespace")
+
+        // Same person, different bytes: the CLI rotated its own token underneath us.
+        memory.put("/synthetic/auth.json", auth("second"))
+        clock.addTimeInterval(600)
+        let after = await provider.windows(force: true).windows.first?.observationNamespace
+        XCTAssertEqual(after, before, "a new access token is not a new account")
+
+        // A genuinely different account still separates.
+        memory.put("/synthetic/auth.json", auth("third", account: "B"))
+        clock.addTimeInterval(600)
+        let elsewhere = await provider.windows(force: true).windows.first?.observationNamespace
+        XCTAssertNotEqual(elsewhere, before)
+    }
 }

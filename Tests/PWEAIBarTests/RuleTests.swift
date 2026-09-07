@@ -254,4 +254,31 @@ final class RuleTests: XCTestCase {
         XCTAssertEqual(full.map(\.kind), [.exhausted])
     }
 
+
+    /// From the cloud review. Readings gained an account suffix (`claude:five_hour:<account>`)
+    /// so two accounts cannot inherit each other's state — but the migration list only knew the
+    /// bare id, never the `provider:id` form everything had actually been keyed on. The first
+    /// reading that arrived with an account attached therefore abandoned every promise made
+    /// under the old key, including the one alert people wait for: 「你可以继续了」.
+    @MainActor func testAPromiseSurvivesTheDayReadingsGainAnAccount() async throws {
+        let space = try TestSpace(); let clock = TestClock()
+        let reset = clock.date.addingTimeInterval(30)
+        let rules = RuleEngine(defaults: space.defaults, now: { clock.date }, away: { false }, remaining: { true })
+
+        // Recorded before accounts existed: the key is "claude:five_hour", no suffix.
+        var snap = Snapshot()
+        snap.windows = [QuotaWindow(id: "five_hour", provider: .claude, channel: .session,
+                                    title: "session", percent: 92, resetsAt: reset,
+                                    observedAt: clock.date)]
+        XCTAssertTrue(rules.evaluate(snap).isEmpty, "the promise is made, not announced")
+
+        // The credential now carries an identity, so every window gains a namespace.
+        clock.date.addTimeInterval(40)
+        snap.windows[0].observationNamespace = "acct"
+        snap.windows[0].percent = 4
+        snap.windows[0].resetsAt = clock.date.addingTimeInterval(3600)
+        snap.windows[0].observedAt = clock.date
+        XCTAssertEqual(rules.evaluate(snap).map(\.kind), [.reset],
+                       "the promise was made under the old key and must still be kept")
+    }
 }
