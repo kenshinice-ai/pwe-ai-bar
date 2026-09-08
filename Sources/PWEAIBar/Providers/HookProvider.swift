@@ -142,10 +142,10 @@ enum HookProvider {
         let raw = kind == .answered ? "" : String((o["text"] as? String ?? "").prefix(200))
         let text: String
         switch kind {
-        case .waiting: text = "Claude 在等你回话"
-        case .finished: text = "任务完成"
-        case .failed: text = "会话出错"
-        case .answered: text = "已回复"
+        case .waiting: text = String(format: L("panel.waiting.provider", "%@ is waiting on your reply"), "Claude")
+        case .finished: text = L("alert.finished", "Task finished")
+        case .failed: text = L("alert.failed", "The session hit an error")
+        case .answered: text = L("hook.answered", "Answered")
         }
         return AgentEvent(id: session.isEmpty ? (eventID ?? "legacy-\(secs)") : session,
                           provider: .claude, kind: kind,

@@ -57,7 +57,7 @@ actor CodexProvider {
                 var w = window
                 let age = date.timeIntervalSince(w.observedAt)
                 if let reset = w.resetsAt, reset <= date {
-                    w.percent = nil; w.note = "待确认"; w.severity = .normal
+                    w.percent = nil; w.note = L("note.unconfirmed", "unconfirmed"); w.severity = .normal
                     w.confirmedExhausted = false; w.isStale = true
                 } else if age > ttl(reading) {
                     w.isStale = true
@@ -126,12 +126,12 @@ actor CodexProvider {
            let reached = c.value["rate_limit_reached_type"] as? String,
            reached.contains("credits") {
             out.append(QuotaWindow(id: "codex_credits", provider: .codex, channel: .codex,
-                                   title: "附加额度", percent: nil, severity: .critical,
-                                   note: "已用尽", observedAt: c.at, confirmedExhausted: true))
+                                   title: L("codex.extraCredits", "Extra credits"), percent: nil, severity: .critical,
+                                   note: L("verdict.spent", "Spent"), observedAt: c.at, confirmedExhausted: true))
         }
         if out.isEmpty {
             out.append(QuotaWindow(id: "codex_unknown", provider: .codex, channel: .codex,
-                                   title: "额度", percent: nil, note: "暂无有效读数",
+                                   title: L("codex.quota", "Quota"), percent: nil, note: L("note.noReading", "no valid reading yet"),
                                    observedAt: date, isStale: true))
         }
         return out
@@ -146,12 +146,12 @@ actor CodexProvider {
         // Chinese numerals for the two everyone has, so Codex's rows read the same as Claude's;
         // digits for anything unusual, where being exact matters more than matching.
         switch minutes {
-        case .some(300):                       return "五小时窗口"
-        case .some(10080):                     return "周窗口"
-        case .some(let m) where m <= 60:       return "\(m) 分钟窗口"
-        case .some(let m) where m < 1440:      return "\(m / 60) 小时窗口"
-        case .some(let m) where m % 1440 == 0: return "\(m / 1440) 天窗口"
-        default: return key == "primary" ? "短窗口" : "长窗口"
+        case .some(300):                       return L("channel.session", "5-hour window")
+        case .some(10080):                     return L("channel.week", "Weekly window")
+        case .some(let m) where m <= 60:       return String(format: L("window.minutes", "%d-minute window"), m)
+        case .some(let m) where m < 1440:      return String(format: L("window.hours", "%d-hour window"), m / 60)
+        case .some(let m) where m % 1440 == 0: return String(format: L("window.days", "%d-day window"), m / 1440)
+        default: return key == "primary" ? L("window.short", "Short window") : L("window.long", "Long window")
         }
     }
 
@@ -167,7 +167,7 @@ actor CodexProvider {
         return QuotaWindow(id: "codex_\(minutes.map(String.init) ?? key)", provider: .codex,
                            channel: .codex, title: windowName(minutes: minutes, key: key),
                            percent: expired ? nil : pct, resetsAt: reset,
-                           note: expired ? "待确认" : nil, observedAt: observed,
+                           note: expired ? L("note.unconfirmed", "unconfirmed") : nil, observedAt: observed,
                            gradedBy: .local, isStale: expired,
                            confirmedExhausted: !expired && pct >= 100,
                            windowLength: minutes.map { TimeInterval($0) * 60 })

@@ -4,6 +4,10 @@ import XCTest
 @testable import PWEAIBar
 
 final class CredentialTests: XCTestCase {
+
+    /// Pinned: these assert on copy that is localised now, and `.system` would follow whatever
+    /// language the machine running the tests uses.
+    override func setUp() { super.setUp(); Loc.language = .en }
     func testUpdateFailureNeverDeletesOrAdds() throws {
         let space = try TestSpace()
         var adds = 0; var deletes = 0
@@ -36,12 +40,12 @@ final class CredentialTests: XCTestCase {
             return .failed(errSecAuthFailed)
         }
         XCTAssertFalse(failed); XCTAssertTrue(editor.hasToken); XCTAssertFalse(editor.isSaving)
-        XCTAssertTrue(editor.message.contains("失败"))
+        XCTAssertTrue(editor.message.contains("failed"), editor.message)
         _ = await editor.submit("") { _ in .cleared }
         XCTAssertFalse(editor.hasToken)
         _ = await editor.submit("synthetic") { _ in .saved(.unauthorized) }
         XCTAssertTrue(editor.hasToken)
-        XCTAssertTrue(editor.message.contains("失效"))
+        XCTAssertTrue(editor.message.contains("no longer valid"), editor.message)
     }
 
     func testUnauthorizedDoesNotRetrySameTokenAndReplacementRecovers() async throws {
@@ -184,7 +188,7 @@ final class CredentialTests: XCTestCase {
         clock.date.addTimeInterval(20)
         let reading = await p.windows()
         XCTAssertTrue(reading.stale); XCTAssertNil(reading.windows.first?.percent)
-        XCTAssertEqual(reading.windows.first?.note, "待确认")
+        XCTAssertEqual(reading.windows.first?.note, "unconfirmed")
     }
     /// Measured on the machine this was written on: Claude Code's keychain credential sat
     /// expired for seven and a half hours while Claude Code itself ran the entire time. The CLI

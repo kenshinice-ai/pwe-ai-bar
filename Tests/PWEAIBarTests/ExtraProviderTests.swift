@@ -8,6 +8,10 @@ import XCTest
 /// carries the percentage, and — for the three that report what is *left* — that it gets turned
 /// around before it reaches a bar that draws what is *spent*.
 final class ExtraProviderTests: XCTestCase {
+
+    /// Pinned: these assert on copy that is localised now, and `.system` would follow whatever
+    /// language the machine running the tests uses.
+    override func setUp() { super.setUp(); Loc.language = .en }
     private let clock = Date(timeIntervalSince1970: 1_800_000_000)
 
     private func reply(_ status: Int, _ body: String) -> ExtraProviders.Transport {
@@ -56,7 +60,7 @@ final class ExtraProviderTests: XCTestCase {
         """
         let c = ExtraProviders.Cursor.map(object(cursor), now: clock)
         XCTAssertEqual(c?.windows.map(\.percent), [64, 12, 0])
-        XCTAssertEqual(c?.windows.map(\.title), ["本期额度", "Auto", "API"])
+        XCTAssertEqual(c?.windows.map(\.title), ["This period", "Auto", "API"])
         // A disabled dashboard has no reading to report, which is not the same as zero usage.
         let off = cursor.replacingOccurrences(of: "\"enabled\":true", with: "\"enabled\":false")
         XCTAssertNil(ExtraProviders.Cursor.map(object(off), now: clock))
@@ -109,9 +113,9 @@ final class ExtraProviderTests: XCTestCase {
         let cases: [(Int, String, ExtraSource.Connection)] = [
             (401, "{}", .signedOut),
             (403, "{}", .signedOut),
-            (500, "{}", .unavailable("接口返回 500")),
-            (200, "not json", .unavailable("接口返回 200")),
-            (200, "{}", .unsupported("这个账户没有可读的额度")),
+            (500, "{}", .unavailable("the endpoint returned 500")),
+            (200, "not json", .unavailable("the endpoint returned 200")),
+            (200, "{}", .unsupported("this account exposes no readable quota")),
         ]
         for (status, body, expected) in cases {
             let request = ExtraSource.request("https://example.invalid/x", headers: [:])!
@@ -127,7 +131,7 @@ final class ExtraProviderTests: XCTestCase {
         let none = await ExtraSource.send(request, via: dead)
         XCTAssertNil(none)
         XCTAssertEqual(ExtraProviders.outcome(none) { _ in ExtraSource.Reading() }.connection,
-                       .unavailable("暂时读不到，稍后重试"))
+                       .unavailable("No reading just now — retrying later"))
     }
 
     // MARK: Value parsing

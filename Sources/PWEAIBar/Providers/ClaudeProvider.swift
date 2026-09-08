@@ -27,23 +27,28 @@ actor ClaudeProvider {
         case rateLimited(Date)
         var message: String {
             switch self {
-            case .none: return "已验证，额度连接正常"
-            case .needsSetup: return "未能读取登录凭据，可在设置中重新连接"
-            case .notLoggedIn: return "未找到凭据，请登录 Claude Code"
-            case .keychainRefused: return "钥匙串访问失败或超时，请在设置中重新连接"
+            case .none: return L("blocker.ok", "Verified — the quota connection is working")
+            case .needsSetup: return L("blocker.needsSetup", "Could not read the login credential — reconnect in settings")
+            case .notLoggedIn: return L("blocker.notLoggedIn", "No credential found — sign in to Claude Code")
+            case .keychainRefused: return L("blocker.keychainRefused", "Keychain access failed or timed out — reconnect in settings")
             case .expired(let at):
                 // Naming the date and the command is the whole improvement. "凭据已失效" is true
                 // and leaves the reader with nothing to do; this sentence ends in something they
                 // can paste. `claude auth login` is what rewrites the record the app reads.
-                guard let at else { return "登录已过期且无法续期 · 在终端运行 claude auth login" }
-                return "Claude Code 的登录已在 \(Blocker.stamp(at)) 过期 · 在终端运行 claude auth login"
-            case .unauthorized: return "凭据已失效，请重新登录 Claude Code 或更换手动令牌"
-            case .forbidden: return "凭据无权读取额度，请检查账户权限或重新登录"
-            case .network: return "暂时无法获取新读数，稍后自动重试"
-            case .storage: return "续期凭据未能安全保存，请在 Claude Code 重新登录"
-            case .invalidResponse: return "额度响应格式异常，保留上次读数，稍后重试"
-            case .credentialsChanged: return "登录来源发生变化或冲突，请确认当前 Claude Code 登录后重试"
-            case .rateLimited: return "接口限流中，将按服务端时间重试"
+                guard let at else {
+                    return L("blocker.expired.noDate",
+                             "The login has expired and cannot be renewed · run claude auth login in a terminal")
+                }
+                return String(format: L("blocker.expired.dated",
+                                        "The Claude Code login expired on %@ · run claude auth login in a terminal"),
+                              Blocker.stamp(at))
+            case .unauthorized: return L("blocker.unauthorized", "The credential is no longer valid — sign in to Claude Code again or replace the manual token")
+            case .forbidden: return L("blocker.forbidden", "This credential may not read quota — check the account's permissions or sign in again")
+            case .network: return L("blocker.network", "No new reading just now — retrying automatically")
+            case .storage: return L("blocker.storage", "The renewed credential could not be saved safely — sign in to Claude Code again")
+            case .invalidResponse: return L("blocker.invalidResponse", "The quota response was malformed — keeping the last reading and retrying")
+            case .credentialsChanged: return L("blocker.credentialsChanged", "The login source changed or conflicts — confirm the current Claude Code login and retry")
+            case .rateLimited: return L("blocker.rateLimited", "Rate limited — retrying on the server's schedule")
             }
         }
 
@@ -62,9 +67,9 @@ actor ClaudeProvider {
         var succeeded: Bool { if case .failed = self { return false }; return true }
         var message: String {
             switch self {
-            case .saved(let state): return "已保存 · " + state.message
-            case .cleared: return "已清除令牌"
-            case .failed(let code): return "钥匙串操作失败（\(code)），请重试"
+            case .saved(let state): return L("token.saved", "Saved") + " · " + state.message
+            case .cleared: return L("token.cleared", "Token cleared")
+            case .failed(let code): return String(format: L("token.failed", "Keychain operation failed (%d) — try again"), code)
             }
         }
     }
@@ -545,7 +550,8 @@ actor ClaudeProvider {
         (cache.map { value in
             var w = value; w.isStale = true
             if let reset = w.resetsAt, reset <= now() {
-                w.percent = nil; w.severity = .normal; w.note = "待确认"; w.confirmedExhausted = false
+                w.percent = nil; w.severity = .normal
+            w.note = L("note.unconfirmed", "unconfirmed"); w.confirmedExhausted = false
             }
             return w
         }, true)

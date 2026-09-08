@@ -101,8 +101,8 @@ actor CodexAppServer {
             guard let reached = pool["rateLimitReachedType"] as? String,
                   reached.contains("credits") else { continue }
             out.windows.append(QuotaWindow(id: "codex_credits", provider: .codex, channel: .codex,
-                                           title: "附加额度", percent: nil, severity: .critical,
-                                           note: "已用尽", observedAt: now(), confirmedExhausted: true))
+                                           title: L("codex.extraCredits", "Extra credits"), percent: nil, severity: .critical,
+                                           note: L("verdict.spent", "Spent"), observedAt: now(), confirmedExhausted: true))
         }
         return out
     }

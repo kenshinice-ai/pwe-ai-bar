@@ -70,8 +70,8 @@ enum ClaudeUsageMapper {
             guard let kind = ClaudeValue.text(node["kind"]) else { continue }
             let id: String, label: String, channel: Channel
             switch kind {
-            case "session": id = "five_hour"; label = "五小时窗口"; channel = .session
-            case "weekly_all": id = "seven_day"; label = "周窗口"; channel = .week
+            case "session": id = "five_hour"; label = L("channel.session", "5-hour window"); channel = .session
+            case "weekly_all": id = "seven_day"; label = L("channel.week", "Weekly window"); channel = .week
             default:
                 guard kind == "weekly_scoped" || node["group"] as? String == "weekly" else { continue }
                 let scope = node["scope"] as? [String: Any] ?? [:]
@@ -79,7 +79,7 @@ enum ClaudeUsageMapper {
                 let name = ClaudeValue.text(model["display_name"]) ?? ClaudeValue.text(model["id"])
                 let scopeData = try JSONSerialization.data(withJSONObject: scope, options: .sortedKeys)
                 id = kind + "_" + String(ClaudeValue.fingerprint(scopeData).prefix(16))
-                label = name.map { "周 · \($0)" } ?? title(kind)
+                label = name.map { String(format: L("channel.weekScoped", "Weekly · %@"), $0) } ?? title(kind)
                 channel = .other
             }
             guard let row = try window(id: id, title: label, channel: channel, node: node,
@@ -140,15 +140,16 @@ enum ClaudeUsageMapper {
         return QuotaWindow(id: id, provider: .claude, channel: channel, title: title,
                            percent: expired ? nil : pct, severity: expired ? .normal : Severity(word: word),
                            resetsAt: reset, isActive: node["is_active"] as? Bool ?? false,
-                           note: expired ? "待确认" : nil, observedAt: now, gradedBy: known ? .server : .local,
+                           note: expired ? L("note.unconfirmed", "unconfirmed") : nil, observedAt: now, gradedBy: known ? .server : .local,
                            isStale: expired, confirmedExhausted: !expired && ((pct ?? 0) >= 100 || ["exhausted", "rejected"].contains(word ?? "")),
                            windowLength: channel == .session ? 18000 : 604800)
     }
 
     private static func title(_ id: String) -> String {
-        if id == "five_hour" { return "五小时窗口" }
-        if id == "seven_day" { return "周窗口" }
-        return id.replacingOccurrences(of: "seven_day_", with: "周 · ")
+        if id == "five_hour" { return L("channel.session", "5-hour window") }
+        if id == "seven_day" { return L("channel.week", "Weekly window") }
+        return id.replacingOccurrences(of: "seven_day_",
+                                      with: String(format: L("channel.weekScoped", "Weekly · %@"), ""))
             .replacingOccurrences(of: "_", with: " ").capitalized
     }
 }

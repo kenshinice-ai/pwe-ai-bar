@@ -60,14 +60,14 @@ struct TrophyView: View {
     private var hero: some View {
         VStack(alignment: .leading, spacing: Theme.s3) {
             HStack(alignment: .firstTextBaseline) {
-                Text("\(t.range.label) · \(t.days) 个活跃日".uppercased()).brandLabel()
+                Text(String(format: L("trophy.rangeDays", "%@ · %d active days"), t.range.label, t.days).uppercased()).brandLabel()
                     .foregroundStyle(Theme.hex(Theme.textDark2))
                 Spacer(minLength: Theme.s2)
                 rangePicker
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("等效 API 成本".uppercased()).brandLabel()
+                Text(L("trophy.equivalentCost", "Equivalent API cost").uppercased()).brandLabel()
                     .foregroundStyle(Theme.hex(Theme.textDark2))
                 Text(money(t.equivalentUSD))
                     .font(Theme.figures(46)).foregroundStyle(Theme.hex(Theme.amber))
@@ -79,23 +79,25 @@ struct TrophyView: View {
             if let sub = t.subscriptionMonthly {
                 HStack(alignment: .firstTextBaseline, spacing: Theme.s2) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("回本".uppercased()).brandLabel()
+                        Text(L("score.multiple", "Return").uppercased()).brandLabel()
                             .foregroundStyle(Theme.hex(Theme.textDark2))
-                        Text(t.multiple >= 1 ? "\(Int(t.multiple.rounded()))×" : "不到 1×")
+                        Text(t.multiple >= 1 ? "\(Int(t.multiple.rounded()))×" : L("trophy.underOne", "under 1×"))
                             .font(Theme.figures(30)).foregroundStyle(Theme.hex(Theme.amber))
                     }
                     Spacer(minLength: 0)
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text("\(sub.display) · \(amount(sub.monthly, sub.currency))/月")
+                        Text(String(format: L("trophy.planPerMonth", "%@ · %@/mo"), sub.display,
+                                    amount(sub.monthly, sub.currency)))
                             .font(Theme.sans(12, 500)).foregroundStyle(Theme.hex(Theme.textDark))
-                        Text("同期 \(amount(sub.monthly * Double(max(t.days, 1)) / 30, sub.currency))")
+                        Text(String(format: L("trophy.sameSpan", "%@ over the same span"),
+                                    amount(sub.monthly * Double(max(t.days, 1)) / 30, sub.currency)))
                             .font(Theme.figures(12)).foregroundStyle(Theme.hex(Theme.textDark2))
                     }
                 }
             } else {
                 // No invented price, and therefore no multiple. A ratio reads exactly as
                 // confidently whether or not anyone checked the number under it.
-                Text("设置里填上你的订阅价格，才能算回本")
+                Text(L("trophy.needPrice", "Set your subscription price in settings to see the return"))
                     .font(Theme.sans(12)).foregroundStyle(Theme.hex(Theme.textDark2))
             }
         }
@@ -122,7 +124,8 @@ struct TrophyView: View {
             }
             .frame(height: 29)
             if t.subscriptionMonthly != nil {
-                Text("上：等效 API 成本　下：同期订阅，同一比例")
+                Text(L("trophy.barLegend",
+                       "Above: equivalent API cost.  Below: the subscription over the same span, same scale"))
                     .font(Theme.sans(10.5)).foregroundStyle(Theme.hex(Theme.textDark2))
             }
         }
@@ -157,7 +160,7 @@ struct TrophyView: View {
 
     private var byModel: some View {
         VStack(alignment: .leading, spacing: Theme.s2) {
-            Text("按模型".uppercased()).brandLabel().foregroundStyle(Theme.text2)
+            Text(L("trophy.byModel", "By model").uppercased()).brandLabel().foregroundStyle(Theme.text2)
             GeometryReader { g in
                 HStack(spacing: 0) {
                     ForEach(Array(t.byModel.enumerated()), id: \.offset) { i, m in
@@ -174,7 +177,7 @@ struct TrophyView: View {
                             .frame(width: 9, height: 9)
                         Text(short(m.model)).font(Theme.sans(12)).foregroundStyle(Theme.text)
                             .lineLimit(1).truncationMode(.middle)
-                        Text("\(m.turns) 次").font(Theme.figures(11, 400))
+                        Text(String(format: L("trophy.turns", "%d turns"), m.turns)).font(Theme.figures(11, 400))
                             .foregroundStyle(Theme.text2)
                         Spacer()
                         Text(money(m.usd)).font(Theme.figures(12, 500)).foregroundStyle(Theme.text)
@@ -186,7 +189,7 @@ struct TrophyView: View {
 
     private var byDay: some View {
         VStack(alignment: .leading, spacing: Theme.s2) {
-            Text("按天".uppercased()).brandLabel().foregroundStyle(Theme.text2)
+            Text(L("trophy.byDay", "By day").uppercased()).brandLabel().foregroundStyle(Theme.text2)
             let peak = max(t.byDay.map(\.usd).max() ?? 1, 0.01)
             HStack(alignment: .bottom, spacing: 3) {
                 ForEach(Array(t.byDay.enumerated()), id: \.offset) { _, d in
@@ -197,13 +200,13 @@ struct TrophyView: View {
             .frame(height: 48)
             if let first = t.byDay.first?.day, let last = t.byDay.last?.day {
                 HStack(spacing: 4) {
-                    Text("\(first) 至 \(last) · \(t.byDay.count) 个活跃日")
+                    Text(String(format: L("trophy.dayRange", "%@ to %@ · %d active days"), first, last, t.byDay.count))
                         .font(Theme.sans(11)).foregroundStyle(Theme.text2)
                     Spacer(minLength: Theme.s1)
                     // Same reason the hourly chart needed one: without the tallest bar's value
                     // the row is a silhouette, and every silhouette looks the same.
                     if let top = t.byDay.max(by: { $0.usd < $1.usd }), top.usd > 0 {
-                        Text("最高 \(money(top.usd)) · \(top.day)")
+                        Text(String(format: L("trophy.dayPeak", "peak %@ · %@"), money(top.usd), top.day))
                             .font(Theme.figures(11, 500)).foregroundStyle(Theme.text)
                     }
                 }
@@ -212,8 +215,12 @@ struct TrophyView: View {
     }
 
     private var tokens: some View {
-        let parts: [(String, Int)] = [("输入", t.tokens.input), ("输出", t.tokens.output),
-                                      ("缓存写", t.tokens.cacheWrite), ("缓存读", t.tokens.cacheRead)]
+        let parts: [(String, Int)] = [
+            (L("tokens.input", "Input"), t.tokens.input),
+            (L("tokens.output", "Output"), t.tokens.output),
+            (L("tokens.cacheWrite", "Cache write"), t.tokens.cacheWrite),
+            (L("tokens.cacheRead", "Cache read"), t.tokens.cacheRead),
+        ]
         let total = max(parts.reduce(0) { $0 + $1.1 }, 1)
         return VStack(alignment: .leading, spacing: Theme.s2) {
             Text("Token".uppercased()).brandLabel().foregroundStyle(Theme.text2)
@@ -234,7 +241,7 @@ struct TrophyView: View {
                 grid(part.0, part.1, share: Double(part.1) / Double(total), swatch: tokenColour(i))
             }
             Divider().overlay(Theme.hairline)
-            grid("往返", t.turns, raw: true)
+            grid(L("tokens.roundTrips", "Round trips"), t.turns, raw: true)
         }
     }
 

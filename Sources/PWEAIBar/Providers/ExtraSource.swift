@@ -28,9 +28,9 @@ enum ExtraSource {
 
         var word: String {
             switch self {
-            case .notInstalled:        return "未安装"
-            case .signedOut:           return "未登录"
-            case .connected:           return "已连接"
+            case .notInstalled:        return L("detected.absent", "not installed")
+            case .signedOut:           return L("detected.signedOut", "signed out")
+            case .connected:           return L("detected.connected", "connected")
             case .unavailable(let w):  return w
             case .unsupported(let w):  return w
             }

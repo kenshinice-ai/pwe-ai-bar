@@ -106,12 +106,16 @@ final class RuleEngine {
             if let at = state.pendingResets[key], at <= date {
                 if fresh, w.observedAt >= at, w.band == .calm, w.percent != nil {
                     enqueue(Alert(id: "reset:\(key):\(at.timeIntervalSince1970)", kind: .reset,
-                                  title: "额度已重置", body: "\(w.provider.name) \(w.title)已重置，可以继续了",
+                                  title: L("alert.reset.title", "Quota reset"),
+                                  body: String(format: L("alert.reset.body", "%@ %@ has reset — you can carry on"),
+                                               w.provider.name, w.title),
                                   provider: w.provider, urgent: false, subject: key, createdAt: date))
                 } else if date.timeIntervalSince(at) >= 120 {
                     enqueue(Alert(id: "reset-expected:\(key):\(at.timeIntervalSince1970)", kind: .resetExpected,
-                                  title: "额度应该重置了",
-                                  body: "\(w.provider.name) \(w.title)的重置时间已过，新读数到了再确认",
+                                  title: L("alert.shouldReset.title", "The quota should have reset"),
+                                  body: String(format: L("alert.shouldReset.body",
+                                                         "%@ %@ is past its reset time — waiting on a fresh reading"),
+                                               w.provider.name, w.title),
                                   provider: w.provider, urgent: false, subject: key, createdAt: date))
                 }
             }
@@ -119,13 +123,18 @@ final class RuleEngine {
             let wasExhausted = seen.exhausted
             if w.confirmedExhausted, !wasExhausted {
                 enqueue(Alert(id: "exhausted:\(key):\(w.observedAt.timeIntervalSince1970)", kind: .exhausted,
-                              title: "\(w.provider.name) \(w.title)已用尽", body: resetText(w, at: date),
+                              title: String(format: L("alert.spent.title", "%@ %@ is spent"), w.provider.name, w.title),
+                              body: resetText(w, at: date),
                               provider: w.provider, urgent: true, subject: key, createdAt: date))
             } else if w.band > previous, w.band >= .warm {
                 let value = Readout.text(w, remaining: remaining())
                 enqueue(Alert(id: "threshold:\(key):\(w.observedAt.timeIntervalSince1970)", kind: .threshold,
-                              title: "\(w.provider.name) \(w.title)\(w.band == .hot ? "接近上限" : "额度预警")",
-                              body: "\(remaining() ? "剩余" : "已用") \(value) · \(resetText(w, at: date))",
+                              title: String(format: w.band == .hot ? L("alert.nearLimit", "%@ %@ is near its limit")
+                                                                  : L("alert.warning", "%@ %@ quota warning"),
+                                            w.provider.name, w.title),
+                              body: String(format: L("alert.body", "%@ %@ · %@"),
+                                           remaining() ? Readout.label.remaining : Readout.label.used,
+                                           value, resetText(w, at: date)),
                               provider: w.provider, urgent: w.band == .hot, subject: key, createdAt: date), quiet: true)
             }
         }
@@ -144,11 +153,13 @@ final class RuleEngine {
             let kind: Alert.Kind
             let title: String
             switch e.kind {
-            case .waiting: kind = .waiting; title = "\(e.provider.name) 在等你"
+            case .waiting:
+                kind = .waiting
+                title = String(format: L("panel.waiting.provider", "%@ is waiting on your reply"), e.provider.name)
             case .finished:
                 guard isAway else { continue }
-                kind = .finished; title = "任务完成"
-            case .failed: kind = .failed; title = "会话出错"
+                kind = .finished; title = L("alert.finished", "Task finished")
+            case .failed: kind = .failed; title = L("alert.failed", "The session hit an error")
             case .answered: continue
             }
             enqueue(Alert(id: "event:\(e.key)", kind: kind, title: title, body: e.text,
@@ -198,8 +209,8 @@ final class RuleEngine {
     }
 
     private func resetText(_ w: QuotaWindow, at date: Date) -> String {
-        guard let at = w.resetsAt, at > date else { return "留意剩余额度" }
+        guard let at = w.resetsAt, at > date else { return L("alert.watchQuota", "Keep an eye on what is left") }
         let mins = max(1, Int(ceil(at.timeIntervalSince(date) / 60)))
-        return "\(mins) 分钟后重置"
+        return String(format: L("reset.minThen", "resets in %d min"), mins)
     }
 }

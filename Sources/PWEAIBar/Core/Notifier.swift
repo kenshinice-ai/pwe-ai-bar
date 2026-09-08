@@ -59,7 +59,7 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         c.setNotificationCategories([
             UNNotificationCategory(identifier: "attention",
                                    actions: [UNNotificationAction(identifier: "open",
-                                                                  title: "去看看",
+                                                                  title: L("panel.goLook", "Take a look ›"),
                                                                   options: [.foreground])],
                                    intentIdentifiers: [])
         ])
@@ -116,8 +116,8 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         let after = await center.notificationSettings()
         print("现在状态   \(Self.word(after.authorizationStatus))")
         let content = UNMutableNotificationContent()
-        content.title = "PWE AI Bar 自检"
-        content.body = "这条能看到，说明通知这条路是通的。"
+        content.title = L("notify.selfCheck.title", "PWE AI Bar self-check")
+        content.body = L("notify.selfCheck.body", "If you can see this, the notification path works.")
         do {
             try await center.add(UNNotificationRequest(identifier: "pwe-selftest",
                                                        content: content, trigger: nil))
@@ -129,12 +129,12 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
 
     static func word(_ status: UNAuthorizationStatus) -> String {
         switch status {
-        case .authorized: return "已授权"
-        case .denied: return "已拒绝"
-        case .notDetermined: return "尚未询问"
-        case .provisional: return "临时授权"
-        case .ephemeral: return "短期授权"
-        @unknown default: return "未知(\(status.rawValue))"
+        case .authorized: return L("auth.granted", "granted")
+        case .denied: return L("auth.denied", "denied")
+        case .notDetermined: return L("auth.notAsked", "not asked yet")
+        case .provisional: return L("auth.provisional", "provisional")
+        case .ephemeral: return L("auth.ephemeral", "ephemeral")
+        @unknown default: return String(format: L("auth.unknown", "unknown (%d)"), status.rawValue)
         }
     }
 

@@ -68,7 +68,7 @@ enum ExtraProviders {
     static func outcome(_ answer: (status: Int, body: Data)?,
                                 map: ([String: Any]) -> ExtraSource.Reading?) -> ExtraSource.Reading {
         guard let answer else {
-            return ExtraSource.Reading(connection: .unavailable("暂时读不到，稍后重试"))
+            return ExtraSource.Reading(connection: .unavailable(L("extra.unavailable", "No reading just now — retrying later")))
         }
         if answer.status == 401 || answer.status == 403 {
             return ExtraSource.Reading(connection: .signedOut)
@@ -76,10 +76,10 @@ enum ExtraProviders {
         guard (200..<300).contains(answer.status),
               let root = try? JSONSerialization.jsonObject(with: answer.body) as? [String: Any]
         else {
-            return ExtraSource.Reading(connection: .unavailable("接口返回 \(answer.status)"))
+            return ExtraSource.Reading(connection: .unavailable(String(format: L("extra.httpStatus", "the endpoint returned %d"), answer.status)))
         }
         guard var reading = map(root) else {
-            return ExtraSource.Reading(connection: .unsupported("这个账户没有可读的额度"))
+            return ExtraSource.Reading(connection: .unsupported(L("extra.noQuota", "this account exposes no readable quota")))
         }
         reading.connection = .connected
         return reading
@@ -114,7 +114,7 @@ enum ExtraProviders {
             guard root["enabled"] as? Bool != false,
                   let usage = ExtraSource.object(root["planUsage"]) else { return nil }
             let reset = ExtraSource.date(root["billingCycleEnd"])
-            let windows = [("total", "本期额度", usage["totalPercentUsed"]),
+            let windows = [("total", L("extra.periodQuota", "This period"), usage["totalPercentUsed"]),
                            ("auto", "Auto", usage["autoPercentUsed"]),
                            ("api", "API", usage["apiPercentUsed"])].compactMap {
                 window($0.0, .cursor, $0.1, used: ExtraSource.number($0.2), resetsAt: reset, now: now)
@@ -134,7 +134,7 @@ enum ExtraProviders {
             guard let usage = ExtraSource.request(
                 "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage",
                 method: "POST", headers: headers, body: Data("{}".utf8)) else {
-                return ExtraSource.Reading(connection: .unavailable("请求构造失败"))
+                return ExtraSource.Reading(connection: .unavailable(L("extra.badRequest", "could not build the request")))
             }
             var reading = outcome(await ExtraSource.send(usage, via: transport)) {
                 map($0, now: now())
@@ -183,7 +183,7 @@ enum ExtraProviders {
                           "Editor-Plugin-Version": "copilot-chat/0.26.7",
                           "User-Agent": "GitHubCopilotChat/0.26.7",
                           "X-Github-Api-Version": "2025-04-01"]) else {
-                return ExtraSource.Reading(connection: .unavailable("请求构造失败"))
+                return ExtraSource.Reading(connection: .unavailable(L("extra.badRequest", "could not build the request")))
             }
             return outcome(await ExtraSource.send(request, via: transport)) { map($0, now: now()) }
         }
@@ -252,7 +252,7 @@ enum ExtraProviders {
                     method: "POST",
                     headers: ["Content-Type": "application/json", "Connect-Protocol-Version": "1"],
                     body: body) else {
-                return ExtraSource.Reading(connection: .unavailable("请求构造失败"))
+                return ExtraSource.Reading(connection: .unavailable(L("extra.badRequest", "could not build the request")))
             }
             return outcome(await ExtraSource.send(request, via: transport)) { map($0, now: now()) }
         }
@@ -265,13 +265,13 @@ enum ExtraProviders {
             // Devin reports what is left; everything here stores what is spent.
             if info["hideDailyQuota"] as? Bool != true,
                let left = ExtraSource.number(plan["dailyQuotaRemainingPercent"]),
-               let row = window("daily", .devin, "每日额度", used: 100 - left,
+               let row = window("daily", .devin, L("extra.daily", "Daily quota"), used: 100 - left,
                                 resetsAt: ExtraSource.date(plan["dailyQuotaResetAtUnix"]),
                                 now: now, length: 86400) {
                 windows.append(row)
             }
             if let left = ExtraSource.number(plan["weeklyQuotaRemainingPercent"]),
-               let row = window("weekly", .devin, "每周额度", used: 100 - left,
+               let row = window("weekly", .devin, L("extra.weekly", "Weekly quota"), used: 100 - left,
                                 resetsAt: ExtraSource.date(plan["weeklyQuotaResetAtUnix"]),
                                 now: now, length: 7 * 86400) {
                 windows.append(row)
@@ -299,7 +299,7 @@ enum ExtraProviders {
                   // Only the weekly period is a quota window; anything else is a billing cycle
                   // we would be mislabelling as one.
                   (period["type"] as? String) == "USAGE_PERIOD_TYPE_WEEKLY",
-                  let row = window("weekly", .grok, "每周额度",
+                  let row = window("weekly", .grok, L("extra.weekly", "Weekly quota"),
                                    used: ExtraSource.number(config["creditUsagePercent"]),
                                    resetsAt: ExtraSource.date(period["end"]), now: now,
                                    length: 7 * 86400)
@@ -314,7 +314,7 @@ enum ExtraProviders {
                            "Accept": "application/json"]
             guard let request = ExtraSource.request(
                 "https://cli-chat-proxy.grok.com/v1/billing?format=credits", headers: headers) else {
-                return ExtraSource.Reading(connection: .unavailable("请求构造失败"))
+                return ExtraSource.Reading(connection: .unavailable(L("extra.badRequest", "could not build the request")))
             }
             var reading = outcome(await ExtraSource.send(request, via: transport)) {
                 map($0, now: now())
@@ -390,7 +390,7 @@ enum ExtraProviders {
                 guard (200..<300).contains(answer.status) else { continue }
                 return outcome(answer) { map($0, now: now()) }
             }
-            return ExtraSource.Reading(connection: .unavailable("暂时读不到，稍后重试"))
+            return ExtraSource.Reading(connection: .unavailable(L("extra.unavailable", "No reading just now — retrying later")))
         }
     }
 }

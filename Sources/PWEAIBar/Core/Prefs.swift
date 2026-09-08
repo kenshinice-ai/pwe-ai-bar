@@ -5,19 +5,29 @@ import ServiceManagement
 enum MenuBarMode: String, CaseIterable, Identifiable {
     case icon, compact, full
     var id: String { rawValue }
-    var label: String { ["icon": "图标", "compact": "紧凑", "full": "完整"][rawValue]! }
+    var label: String {
+        [L("mode.icon", "Icon"), L("mode.compact", "Compact"), L("mode.full", "Full")][index]
+    }
+    private var index: Int { ["icon": 0, "compact": 1, "full": 2][rawValue]! }
 }
 
 enum PanelMode: String, CaseIterable, Identifiable {
     case lean, standard, full
     var id: String { rawValue }
-    var label: String { ["lean": "精简", "standard": "标准", "full": "完整"][rawValue]! }
+    var label: String {
+        [L("mode.lean", "Lean"), L("mode.standard", "Standard"), L("mode.full", "Full")][index]
+    }
+    private var index: Int { ["lean": 0, "standard": 1, "full": 2][rawValue]! }
 }
 
 enum AlertPlacement: String, CaseIterable, Identifiable {
     case menubar, notch, center
     var id: String { rawValue }
-    var label: String { ["menubar": "菜单栏", "notch": "刘海", "center": "通知中心"][rawValue]! }
+    var label: String {
+        [L("place.menubar", "Menu bar"), L("place.notch", "Notch"),
+         L("place.center", "Notification Centre")][index]
+    }
+    private var index: Int { ["menubar": 0, "notch": 1, "center": 2][rawValue]! }
 }
 
 /// User-facing settings. Density is a preference, not a house opinion: some people want every

@@ -89,7 +89,7 @@ struct Pricing: Codable {
     func subscription(planKey: String?, currency: String,
                       override: Double?, overrideUSD: Double?) -> Subscription? {
         let plan = planKey.flatMap { subscriptions?.plans[$0] }
-        let display = plan?.display ?? planKey ?? "订阅"
+        let display = plan?.display ?? planKey ?? L("pricing.subscription", "Subscription")
         let shown = override ?? plan?.amount(currency)
         let usd = overrideUSD ?? plan?.USD ?? (currency == "USD" ? shown : nil)
         guard let shown, let usd, shown > 0, usd > 0 else { return nil }

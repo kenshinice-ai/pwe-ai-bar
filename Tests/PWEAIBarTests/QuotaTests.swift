@@ -46,7 +46,7 @@ final class QuotaTests: XCTestCase {
         _ = try space.file("s.jsonl", codexLine(at: clock.date.addingTimeInterval(-10), reset: clock.date.addingTimeInterval(-1)))
         let rows = await CodexProvider(root: space.root, now: { clock.date }).windows()
         let row = try XCTUnwrap(rows.first)
-        XCTAssertNil(row.percent); XCTAssertEqual(Readout.text(row, remaining: true), "待确认")
+        XCTAssertNil(row.percent); XCTAssertEqual(Readout.text(row, remaining: true), "unconfirmed")
         XCTAssertTrue(row.isStale); XCTAssertFalse(row.canNotify(at: clock.date))
     }
 
@@ -111,7 +111,7 @@ final class QuotaTests: XCTestCase {
         XCTAssertEqual(reading.planType, "team")
         XCTAssertEqual(reading.resetCredits, 2)
         XCTAssertEqual(reading.windows.map(\.percent), [83, 44, nil])
-        XCTAssertEqual(reading.windows.map(\.title), ["五小时窗口", "周窗口", "附加额度"])
+        XCTAssertEqual(reading.windows.map(\.title), ["5-hour window", "Weekly window", "Extra credits"])
         XCTAssertEqual(reading.windows.map(\.id), ["codex_300", "codex_10080", "codex_credits"])
         // The spent add-on pool is its own row, never the quota's headline.
         XCTAssertFalse(reading.windows[0].confirmedExhausted)
@@ -274,7 +274,7 @@ final class QuotaTests: XCTestCase {
         clock.date.addTimeInterval(3600)
         let expired = await codex.windows()
         XCTAssertNil(expired.first?.percent)
-        XCTAssertEqual(expired.first?.note, "待确认")
+        XCTAssertEqual(expired.first?.note, "unconfirmed")
         XCTAssertFalse(expired.first?.confirmedExhausted ?? true)
     }
 

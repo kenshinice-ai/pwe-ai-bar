@@ -10,13 +10,14 @@ final class TokenEditor: ObservableObject {
 
     init(hasToken: Bool) {
         self.hasToken = hasToken
-        self.message = hasToken ? "令牌已保存，有效性以额度连接结果为准" : ""
+        self.message = hasToken
+            ? L("token.stored", "A token is saved; the quota connection decides whether it works") : ""
     }
 
     @discardableResult
     func submit(_ value: String, save: (String) async -> ClaudeProvider.TokenUpdate) async -> Bool {
         guard !isSaving else { return false }
-        isSaving = true; message = "正在保存并验证…"
+        isSaving = true; message = L("token.saving", "Saving and verifying…")
         defer { isSaving = false }
         let result = await save(value)
         message = result.message

@@ -207,14 +207,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showMenu() {
         closePopover()
         let menu = NSMenu()
-        let refresh = menu.addItem(withTitle: "立即刷新", action: #selector(refreshNow), keyEquivalent: "r")
+        let refresh = menu.addItem(withTitle: L("menu.refreshNow", "Refresh now"), action: #selector(refreshNow), keyEquivalent: "r")
         refresh.target = self
-        let trophy = menu.addItem(withTitle: "战绩…", action: #selector(showTrophy), keyEquivalent: "")
+        let trophy = menu.addItem(withTitle: L("menu.trophy", "Trophy…"), action: #selector(showTrophy), keyEquivalent: "")
         trophy.target = self
-        let settings = menu.addItem(withTitle: "设置…", action: #selector(showSettings), keyEquivalent: ",")
+        let settings = menu.addItem(withTitle: L("menu.settings", "Settings…"), action: #selector(showSettings), keyEquivalent: ",")
         settings.target = self
         menu.addItem(.separator())
-        menu.addItem(withTitle: "退出 PWE AI Bar",
+        menu.addItem(withTitle: L("menu.quitNamed", "Quit PWE AI Bar"),
                      action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
@@ -235,7 +235,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             w.contentView = NSHostingView(rootView: view)
             present(w); return
         }
-        let w = panelWindow(title: "战绩", size: NSSize(width: 460, height: 620))
+        let w = panelWindow(title: L("window.trophy", "Trophy"), size: NSSize(width: 460, height: 620))
         w.contentView = NSHostingView(rootView: view)
         trophyWindow = w
         present(w)
@@ -254,7 +254,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             w.contentView = NSHostingView(rootView: view)
             present(w); return
         }
-        let w = panelWindow(title: "设置", size: NSSize(width: 380, height: 560))
+        let w = panelWindow(title: L("window.settings", "Settings"), size: NSSize(width: 380, height: 560))
         w.contentView = NSHostingView(rootView: view)
         settingsWindow = w
         present(w)
@@ -308,9 +308,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let main = NSMenu()
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "设置…", action: #selector(showSettings), keyEquivalent: ",").target = self
+        appMenu.addItem(withTitle: L("menu.settings", "Settings…"), action: #selector(showSettings), keyEquivalent: ",").target = self
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "退出", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: L("menu.quit", "Quit"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         main.addItem(appItem)
 

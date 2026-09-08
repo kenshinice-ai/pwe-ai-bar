@@ -62,7 +62,8 @@ final class RuleTests: XCTestCase {
         clock.date = reset.addingTimeInterval(180)
         let alerts = rules.evaluate(snap)
         XCTAssertEqual(alerts.map(\.kind), [.resetExpected])
-        XCTAssertTrue(alerts[0].body.contains("确认"), "the wording must not claim a measurement")
+        XCTAssertTrue(alerts[0].body.contains("waiting on a fresh reading"),
+                      "the wording must not claim a measurement")
         XCTAssertEqual(rules.evaluate(snap).map(\.id), alerts.map(\.id), "queued until the OS takes it")
         rules.acknowledge(alerts[0])
         XCTAssertTrue(rules.evaluate(snap).isEmpty)
@@ -186,7 +187,7 @@ final class RuleTests: XCTestCase {
         let alerts = after.evaluate(window(100))
         XCTAssertEqual(alerts.map(\.kind), [.exhausted])
         XCTAssertTrue(alerts[0].urgent)
-        XCTAssertTrue(alerts[0].title.contains("用尽"))
+        XCTAssertTrue(alerts[0].title.contains("spent"))
         after.acknowledge(alerts[0])
 
         // Still spent is not news, and neither is another relaunch.
