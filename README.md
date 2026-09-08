@@ -178,9 +178,15 @@ open "build/PWE AI Bar.app"
 
 ## 许可
 
-版权归 PWE Group Pty Ltd 所有。源码公开供阅读与审计 —— 这个 app 会读你的凭据，
-所以你应该能亲眼确认它拿这些凭据做了什么。尚未附加开源许可证；
-需要在自己的项目里使用其中任何部分，请先联系。
+源码按 [MIT](LICENSE) 授权 —— 这个 app 会读你的凭据，所以你应该能亲眼确认它拿这些凭据
+做了什么，并且能自己构建一份来核对。
+
+**品牌不在授权范围内**：名称、翼形标识与其向量数据、应用图标、以及那句 slogan。
+你可以 fork、修改、再分发，但再分发的构建不能带着翼标、也不能用 PWE 或
+Paradise Production 的名字让人以为那是官方版本 —— 把 `Sources/PWEAIBar/Brand/`
+和应用名换成你自己的。
+
+内置的 Inter 与 Playfair Display 两个字体不归我们授权，它们是 SIL OFL 1.1。
 
 PWE Studio 菜单栏家族的第四位，接在 Loan Bar、Lumen Bar、MAC MONITOR 之后 ——
 全部在 [pwestudio.site](https://pwestudio.site)。

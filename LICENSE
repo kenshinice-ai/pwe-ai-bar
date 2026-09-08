@@ -1,0 +1,69 @@
+MIT License
+
+Copyright (c) 2026 PWE Group Pty Ltd (Paradise Production / 天域文创)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+TRADEMARKS AND BRAND ASSETS — NOT COVERED BY THE LICENSE ABOVE
+
+The MIT licence above applies to the source code. It does not grant any right
+to use the names, logos, or brand assets of PWE Group Pty Ltd, including:
+
+  * the names "Paradise Production", "天域文创", "PWE", "PWE Studio" and
+    "PWE AI Bar";
+  * the Paradise wing mark, in any form — including the vector path data in
+    `Sources/PWEAIBar/Brand/BrandMark.swift`, the wing gauge derived from it in
+    `Sources/PWEAIBar/Brand/WingGauge.swift`, and the application icon
+    `Sources/PWEAIBar/Resources/AppIcon512.png`;
+  * the slogan "Create trust through clarity." / "用清晰创造信任。"
+
+You may fork, modify and redistribute this software under the MIT licence, but
+a redistributed build must not carry the Paradise wing mark or use the PWE or
+Paradise Production names in a way that suggests it is the official release.
+Replace the files in `Sources/PWEAIBar/Brand/` and the application name with
+your own.
+
+---
+
+BUNDLED FONTS
+
+`Sources/PWEAIBar/Resources/Inter.ttf` and `PlayfairDisplay.ttf` are not covered
+by the MIT licence above and are not ours to relicense. Both are licensed under
+the SIL Open Font License, Version 1.1, and carry that licence in their own
+metadata:
+
+  * Inter — Copyright 2016 The Inter Project Authors,
+    https://github.com/rsms/inter
+  * Playfair Display — Copyright 2017 The Playfair Display Project Authors,
+    https://github.com/clauseggers/Playfair
+
+Redistributing them, on their own or inside a build, is subject to the OFL:
+https://openfontlicense.org
+
+---
+
+THIRD-PARTY SERVICES
+
+This software reads quota information from services operated by other
+companies, using credentials those services' own tools have stored on the
+machine it runs on. It is not affiliated with, endorsed by, or sponsored by
+Anthropic, OpenAI, Anysphere, GitHub, Cognition, xAI, or Google, and the names
+of their products are used only to say which service a reading came from.
