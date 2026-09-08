@@ -52,8 +52,8 @@ swift test --disable-sandbox --scratch-path /private/tmp/pwe-audit-20260906-buil
 
 诊断程序通过 `@testable import PWEAIBar` 调用当前实现，凭据/网络由合成 exchange 替代，没有启动真实 Codex 查询。程序与结果已保存：
 
-- [AuditProbe.swift](</Users/leeliu/Documents/ClaudeProject/PWE AI Bar/docs/audits/2026-09-06/AuditProbe.swift>)
-- [synthetic-results.txt](</Users/leeliu/Documents/ClaudeProject/PWE AI Bar/docs/audits/2026-09-06/synthetic-results.txt>)
+- [AuditProbe.swift](<./docs/audits/2026-09-06/AuditProbe.swift>)
+- [synthetic-results.txt](<./docs/audits/2026-09-06/synthetic-results.txt>)
 
 | 场景 | 当前实际返回 | 判断 |
 | --- | --- | --- |
@@ -74,7 +74,7 @@ swift test --disable-sandbox --scratch-path /private/tmp/pwe-audit-20260906-buil
 
 主面板没有 `ScrollView` 或屏幕高度约束，1030pt 内容在较矮可用区域存在溢出/不可达风险；实际系统裁剪行为仍需真实 popover 验证。[PanelView:24][c-panel]
 
-合成面板截图：[七工具完整面板](</Users/leeliu/Documents/ClaudeProject/PWE AI Bar/docs/audits/2026-09-06/seven-providers-full.png>)。
+合成面板截图：[七工具完整面板](<./docs/audits/2026-09-06/seven-providers-full.png>)。
 
 另外检查了现有测试生成的设置与待确认面板，以及应用自带 `--endurance` 生成的状态样本。没有启动正常应用入口，避免触发真实登录读取、hook 更新或通知。
 
@@ -150,7 +150,7 @@ Claude 部分映射、Codex 在线/日志映射和其他工具共用窗口构造
 
 当前“够用”合成结果：
 
-![当前续航图，重置标线与文字不对齐；合成数据](/Users/leeliu/Documents/ClaudeProject/PWE AI Bar/docs/audits/2026-09-06/endurance-comfortable-dark.png)
+![当前续航图，重置标线与文字不对齐；合成数据](./docs/audits/2026-09-06/endurance-comfortable-dark.png)
 
 建议将主时间轴固定为“现在 → 本次重置”，重置始终在右端。预测耗尽发生在重置之前时画标记；重置之后仅显示“按当前节奏可到重置，预计剩余约 X%”。避免将重置后的理论耗尽时长用一个大数字表现成不中断的可用时间。
 
@@ -386,24 +386,24 @@ flowchart LR
 
 源码快速索引：[Store][c-store]、[AppShell][c-shell]、[PanelView][c-panel]、[EnduranceView][c-endurance]、[History][c-history]、[Model][c-burn]、[CodexProvider][c-codex]、[CodexAppServer][c-server]、[ExtraStore][c-extra-store]、[Settings][c-settings]。
 
-[c-store]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/Core/Store.swift:122>
-[c-cadence]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/Core/Store.swift:75>
-[c-shell]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/AppShell.swift:126>
-[c-prefwatch]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/AppShell.swift:43>
-[c-panel]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/App/PanelView.swift:24>
-[c-focus]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/App/PanelView.swift:401>
-[c-endurance]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/App/EnduranceView.swift:74>
-[c-axis]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/App/EnduranceView.swift:283>
-[c-history]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/Core/History.swift:44>
-[c-burn]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/Core/Model.swift:94>
-[c-codex]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/Providers/CodexProvider.swift:52>
-[c-server]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/Providers/CodexAppServer.swift:77>
-[c-extra-window]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/Providers/ExtraProviders.swift:88>
-[c-extra-store]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/Providers/ExtraProviders.swift:423>
-[c-settings]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/App/SettingsView.swift:224>
-[c-settings-init]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/App/SettingsView.swift:16>
-[c-transcript]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/Providers/Transcript.swift:21>
-[c-transcript-refresh]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/Providers/Transcript.swift:74>
-[c-cost]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/Providers/Transcript.swift:210>
-[c-pricing]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/Core/Pricing.swift:59>
-[c-hooktest]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Tests/PWEAIBarTests/HookTests.swift:149>
+[c-store]: <./Sources/PWEAIBar/Core/Store.swift:122>
+[c-cadence]: <./Sources/PWEAIBar/Core/Store.swift:75>
+[c-shell]: <./Sources/PWEAIBar/AppShell.swift:126>
+[c-prefwatch]: <./Sources/PWEAIBar/AppShell.swift:43>
+[c-panel]: <./Sources/PWEAIBar/App/PanelView.swift:24>
+[c-focus]: <./Sources/PWEAIBar/App/PanelView.swift:401>
+[c-endurance]: <./Sources/PWEAIBar/App/EnduranceView.swift:74>
+[c-axis]: <./Sources/PWEAIBar/App/EnduranceView.swift:283>
+[c-history]: <./Sources/PWEAIBar/Core/History.swift:44>
+[c-burn]: <./Sources/PWEAIBar/Core/Model.swift:94>
+[c-codex]: <./Sources/PWEAIBar/Providers/CodexProvider.swift:52>
+[c-server]: <./Sources/PWEAIBar/Providers/CodexAppServer.swift:77>
+[c-extra-window]: <./Sources/PWEAIBar/Providers/ExtraProviders.swift:88>
+[c-extra-store]: <./Sources/PWEAIBar/Providers/ExtraProviders.swift:423>
+[c-settings]: <./Sources/PWEAIBar/App/SettingsView.swift:224>
+[c-settings-init]: <./Sources/PWEAIBar/App/SettingsView.swift:16>
+[c-transcript]: <./Sources/PWEAIBar/Providers/Transcript.swift:21>
+[c-transcript-refresh]: <./Sources/PWEAIBar/Providers/Transcript.swift:74>
+[c-cost]: <./Sources/PWEAIBar/Providers/Transcript.swift:210>
+[c-pricing]: <./Sources/PWEAIBar/Core/Pricing.swift:59>
+[c-hooktest]: <./Tests/PWEAIBarTests/HookTests.swift:149>

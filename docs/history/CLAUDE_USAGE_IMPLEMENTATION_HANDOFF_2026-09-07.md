@@ -14,11 +14,11 @@
 
 ## 2. 产物
 
-- [Release 本机审阅包](</Users/leeliu/Documents/ClaudeProject/PWE AI Bar/build/claude-review/PWE AI Bar.app>)。
-- [验证摘要](</Users/leeliu/Documents/ClaudeProject/PWE AI Bar/docs/claude-usage-verification/2026-09-07/validation.txt>)。
-- [真实只读结果](</Users/leeliu/Documents/ClaudeProject/PWE AI Bar/docs/claude-usage-verification/2026-09-07/live-read-only.txt>)。
-- [成功浅色](</Users/leeliu/Documents/ClaudeProject/PWE AI Bar/docs/claude-usage-verification/2026-09-07/claude-live-light.png>)、[成功深色](</Users/leeliu/Documents/ClaudeProject/PWE AI Bar/docs/claude-usage-verification/2026-09-07/claude-live-dark.png>)。
-- [限流浅色](</Users/leeliu/Documents/ClaudeProject/PWE AI Bar/docs/claude-usage-verification/2026-09-07/claude-stale-light.png>)、[限流深色](</Users/leeliu/Documents/ClaudeProject/PWE AI Bar/docs/claude-usage-verification/2026-09-07/claude-stale-dark.png>)。
+- [Release 本机审阅包](<./build/claude-review/PWE AI Bar.app>)。
+- [验证摘要](<./docs/claude-usage-verification/2026-09-07/validation.txt>)。
+- [真实只读结果](<./docs/claude-usage-verification/2026-09-07/live-read-only.txt>)。
+- [成功浅色](<./docs/claude-usage-verification/2026-09-07/claude-live-light.png>)、[成功深色](<./docs/claude-usage-verification/2026-09-07/claude-live-dark.png>)。
+- [限流浅色](<./docs/claude-usage-verification/2026-09-07/claude-stale-light.png>)、[限流深色](<./docs/claude-usage-verification/2026-09-07/claude-stale-dark.png>)。
 
 四张截图都是合成数据。真实查询只输出状态、来源、窗口数量，不输出令牌、账号或服务器正文。审阅包采用 ad-hoc 签名，并非公证分发包。
 
@@ -102,7 +102,7 @@ Release 普通沙盒构建曾被 `dsymutil: Operation not permitted` 阻止；�
 ### 测试
 
 ```bash
-cd "/Users/leeliu/Documents/ClaudeProject/PWE AI Bar"
+cd "<仓库根目录>"
 CLANG_MODULE_CACHE_PATH=/private/tmp/pwe-claude-20260907/clang \
 SWIFT_MODULECACHE_PATH=/private/tmp/pwe-claude-20260907/swift \
 PWEBAR_TEST_ARTIFACTS=/private/tmp/pwe-claude-20260907/ui \

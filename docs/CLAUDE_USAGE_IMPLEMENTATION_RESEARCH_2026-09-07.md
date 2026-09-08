@@ -391,7 +391,7 @@ Claude Code                           Pro
 [O4]: https://code.claude.com/docs/en/commands
 [O5]: https://code.claude.com/docs/en/monitoring-usage
 [O6]: https://platform.claude.com/docs/en/manage-claude/usage-cost-api
-[P1]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/Providers/ClaudeProvider.swift:110>
-[P2]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/Providers/ClaudeProvider.swift:302>
-[P3]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/Providers/ClaudeProvider.swift:395>
-[P4]: </Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/Providers/Credentials.swift:209>
+[P1]: <./Sources/PWEAIBar/Providers/ClaudeProvider.swift:110>
+[P2]: <./Sources/PWEAIBar/Providers/ClaudeProvider.swift:302>
+[P3]: <./Sources/PWEAIBar/Providers/ClaudeProvider.swift:395>
+[P4]: <./Sources/PWEAIBar/Providers/Credentials.swift:209>

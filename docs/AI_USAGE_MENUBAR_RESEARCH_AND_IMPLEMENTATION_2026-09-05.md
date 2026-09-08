@@ -322,7 +322,7 @@ grant_type=refresh_token&client_id=app_EMoamEEZ73f0CkXaXp7hrann&refresh_token=<f
 
 ## 8. 对照当前 PWE AI Bar：已经有的与缺少的
 
-对照根目录：`/Users/leeliu/Documents/ClaudeProject/PWE AI Bar`。研究时 HEAD 为 `92edde19ce15b3ef1756c5eb4aae65bcc04ddf80`，但工作区有大量未提交修改，以下判断以当时实际文件内容为准，不能只从该 HEAD 重现。
+对照根目录：仓库根目录。研究时 HEAD 为 `92edde19ce15b3ef1756c5eb4aae65bcc04ddf80`，但工作区有大量未提交修改，以下判断以当时实际文件内容为准，不能只从该 HEAD 重现。
 
 | 部分 | 当前代码事实 | 方案 |
 | --- | --- | --- |
@@ -336,7 +336,7 @@ grant_type=refresh_token&client_id=app_EMoamEEZ73f0CkXaXp7hrann&refresh_token=<f
 | 状态模型 | `QuotaWindow` 已有 observedAt、isStale、gradedBy | 增加数据来源、账户与额度池标识、独立 credits 模型 |
 | 当前产品功能 | 已有 hooks、提醒、战绩与品牌 UI | 本次额度接入继续复用这些模块，不重写产品 |
 
-本地证据：[Credentials.swift](</Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/Providers/Credentials.swift:159>)、[ClaudeProvider.swift](</Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/Providers/ClaudeProvider.swift:99>)、[CodexProvider.swift](</Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/Providers/CodexProvider.swift:4>)、[Model.swift](</Users/leeliu/Documents/ClaudeProject/PWE AI Bar/Sources/PWEAIBar/Core/Model.swift:35>)。
+本地证据：[Credentials.swift](<./Sources/PWEAIBar/Providers/Credentials.swift:159>)、[ClaudeProvider.swift](<./Sources/PWEAIBar/Providers/ClaudeProvider.swift:99>)、[CodexProvider.swift](<./Sources/PWEAIBar/Providers/CodexProvider.swift:4>)、[Model.swift](<./Sources/PWEAIBar/Core/Model.swift:35>)。
 
 ### 8.1 需要同步修订的解释
 
@@ -475,7 +475,7 @@ ProviderSnapshot
 下一轮实施的基础命令，**本轮没有运行这些 build/test 命令**：
 
 ```bash
-cd "/Users/leeliu/Documents/ClaudeProject/PWE AI Bar"
+cd "<仓库根目录>"
 git status --short
 swift test
 ./scripts/build-app.sh

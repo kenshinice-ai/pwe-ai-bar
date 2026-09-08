@@ -2,7 +2,7 @@
 
 > 日期：2026-09-05（Australia/Melbourne）  
 > 审查基线：`92edde1` · `VERSION = 0.1.0`  
-> 项目：`/Users/leeliu/Documents/ClaudeProject/PWE AI Bar`  
+> 项目：仓库根目录  
 > 文档用途：交给 Astra 或其他执行代理，继续核查、修复和验收。  
 > 当前状态：已完成只读审查及隔离复现；尚未实施修复。本轮仅新增本文档。
 
