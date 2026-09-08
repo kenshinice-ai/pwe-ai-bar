@@ -32,14 +32,20 @@ var problems: [String] = []
 
 for path in swiftFiles("\(root)/Sources") {
     guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { continue }
-    for (n, rawLine) in text.components(separatedBy: "\n").enumerated() {
-        // Doc comments in Loc.swift spell out example calls; they are not call sites.
-        let t = rawLine.trimmingCharacters(in: .whitespaces)
-        if t.hasPrefix("//") || t.hasPrefix("*") { continue }
-        let r = NSRange(rawLine.startIndex..., in: rawLine)
-        for m in call.matches(in: rawLine, range: r) {
-            guard let k = Range(m.range(at: 1), in: rawLine), let v = Range(m.range(at: 2), in: rawLine) else { continue }
-            let key = String(rawLine[k]), value = String(rawLine[v])
+    // Scanned whole-file, not line by line. The call regex sets `.dotMatchesLineSeparators` so a
+    // call broken across two lines still matches — but a per-line loop could never hand it one,
+    // so every multi-line `L(` was invisible and its key looked like an orphan translation.
+    let full = NSRange(text.startIndex..., in: text)
+    for m in call.matches(in: text, range: full) {
+        guard let k = Range(m.range(at: 1), in: text), let v = Range(m.range(at: 2), in: text),
+              let whole = Range(m.range, in: text) else { continue }
+        // A commented-out example is not a call site; Loc.swift's own doc comments contain one.
+        let lineStart = text[..<whole.lowerBound].lastIndex(of: "\n").map { text.index(after: $0) } ?? text.startIndex
+        let lead = text[lineStart..<whole.lowerBound].trimmingCharacters(in: .whitespaces)
+        if lead.hasPrefix("//") || lead.hasPrefix("*") { continue }
+        do {
+            let key = String(text[k]), value = String(text[v])
+            let n = text[..<whole.lowerBound].filter { $0 == "\n" }.count
             let site = "\(path.replacingOccurrences(of: root + "/", with: "")):\(n + 1)"
             if let prior = english[key], prior != value {
                 problems.append("· key '\(key)' has two English texts:\n    \(whereUsed[key] ?? "?")  \"\(prior)\"\n    \(site)  \"\(value)\"")

@@ -154,13 +154,13 @@ struct PanelView: View {
             // it means nothing, and the section's own line already says what is wrong.
             if snap.stale, !snap.windows.isEmpty {
                 Circle().fill(Theme.accent).frame(width: 5, height: 5)
-                    .help("显示的是上一次成功读到的数字")
-                    .accessibilityLabel("数据可能已过时")
+                    .help(L("panel.stale.help", "Showing the last figure that was read successfully"))
+                    .accessibilityLabel(L("panel.stale.a11y", "The reading may be out of date"))
             }
             Button(action: onSettings) {
                 Image(systemName: "gearshape").font(.system(size: 11))
             }
-            .buttonStyle(.plain).foregroundStyle(Theme.text2).accessibilityLabel("设置")
+            .buttonStyle(.plain).foregroundStyle(Theme.text2).accessibilityLabel(L("panel.settings.a11y", "Settings"))
         }
         .padding(.horizontal, Theme.s3).padding(.vertical, 11)
     }
@@ -196,7 +196,9 @@ struct PanelView: View {
         Button { onOpen(e.provider) } label: {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline, spacing: Theme.s2) {
-                    Text(snap.waiting > 1 ? "\(snap.waiting) 个会话在等你" : "在等你回话")
+                    Text(snap.waiting > 1
+                         ? String(format: L("panel.waiting.many", "%d sessions are waiting on you"), snap.waiting)
+                         : L("panel.waiting.one", "Waiting on your reply"))
                         .font(Theme.figures(26)).foregroundStyle(Theme.accent)
                         .lineLimit(1).minimumScaleFactor(0.7)
                     Spacer(minLength: Theme.s1)
@@ -208,14 +210,16 @@ struct PanelView: View {
                     Text(e.text).font(Theme.sans(11)).foregroundStyle(Theme.text2)
                         .lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: Theme.s1)
-                    Text("去看看 ›").font(Theme.sans(11)).foregroundStyle(Theme.accent)
+                    Text(L("panel.goLook", "Take a look ›")).font(Theme.sans(11)).foregroundStyle(Theme.accent)
                 }
                 .padding(.top, Theme.s2)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(snap.waiting > 1 ? "\(snap.waiting) 个会话在等你回话" : "\(e.provider.name) 在等你回话")
+        .accessibilityLabel(snap.waiting > 1
+            ? String(format: L("panel.waiting.many", "%d sessions are waiting on you"), snap.waiting)
+            : String(format: L("panel.waiting.provider", "%@ is waiting on your reply"), e.provider.name))
     }
 
     private func clock(_ d: Date) -> String {
@@ -225,10 +229,13 @@ struct PanelView: View {
 
     private func span(_ seconds: TimeInterval) -> String {
         let s = max(0, Int(seconds))
-        if s < 3600 { return "\(max(1, s / 60)) 分钟" }
+        if s < 3600 { return String(format: L("dur.minutes", "%d min"), max(1, s / 60)) }
         let hours = s / 3600, minutes = (s % 3600) / 60
-        if s < 86400 { return minutes == 0 ? "\(hours) 小时" : "\(hours) 小时 \(minutes) 分" }
-        return "\(s / 86400) 天"
+        if s < 86400 {
+            return minutes == 0 ? String(format: L("dur.hours", "%d h"), hours)
+                                : String(format: L("dur.hoursMinutes", "%d h %d m"), hours, minutes)
+        }
+        return String(format: L("dur.days", "%d d"), s / 86400)
     }
 
     /// What to say when there is nothing to show. "读不到额度" is true and useless — each of
@@ -237,26 +244,32 @@ struct PanelView: View {
         let (headline, fix): (String, String?) = {
             switch store.blocker {
             case .needsSetup:
-                return ("读不到 Claude Code 的凭据", "下面是本地估算；可在设置里改用钥匙串授权")
+                return (L("empty.noCredential", "Cannot read the Claude Code credential"),
+                        L("empty.noCredential.fix",
+                          "Below is a local estimate; switch to keychain access in settings"))
             case .notLoggedIn:
-                return ("还没登录", "在终端运行 claude auth login")
+                return (L("empty.notLoggedIn", "Not signed in"),
+                        L("empty.notLoggedIn.fix", "Run claude auth login in a terminal"))
             case .keychainRefused:
                 // Re-logging in rewrites the keychain item through `security`, which is the one
                 // program allowed to read it back; editing an ACL by hand is four dialogs deep.
-                return ("钥匙串拒绝了访问", "重新运行 claude auth login 即可重建授权")
+                return (L("empty.keychainRefused", "The keychain refused access"),
+                        L("empty.keychainRefused.fix",
+                          "Running claude auth login again rebuilds the authorisation"))
             case .unauthorized, .forbidden, .network, .storage, .invalidResponse, .credentialsChanged:
-                return ("额度连接需要处理", store.blocker.message)
+                return (L("empty.needsAttention", "The quota connection needs attention"), store.blocker.message)
             case .expired:
                 // The old wording said opening Claude Code would renew it. Measured on this
                 // machine: the credential sat expired for seven and a half hours while Claude
                 // Code ran the whole time — the CLI does not rewrite that item on every refresh,
                 // so the advice sent people to do something that would not have worked.
-                return ("Claude 凭据已过期", store.blocker.message)
+                return (L("empty.expired", "The Claude credential has expired"), store.blocker.message)
             case .rateLimited(let until):
                 let m = max(1, Int(until.timeIntervalSinceNow / 60))
-                return ("接口限流中", "\(m) 分钟后自动重试")
+                return (L("empty.rateLimited", "Rate limited"),
+                        String(format: L("empty.rateLimited.fix", "Retrying automatically in %d min"), m))
             case .none:
-                return ("暂时读不到额度", nil)
+                return (L("empty.temporary", "No quota reading just now"), nil)
             }
         }()
         return VStack(alignment: .leading, spacing: 6) {
@@ -266,12 +279,12 @@ struct PanelView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if store.blocker == .unauthorized || store.blocker == .forbidden || store.blocker.isExpired {
-                Button("管理凭据", action: onSettings).font(Theme.sans(11.5))
+                Button(CTAAction.settings.title, action: onSettings).font(Theme.sans(11.5))
             }
             if store.blocker == .needsSetup || store.blocker == .keychainRefused {
-                Button("改用钥匙串授权") { onEnableQuota() }
+                Button(CTAAction.enableQuota.title) { onEnableQuota() }
                     .font(Theme.sans(11.5))
-                    .help("重新连接已保存的 Claude Code 登录；macOS 可能请求钥匙串授权")
+                    .help(CTAAction.enableQuota.help)
             }
         }
     }
@@ -318,13 +331,17 @@ struct PanelView: View {
                     Text(claudeStatus).font(Theme.sans(10)).foregroundStyle(Theme.text2)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 4)
-                    Button(store.claudeRefreshing ? "更新中…" : "刷新") { store.refreshClaudeOnly() }
+                    Button(store.claudeRefreshing ? L("panel.refreshing", "Updating…") : L("panel.refresh", "Refresh")) { store.refreshClaudeOnly() }
                         .font(Theme.sans(11)).disabled(store.claudeRefreshing)
-                        .accessibilityLabel("刷新 Claude 额度")
+                        .accessibilityLabel(L("panel.refresh.a11y", "Refresh the Claude quota"))
                 }
                 if let spend = snap.claudeDetails.spend {
-                    Text("额外消费 $" + NSDecimalNumber(decimal: spend.usedUSD).stringValue
-                         + (spend.limitUSD.map { " / 本期上限 $" + NSDecimalNumber(decimal: $0).stringValue } ?? "（未提供上限）"))
+                    Text(String(format: L("panel.extraSpend", "Extra spend $%@"),
+                                NSDecimalNumber(decimal: spend.usedUSD).stringValue)
+                         + (spend.limitUSD.map {
+                             String(format: L("panel.extraSpend.limit", " / $%@ cap this period"),
+                                    NSDecimalNumber(decimal: $0).stringValue)
+                           } ?? L("panel.extraSpend.noLimit", " (no cap given)")))
                         .font(Theme.sans(10.5)).foregroundStyle(Theme.text2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -348,22 +365,54 @@ struct PanelView: View {
     }
 
     private var claudeStatus: String {
-        let age = snap.claudeDetails.lastSuccessAt.map { ago($0) + "成功获取" } ?? "尚无成功读数"
-        let source = snap.claudeDetails.source == .ownToken ? "手动令牌" : "Claude Code 登录"
-        return source + " · " + age + (snap.stale ? " · 旧读数" : "")
+        let age = snap.claudeDetails.lastSuccessAt
+            .map { String(format: L("panel.readOk", "read %@"), ago($0)) }
+            ?? L("panel.readNever", "no successful read yet")
+        let source = snap.claudeDetails.source == .ownToken
+            ? L("panel.source.manual", "Manual token") : L("panel.source.cli", "Claude Code login")
+        return source + " · " + age + (snap.stale ? " · " + L("panel.staleTag", "stale") : "")
     }
 
-    private func ctaRow(_ cta: (text: String, button: String?)) -> some View {
+    /// What the call-to-action button does, as a case rather than as its own label.
+    ///
+    /// It used to branch on `title == "管理凭据"` — comparing the *displayed* text to decide the
+    /// behaviour. That works right up until the text is translated, at which point every button
+    /// silently takes the other branch. Localising this file without fixing it first would have
+    /// shipped a settings button that reconnects the keychain instead.
+    enum CTAAction {
+        case settings, enableQuota
+
+        var title: String {
+            switch self {
+            case .settings:    return L("cta.manageCredential", "Manage credential")
+            case .enableQuota: return L("cta.useKeychain", "Use keychain access")
+            }
+        }
+        var help: String {
+            switch self {
+            case .settings:
+                return L("cta.manageCredential.help", "Open settings to replace or clear the token")
+            case .enableQuota:
+                return L("cta.useKeychain.help",
+                         "Reconnect the saved Claude Code login; macOS may ask for keychain access")
+            }
+        }
+    }
+
+    private func ctaRow(_ cta: (text: String, action: CTAAction?)) -> some View {
         HStack(spacing: Theme.s2) {
             Text(cta.text).font(Theme.sans(11)).foregroundStyle(Theme.text2)
                 .fixedSize(horizontal: false, vertical: true).lineLimit(2)
             Spacer(minLength: Theme.s1)
-            if let title = cta.button {
-                Button(title) {
-                    if title == "管理凭据" { onSettings() } else { onEnableQuota() }
+            if let action = cta.action {
+                Button(action.title) {
+                    switch action {
+                    case .settings:    onSettings()
+                    case .enableQuota: onEnableQuota()
+                    }
                 }
-                    .font(Theme.sans(11))
-                    .help(title == "管理凭据" ? "打开设置以更换或清除令牌" : "重新连接 Claude Code 登录，macOS 可能请求授权")
+                .font(Theme.sans(11))
+                .help(action.help)
             }
         }
     }
@@ -393,7 +442,7 @@ struct PanelView: View {
             }
             if let c = snap.contextPercent {
                 HStack(spacing: 4) {
-                    Text("上下文").font(Theme.sans(10)).foregroundStyle(Theme.text2)
+                    Text(L("channel.context", "Context")).font(Theme.sans(10)).foregroundStyle(Theme.text2)
                     Text("\(Int((prefs.showRemaining ? 100 - c : c).rounded()))%")
                         .font(Theme.figures(11.5, 500)).foregroundStyle(Theme.text)
                 }
@@ -404,22 +453,30 @@ struct PanelView: View {
     }
 
     /// Nil once real quota is flowing.
-    private var claudeCallToAction: (text: String, button: String?)? {
+    private var claudeCallToAction: (text: String, action: CTAAction?)? {
         switch store.blocker {
-        case .unauthorized, .forbidden, .expired, .storage, .credentialsChanged: return (store.blocker.message, "管理凭据")
+        case .unauthorized, .forbidden, .expired, .storage, .credentialsChanged:
+            return (store.blocker.message, .settings)
         case .network, .invalidResponse: return (store.blocker.message, nil)
         case .rateLimited(let until):
-            return ("接口限流中，\(max(1, Int(ceil(until.timeIntervalSinceNow / 60)))) 分钟后可重试", nil)
+            return (String(format: L("cta.rateLimited", "Rate limited — retrying in %d min"),
+                           max(1, Int(ceil(until.timeIntervalSinceNow / 60)))), nil)
         default: break
         }
         guard snap.windows(of: .claude).isEmpty else { return nil }
         switch store.blocker {
-        case .needsSetup:      return ("只有本地估算，读不到 Claude Code 凭据", "处理")
-        case .keychainRefused: return ("钥匙串授权被拒过", "重新授权")
-        case .notLoggedIn:     return ("先在终端运行 claude auth login", nil)
-        case .expired, .unauthorized, .forbidden, .network, .storage, .invalidResponse, .credentialsChanged: return (store.blocker.message, "管理凭据")
+        case .needsSetup:
+            return (L("cta.localOnly", "Local estimate only — cannot read the Claude Code credential"),
+                    .enableQuota)
+        case .keychainRefused:
+            return (L("cta.keychainRefused", "Keychain access was refused before"), .enableQuota)
+        case .notLoggedIn:
+            return (L("cta.notLoggedIn", "Run claude auth login in a terminal first"), nil)
+        case .expired, .unauthorized, .forbidden, .network, .storage, .invalidResponse, .credentialsChanged:
+            return (store.blocker.message, .settings)
         case .rateLimited(let until):
-            return ("接口限流中，\(max(1, Int(until.timeIntervalSinceNow / 60))) 分钟后重试", nil)
+            return (String(format: L("cta.rateLimited", "Rate limited — retrying in %d min"),
+                           max(1, Int(until.timeIntervalSinceNow / 60))), nil)
         case .none:            return nil
         }
     }
@@ -447,9 +504,10 @@ struct PanelView: View {
     private var chartSection: some View {
         VStack(alignment: .leading, spacing: Theme.s2) {
             HStack {
-                Text("最近 24 小时").font(Theme.sans(11, 600)).foregroundStyle(Theme.text2)
+                Text(L("panel.last24h", "Last 24 hours")).font(Theme.sans(11, 600)).foregroundStyle(Theme.text2)
                 Spacer()
-                Text(money(snap.trophy.byHour.reduce(0) { $0 + $1.usd }) + " 等效")
+                Text(String(format: L("panel.equivalent", "%@ equivalent"),
+                            money(snap.trophy.byHour.reduce(0) { $0 + $1.usd })))
                     .font(Theme.figures(11, 500)).foregroundStyle(Theme.text)
             }
             UsageChart(hours: snap.trophy.byHour)
@@ -460,9 +518,9 @@ struct PanelView: View {
     private var scoreRow: some View {
         Button(action: onTrophy) {
             HStack(spacing: Theme.s3) {
-                score("活跃", "\(snap.trophy.days) 天")
-                score("等效", money(snap.trophy.equivalentUSD))
-                score("回本", snap.trophy.multiple >= 1
+                score(L("score.active", "Active"), String(format: L("dur.days", "%d d"), snap.trophy.days))
+                score(L("score.equivalent", "Equivalent"), money(snap.trophy.equivalentUSD))
+                score(L("score.multiple", "Return"), snap.trophy.multiple >= 1
                       ? "\(Int(snap.trophy.multiple.rounded()))×" : "—")
             }
             .padding(.horizontal, Theme.s3).padding(.vertical, 11)
@@ -482,12 +540,13 @@ struct PanelView: View {
     private var footer: some View {
         HStack {
             Button(action: onTrophy) {
-                Text("\(snap.trophy.days) 天 · \(money(snap.trophy.equivalentUSD)) 等效 ›")
+                Text(String(format: L("panel.footerTrophy", "%d d · %@ equivalent ›"),
+                            snap.trophy.days, money(snap.trophy.equivalentUSD)))
                     .font(Theme.sans(10)).foregroundStyle(Theme.text2)
             }
             .buttonStyle(.plain)
             Spacer()
-            Text(ago(snap.updatedAt) + "更新").font(Theme.sans(10)).foregroundStyle(Theme.text2)
+            Text(String(format: L("panel.updated", "updated %@"), ago(snap.updatedAt))).font(Theme.sans(10)).foregroundStyle(Theme.text2)
         }
         .padding(.horizontal, Theme.s3).padding(.vertical, 10)
     }
@@ -530,7 +589,7 @@ struct PanelView: View {
     private var focusBar: some View {
         let pinned = pinnedProvider
         return HStack(spacing: 10) {
-            focusChip("自动", selected: pinned == nil) { prefs.focusProvider = "" }
+            focusChip(L("panel.auto", "Auto"), selected: pinned == nil) { prefs.focusProvider = "" }
             ForEach(focusableProviders, id: \.self) { p in
                 Button {
                     // Tapping the one already chosen releases the pin: the way back to
@@ -544,7 +603,7 @@ struct PanelView: View {
                 }
                 .buttonStyle(.plain)
                 .help(p.name)
-                .accessibilityLabel(pinned == p ? "\(p.name)，已选中" : p.name)
+                .accessibilityLabel(pinned == p ? String(format: L("panel.selected", "%@, selected"), p.name) : p.name)
             }
             Spacer(minLength: Theme.s1)
             // The one place the panel says which way its percentages read. It used to be a
@@ -559,8 +618,9 @@ struct PanelView: View {
                     .overlay(Capsule().stroke(Theme.hairline, lineWidth: 1))
             }
             .buttonStyle(.plain)
-            .help("切换百分比的口径：剩余 / 已用")
-            .accessibilityLabel("百分比口径，当前 \(prefs.showRemaining ? Readout.label.remaining : Readout.label.used)")
+            .help(L("panel.readout.help", "Switch how the percentage is read: remaining / used"))
+            .accessibilityLabel(String(format: L("panel.readout.a11y", "Percentage basis, currently %@"),
+                                       prefs.showRemaining ? Readout.label.remaining : Readout.label.used))
         }
         .frame(height: 17)
     }
@@ -573,7 +633,8 @@ struct PanelView: View {
                 .overlay(alignment: .bottom) { underline(selected) }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(selected ? "自动，已选中" : "自动")
+        .accessibilityLabel(selected ? String(format: L("panel.selected", "%@, selected"), L("panel.auto", "Auto"))
+                                     : L("panel.auto", "Auto"))
     }
 
     /// Selection is carried by a rule under the mark rather than by a filled pill: a pill would
@@ -610,7 +671,7 @@ struct PanelView: View {
 
     private var contextWindow: QuotaWindow? {
         guard let c = snap.contextPercent else { return nil }
-        return QuotaWindow(id: "context", provider: .claude, channel: .context, title: "上下文",
+        return QuotaWindow(id: "context", provider: .claude, channel: .context, title: L("channel.context", "Context"),
                            percent: c,
                            severity: Severity(word: Health.grade(
                                c, warm: Channel.context.warm,
@@ -677,9 +738,9 @@ struct PanelView: View {
         guard let oldest = snap.windows(of: p).map(\.observedAt).min() else { return nil }
         let s = Int(Date().timeIntervalSince(oldest))
         guard s > 300 else { return nil }
-        if s < 3600 { return "\(s / 60) 分钟前读到" }
-        if s < 86400 { return "\(s / 3600) 小时前读到" }
-        return "\(s / 86400) 天前读到"
+        if s < 3600 { return String(format: L("observed.min", "read %d min ago"), s / 60) }
+        if s < 86400 { return String(format: L("observed.hour", "read %d h ago"), s / 3600) }
+        return String(format: L("observed.day", "read %d d ago"), s / 86400)
     }
 
     /// Claude's context is one of its readings, not a channel of its own — it belongs under the
@@ -694,14 +755,17 @@ struct PanelView: View {
     /// How long you are stopped for, said as a duration rather than a clock time. "23:10 重置"
     /// makes you do the arithmetic; "还有 1 小时 26 分" is the answer you were going to work out.
     private func waitText(_ w: QuotaWindow) -> String {
-        guard let at = w.resetsAt else { return "等待重置" }
+        guard let at = w.resetsAt else { return L("reset.waiting", "Waiting for the reset") }
         let s = Int(at.timeIntervalSinceNow)
-        guard s > 0 else { return "应该已经重置" }
-        if s < 60 { return "不到 1 分钟就恢复" }
-        if s < 3600 { return "还有 \(s / 60) 分钟" }
+        guard s > 0 else { return L("reset.shouldHave", "Should have reset by now") }
+        if s < 60 { return L("reset.underMinute", "Back in under a minute") }
+        if s < 3600 { return String(format: L("reset.inMin", "%d min to go"), s / 60) }
         let hours = s / 3600, minutes = (s % 3600) / 60
-        if s < 86400 { return minutes == 0 ? "还有 \(hours) 小时" : "还有 \(hours) 小时 \(minutes) 分" }
-        return "还有 \(s / 86400) 天"
+        if s < 86400 {
+            return minutes == 0 ? String(format: L("reset.inHours", "%d h to go"), hours)
+                                : String(format: L("reset.inHoursMin", "%d h %d m to go"), hours, minutes)
+        }
+        return String(format: L("reset.inDaysToGo", "%d d to go"), s / 86400)
     }
 
     private func resetText(_ w: QuotaWindow) -> String? {
@@ -710,33 +774,33 @@ struct PanelView: View {
         guard s > 0 else { return nil }
         // Integer division turned the last minute before a reset into "0 分钟后重置", which
         // reads as broken rather than imminent.
-        if s < 60 { return "不到 1 分钟" }
-        if s < 3600 { return "\(s / 60) 分钟后重置" }
+        if s < 60 { return L("reset.underMinuteShort", "Under a minute") }
+        if s < 3600 { return String(format: L("reset.minThen", "resets in %d min"), s / 60) }
         if s < 86400 {
             let f = DateFormatter(); f.dateFormat = "HH:mm"
-            return "\(f.string(from: at)) 重置"
+            return String(format: L("reset.at", "%@ reset"), f.string(from: at))
         }
-        return "\(s / 86400) 天后重置"
+        return String(format: L("reset.inDays", "resets in %@d"), "\(s / 86400)")
     }
 
     private func shortReset(_ w: QuotaWindow) -> String? {
         guard let at = w.resetsAt else { return nil }
         let s = Int(at.timeIntervalSinceNow)
         guard s > 0 else { return nil }
-        if s < 60 { return "<1 分" }
-        if s < 3600 { return "\(s / 60) 分" }
+        if s < 60 { return L("compact.underMin", "<1m") }
+        if s < 3600 { return String(format: L("compact.min", "%dm"), s / 60) }
         if s < 86400 {
             let f = DateFormatter(); f.dateFormat = "HH:mm"
             return f.string(from: at)
         }
-        return "\(s / 86400) 天"
+        return String(format: L("compact.day", "%dd"), s / 86400)
     }
 
     private func ago(_ d: Date) -> String {
         let s = Int(Date().timeIntervalSince(d))
-        if s < 60 { return "\(max(s, 1)) 秒前" }
-        if s < 3600 { return "\(s / 60) 分钟前" }
-        return "\(s / 3600) 小时前"
+        if s < 60 { return String(format: L("ago.sec", "%ds ago"), max(s, 1)) }
+        if s < 3600 { return String(format: L("ago.min", "%d min ago"), s / 60) }
+        return String(format: L("ago.hour", "%d h ago"), s / 3600)
     }
 
     /// Grouped, like the trophy page. Six figures with no separator — "$987654" — is a string
