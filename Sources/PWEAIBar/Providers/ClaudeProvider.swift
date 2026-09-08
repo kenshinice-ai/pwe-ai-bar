@@ -10,14 +10,12 @@ actor ClaudeProvider {
         var sharedExists: () -> Bool
         var shared: () -> Credentials.Token?
         var save: (String) -> Credentials.SaveResult
-        /// `Bool`: may this read touch the keychain, i.e. may it raise a dialog?
-        var load: ((Bool) throws -> [Credentials.Token])? = nil
+        var load: (() throws -> [Credentials.Token])? = nil
         var persist: ((Credentials.Token, Credentials.Token) throws -> Bool)? = nil
         static let live = Access(own: Credentials.ownToken, claudeCode: { Credentials.claudeCodeCredential() },
                                  sharedExists: Credentials.sharedItemExists, shared: Credentials.readShared,
                                  save: { Credentials.storeOwnToken($0) },
-                                 load: { keychain in try ClaudeCredentialStore(
-                                    services: keychain ? Credentials.sharedServiceCandidates() : []).load() },
+                                 load: { try ClaudeCredentialStore().load() },
                                  persist: { try ClaudeCredentialStore().save($0, expected: $1) })
     }
     enum Blocker: Error, Equatable {
@@ -125,7 +123,7 @@ actor ClaudeProvider {
         set { defaults.set(newValue?.timeIntervalSince1970 ?? 0, forKey: "quotaRetryAfter") }
     }
 
-    private func offActor<T>(timeout: TimeInterval = 15, _ work: @escaping () throws -> T) async throws -> T {
+    private func offActor<T>(_ work: @escaping () throws -> T) async throws -> T {
         try await withCheckedThrowingContinuation { cont in
             let done = OSAllocatedUnfairLock(initialState: false)
             func claim() -> Bool { done.withLock { value in
@@ -135,7 +133,7 @@ actor ClaudeProvider {
                 let result = Result { try work() }
                 if claim() { cont.resume(with: result) }
             }
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) {
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 15) {
                 if claim() { cont.resume(throwing: Blocker.keychainRefused) }
             }
         }
@@ -146,16 +144,13 @@ actor ClaudeProvider {
         if defaults.bool(forKey: "claudeManualTokenSelected") {
             return try await offActor { access.own().map { [$0] } ?? [] }
         }
-        // This latch used to guard only the fallback further down — never the read below, which
-        // is the one that shells out to `security` and can raise a keychain dialog. So a refusal
-        // latched and changed nothing: the next sweep asked again, and at a 20 s poll that is a
-        // dialog every 20 s until the app is killed. The keychain is asked here or nowhere.
-        let mayPrompt = !defaults.bool(forKey: "keychainRefused")
+        // No gate here any more, and that is the point. 1.0.9 gated this leg on the refusal
+        // latch because it could raise a dialog; the reads themselves are now incapable of it,
+        // so gating them buys nothing and costs the reader a working panel on a machine whose
+        // ACL was perfectly willing. A quiet read that fails is free to try again next poll.
         var tokens: [Credentials.Token]
         do {
-            // 75 s: long enough to outlast the 60 s the dialog itself is given, so a person
-            // answering it wins rather than racing this watchdog.
-            if let load = access.load { tokens = try await offActor(timeout: 75) { try load(mayPrompt) } }
+            if let load = access.load { tokens = try await offActor(load) }
             else { tokens = try await offActor { access.claudeCode().map { [$0] } ?? [] } }
         } catch {
             // The fallback on the next line reads the same item in-process, where nothing can
@@ -178,9 +173,9 @@ actor ClaudeProvider {
             if defaults.bool(forKey: "sharedKeychainOptIn"),
                let shared = try await offActor(access.shared) { return [shared] }
         }
-        // Nothing to show, and the keychain is exactly what we declined to open. Say that,
-        // rather than "not logged in" about a credential sitting right there unread.
-        if tokens.isEmpty, !mayPrompt { throw Blocker.keychainRefused }
+        // Nothing to show, and the keychain is what would not open. Say that, rather than
+        // "not logged in" about a credential that is sitting right there unread.
+        if tokens.isEmpty, defaults.bool(forKey: "keychainRefused") { throw Blocker.keychainRefused }
         return tokens
     }
 
@@ -409,9 +404,27 @@ actor ClaudeProvider {
         defaults.integer(forKey: "claudeRefreshCount") == 0 ? token.refreshExpiresAt : nil
     }
 
+    /// A write-back that failed will fail again, and the retry is not free: a refresh token is
+    /// single-use in the worst case, so every exchange whose replacement cannot be stored can
+    /// kill the copy Claude Code still holds. Twenty seconds later is not a retry, it is the
+    /// same mistake at a cadence — and the mistake logs someone out of their own CLI. Cleared by
+    /// 设置 → 重新连接, and by any exchange that does complete.
+    private var rotationBlockedUntil: Date? {
+        get {
+            let n = defaults.double(forKey: "claudeRotationBlockedUntil")
+            guard n.isFinite, n > 0 else { return nil }
+            let date = Date(timeIntervalSince1970: n)
+            return date > now() ? date : nil
+        }
+        set { defaults.set(newValue?.timeIntervalSince1970 ?? 0, forKey: "claudeRotationBlockedUntil") }
+    }
+
     private func rotate(_ token: Credentials.Token, expected: String, version: Int) async throws -> Credentials.Token {
         guard let refresh = token.refreshToken, let persist = access.persist
         else { throw Blocker.expired(expiryToReport(token)) }
+        // Deliberately no `note()` here: this path performs no exchange, and writing a record
+        // once per poll would erase the one that says why the write-back failed.
+        if rotationBlockedUntil != nil { throw Blocker.storage }
 
         // 1.0.1 also skipped the exchange outright when `refreshTokenExpiresAt` had passed. That
         // is gone, and three separate reasons say it should be:
@@ -492,9 +505,11 @@ actor ClaudeProvider {
             // exchange has already happened, so if the server rotated the refresh token then
             // the copy Claude Code still holds may now be dead. Nothing here can undo that; the
             // least the app can do is leave a note saying it is what happened.
+            rotationBlockedUntil = now().addingTimeInterval(30 * 60)
             note(.savedFailed); throw Blocker.storage
         }
         guard saved else { note(.changedUnderUs); throw Blocker.credentialsChanged }
+        rotationBlockedUntil = nil
         note(.renewed, success: true)
         return rotated
     }
@@ -547,6 +562,7 @@ actor ClaudeProvider {
     func enableSharedKeychain() {
         defaults.set(true, forKey: "sharedKeychainOptIn")
         defaults.set(false, forKey: "keychainRefused")
+        defaults.set(0, forKey: "claudeRotationBlockedUntil")
         defaults.set(false, forKey: "claudeManualTokenSelected")
         invalidate()
     }

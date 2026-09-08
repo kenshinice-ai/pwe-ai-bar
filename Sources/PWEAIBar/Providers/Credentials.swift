@@ -60,6 +60,10 @@ enum Credentials {
     /// and it has been measured on this machine at 4 s, 10 s and 84 s for the same item. Whatever
     /// makes it slow, an app that reads a token it does not have on every refresh is paying for
     /// nothing.
+    /// Serialises the process-wide interaction switch so two readers cannot leave it off for
+    /// each other, or restore it out from under one another.
+    private static let interactionLock = NSLock()
+
     private static let ownFlag = "ownTokenStored"
     static var mayHaveOwnToken: Bool {
         let d = UserDefaults.standard
@@ -67,6 +71,19 @@ enum Credentials {
         let found = read(ownService, ownAccount) != nil      // one-time migration probe
         d.set(found, forKey: ownFlag)
         return found
+    }
+
+    /// A keychain read that cannot put anything on screen, for every path that runs on a timer.
+    ///
+    /// Both switches are needed and they cover different gates: the `LAContext` covers
+    /// LocalAuthentication for `SecAccessControl` items, `SecKeychainSetUserInteractionAllowed`
+    /// covers the classic ACL on a `login.keychain` item. Missing the second one is what made
+    /// this app ask a person for permission every twenty seconds.
+    static func quietRead(_ service: String, _ account: String) -> String? {
+        interactionLock.lock()
+        SecKeychainSetUserInteractionAllowed(false)
+        defer { SecKeychainSetUserInteractionAllowed(true); interactionLock.unlock() }
+        return read(service, account)
     }
 
     private static func read(_ service: String, _ account: String) -> String? {
@@ -197,14 +214,32 @@ enum Credentials {
         return parse(text, source: .claudeFile)
     }
 
-    /// Direct keychain read. Kept only for the opt-in path, because this is the call that puts
-    /// the access dialog on screen when the app is not on the item's access list.
+    /// Direct keychain read — the call that puts the access dialog on screen when the app is not
+    /// on the item's access list. It now cannot, and that took the right switch:
+    ///
+    /// `kSecUseAuthenticationContext` does **not** cover this. An `LAContext` governs
+    /// LocalAuthentication — Touch ID, the passcode — for items carrying a `SecAccessControl`.
+    /// A classic ACL on a `login.keychain` item is a different gate with a different door, and
+    /// `SecKeychainSetUserInteractionAllowed` is the only switch that closes it. Every sibling
+    /// read here passes a non-interactive `LAContext` and is quiet; this one passed none and was
+    /// the loud one. 1.0.9 then moved it out from behind the refusal latch on the stated grounds
+    /// that "this read is in-process and non-interactive, so it cannot be the thing that nags",
+    /// which was simply wrong — with the latch armed, every poll landed here, on the one call
+    /// documented three lines up as the dialog-raiser.
+    ///
+    /// Suppressed rather than skipped: where the ACL does allow the read it still succeeds, so
+    /// the panel keeps its numbers instead of going blank. Where it does not, this fails quietly
+    /// and the provider reports it. Silence is the fix; not reading was never the fix.
     static func readShared() -> Token? {
+        interactionLock.lock()
+        SecKeychainSetUserInteractionAllowed(false)
+        defer { SecKeychainSetUserInteractionAllowed(true); interactionLock.unlock() }
         for service in sharedServiceCandidates() {
             let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                    kSecAttrService as String: service, kSecAttrAccount as String: NSUserName(),
                                    kSecReturnData as String: true, kSecReturnAttributes as String: true,
-                                   kSecMatchLimit as String: kSecMatchLimitOne]
+                                   kSecMatchLimit as String: kSecMatchLimitOne,
+                                   kSecUseAuthenticationContext as String: Credentials.noninteractiveContext()]
             var item: CFTypeRef?
             guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess,
                   let record = item as? [String: Any], let data = record[kSecValueData as String] as? Data,

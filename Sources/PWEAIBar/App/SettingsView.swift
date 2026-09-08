@@ -190,8 +190,28 @@ struct SettingsView: View {
                 switchRow(L("settings.launchAtLogin", "Launch at login"), $prefs.launchAtLogin)
                 row(L("settings.subscription", "Subscription price")) { subscription }
             }
+            footer
         }
         .frame(width: 380)
+    }
+
+    /// Which build is actually running. Not decoration: several releases went out in two days
+    /// chasing one bug, and "is the fix in the copy I am looking at" was a question the screen
+    /// could not answer — you had to go and read Info.plist.
+    private var footer: some View {
+        HStack(spacing: 6) {
+            Text(verbatim: "PWE AI Bar").font(Theme.sans(11)).foregroundStyle(Theme.text2)
+            Text(verbatim: Self.version).font(Theme.figures(11)).foregroundStyle(Theme.text)
+            Spacer()
+        }
+        .padding(.horizontal, Theme.s3).padding(.top, Theme.s3).padding(.bottom, Theme.s4)
+    }
+
+    /// Falls back to a dash rather than to "1.0.0" or an empty string: a wrong version on screen
+    /// is worse than an admitted unknown, because it is the thing being trusted to settle a
+    /// question. Nil is what a test host returns, never the shipped app.
+    static var version: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "—"
     }
 
     /// Broken out of `content` for the same reason it is the messiest section on the page: a

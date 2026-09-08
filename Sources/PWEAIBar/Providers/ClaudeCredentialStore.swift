@@ -145,15 +145,18 @@ struct ClaudeCredentialStore {
         return rows.compactMap { $0[kSecAttrAccount as String] as? String }
     }
 
-    /// The one call in this app that can put a dialog on screen. It is therefore asked at most
-    /// once per opt-in — `ClaudeProvider.candidates` drops this whole leg once a read has been
-    /// refused — and it is given a minute rather than five seconds, because the thing it is
-    /// waiting for is a person reading a keychain prompt.
+    /// This used to fork the `security` command-line tool, and that was the whole disease. The
+    /// subprocess existed to dodge the dialog an in-process read would raise — except it raised
+    /// its own, named for the tool instead of the app, and every poll asked again. 1.0.9 tried to gate the
+    /// call sites one by one; there turned out to be three, reached by two different code paths,
+    /// and gating them individually is a game you lose the moment a fourth appears.
+    ///
+    /// So the capability goes instead of the gates: a read that runs on a timer is one that
+    /// cannot put anything on screen. `quietRead` closes both UI gates and answers `nil` where
+    /// it would otherwise have asked. Nothing here is slower for it — an in-process
+    /// `SecItemCopyMatching` was always cheaper than spawning a process.
     private static func readKeychain(_ service: String, _ account: String) throws -> String? {
-        guard let value = Subprocess.run(["/usr/bin/security", "find-generic-password", "-a", account, "-s", service, "-w"],
-                                         timeout: 60) else {
-            throw Failure.denied
-        }
+        guard let value = Credentials.quietRead(service, account) else { throw Failure.denied }
         return value
     }
 

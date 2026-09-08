@@ -7,6 +7,13 @@ import AppKit
 enum PWEAIBarMain {
     @MainActor
     static func main() {
+        // The same read the settings footer uses, so "which build is this" can be answered
+        // without opening a window — and so the footer's claim is checkable from outside the
+        // app, which a number that exists to settle that question needs to be.
+        if CommandLine.arguments.contains("--version") {
+            print(SettingsView.version)
+            return
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--icon"),
            i + 1 < CommandLine.arguments.count {
             Theme.registerFonts()

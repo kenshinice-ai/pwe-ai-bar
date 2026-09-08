@@ -20,7 +20,7 @@ private final class ClaudeMemory: @unchecked Sendable {
     }
     var access: ClaudeProvider.Access {
         .init(own: { nil }, claudeCode: { nil }, sharedExists: { false }, shared: { nil }, save: { _ in .failed(-1) },
-              load: { _ in try self.store.load() }, persist: { try self.store.save($0, expected: $1) })
+              load: { try self.store.load() }, persist: { try self.store.save($0, expected: $1) })
     }
 }
 
@@ -259,7 +259,7 @@ final class ClaudeUsageTests: XCTestCase {
             first.refreshToken = nil; second.refreshToken = nil
             let tokens = [first, second]
             let access = ClaudeProvider.Access(own: { nil }, claudeCode: { nil }, sharedExists: { false }, shared: { nil },
-                                               save: { _ in .failed(-1) }, load: { _ in tokens })
+                                               save: { _ in .failed(-1) }, load: { tokens })
             let http = HTTPStub([(401, "{}", [:]), (200, quota, [:])])
             let p = ClaudeProvider(defaults: space.defaults, access: access, now: { self.date }, request: { try await http.send($0) })
             let result = await p.windows()
@@ -522,96 +522,110 @@ final class ClaudeUsageTests: XCTestCase {
     }
 }
 
-/// 1.0.8 shipped a keychain prompt loop: the `keychainRefused` latch guarded the in-process
-/// fallback but not the leg that shells out to `/usr/bin/security`, so a refusal changed
-/// nothing and the 20 s poll re-raised the dialog until the app was force-quit. These pin the
-/// two halves of the fix — the latch is read before the ask, and the ask outlasts a person.
+/// 1.0.8 raised a keychain dialog every twenty seconds until the app was force-quit. 1.0.9 tried
+/// to gate each call site that could prompt, missed two of the three, and moved a fourth out from
+/// behind the gate on the false premise that an in-process read cannot prompt. 1.0.10 removes the
+/// capability instead of guarding it: reads that run on a timer cannot put anything on screen.
+/// These pin the parts of that which are testable without a window server.
 final class KeychainPromptTests: XCTestCase {
-    /// Records what the credential leg was told about touching the keychain.
-    private final class Asked: @unchecked Sendable {
-        private let lock = NSLock()
-        private var calls: [Bool] = []
-        func note(_ keychain: Bool) { lock.lock(); defer { lock.unlock() }; calls.append(keychain) }
-        var log: [Bool] { lock.lock(); defer { lock.unlock() }; return calls }
+    private func token(_ json: String, expired: Bool = false) throws -> Credentials.Token {
+        try XCTUnwrap(ClaudeCredentialStore.decode(json, source: .sharedKeychain,
+                                                   origin: .keychain(service: "Claude Code-credentials",
+                                                                     account: "tester")))
     }
-
-    private func provider(_ space: TestSpace, _ asked: Asked) -> ClaudeProvider {
-        let access = ClaudeProvider.Access(own: { nil }, claudeCode: { nil }, sharedExists: { true },
-                                           shared: { nil }, save: { _ in .failed(-1) },
-                                           load: { keychain in asked.note(keychain); return [] })
-        return ClaudeProvider(defaults: space.defaults, access: access,
-                              now: { Date(timeIntervalSince1970: 1_760_000_000) },
-                              request: { _ in throw ClaudeProvider.Blocker.network })
+    private var expiredJSON: String {
+        #"{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":1000,"scopes":["user:profile"]}}"#
     }
+    private let refreshReply = #"{"access_token":"new","expires_in":3600}"#
+    private var at: Date { Date(timeIntervalSince1970: 1_760_000_000) }
 
-    func testARefusedKeychainIsNeverAskedAgain() async throws {
-        let space = try TestSpace()
-        space.defaults.set(true, forKey: "sharedKeychainOptIn")
-        space.defaults.set(true, forKey: "keychainRefused")
-        let asked = Asked(), p = provider(space, asked)
-        for _ in 0..<3 { _ = await p.windows(force: true) }
-        XCTAssertEqual(asked.log, [false, false, false],
-                       "every sweep after a refusal must skip the leg that can raise a dialog")
-        let blocker = await p.blocker
-        XCTAssertEqual(blocker, .keychainRefused,
-                       "and it must say which door it declined to open, not 'not logged in'")
-    }
-
-    func testAnUnrefusedKeychainIsStillRead() async throws {
-        let space = try TestSpace()
-        let asked = Asked(), p = provider(space, asked)
-        _ = await p.windows()
-        XCTAssertEqual(asked.log, [true], "the latch is off, so the keychain is the first place to look")
-    }
-
-    func testReconnectClearsTheLatch() async throws {
-        let space = try TestSpace()
-        space.defaults.set(true, forKey: "keychainRefused")
-        let asked = Asked(), p = provider(space, asked)
-        _ = await p.windows()
-        await p.enableSharedKeychain()
-        _ = await p.windows()
-        XCTAssertEqual(asked.log, [false, true], "设置 → 重新连接 is the way back in")
-    }
-
-    /// The reported bug, exactly. The keychain leg fails; the in-process fallback rescues the
-    /// reading; the panel shows correct numbers — so nothing propagates, and the app asks again
-    /// twenty seconds later, forever. Recovering is not the same as fine, and the latch has to
-    /// arm off the failure rather than off whether anyone noticed it.
+    /// The failure that started all of this: the fallback rescues the reading, so nothing
+    /// propagates and the app concludes it is fine. Recovering is not the same as fine.
     func testAFallbackThatRescuesTheReadingStillRecordsTheRefusal() async throws {
         let space = try TestSpace()
         space.defaults.set(true, forKey: "sharedKeychainOptIn")
-        let asked = Asked(), shared = Counter()
-        let token = try XCTUnwrap(ClaudeCredentialStore.decode(
-            #"{"claudeAiOauth":{"accessToken":"t","refreshToken":"r","expiresAt":1800000000000,"scopes":["user:profile"]}}"#,
-            source: .sharedKeychain))
+        let shared = Counter()
+        let good = try token(#"{"claudeAiOauth":{"accessToken":"t","refreshToken":"r","expiresAt":1800000000000,"scopes":["user:profile"]}}"#)
         let access = ClaudeProvider.Access(
             own: { nil }, claudeCode: { nil }, sharedExists: { true },
-            shared: { shared.bump(); return token }, save: { _ in .failed(-1) },
-            load: { keychain in
-                asked.note(keychain)
-                if keychain { throw ClaudeCredentialStore.Failure.denied }
-                return []
-            })
-        let p = ClaudeProvider(defaults: space.defaults, access: access,
-                               now: { Date(timeIntervalSince1970: 1_760_000_000) },
+            shared: { shared.bump(); return good }, save: { _ in .failed(-1) },
+            load: { throw ClaudeCredentialStore.Failure.denied })
+        let p = ClaudeProvider(defaults: space.defaults, access: access, now: { self.at },
                                request: { _ in throw ClaudeProvider.Blocker.network })
         _ = await p.windows(force: true)
         XCTAssertTrue(space.defaults.bool(forKey: "keychainRefused"),
                       "the refusal must be recorded even though the fallback made it invisible")
-        _ = await p.windows(force: true)
-        XCTAssertEqual(asked.log, [true, false], "asked once, then never again — this is the whole bug")
-        XCTAssertEqual(shared.value, 2,
-                       "and the door that cannot prompt stays open, so the panel keeps its numbers")
+        XCTAssertEqual(shared.value, 1, "and the door that cannot prompt stays open")
     }
 
-    /// The dialog is answered by a person. Five seconds killed `security` mid-prompt, so the
-    /// grant never recorded — which is what made the loop endless rather than merely annoying.
+    /// A refresh token is single-use in the worst case, so an exchange whose replacement cannot
+    /// be stored can kill the copy Claude Code still holds. Within one run the in-memory
+    /// `rejected` table already stops a repeat — but it dies with the process, and this app has
+    /// been force-quit and relaunched all day. The record has to outlive the process.
+    func testAFailedWriteBackSurvivesARelaunch() async throws {
+        let space = try TestSpace()
+        let expired = try token(expiredJSON)
+        let http = HTTPStub([(200, refreshReply, [:]), (200, refreshReply, [:])])
+        func provider() -> ClaudeProvider {
+            ClaudeProvider(defaults: space.defaults,
+                           access: .init(own: { nil }, claudeCode: { nil }, sharedExists: { false },
+                                         shared: { nil }, save: { _ in .failed(-1) },
+                                         load: { [expired] },
+                                         persist: { _, _ in throw ClaudeCredentialStore.Failure.storage }),
+                           now: { self.at }, request: { try await http.send($0) })
+        }
+        _ = await provider().windows(force: true)
+        XCTAssertEqual(space.defaults.string(forKey: "claudeRefreshOutcome"), "savedFailed")
+        let first = await http.count
+        XCTAssertEqual(first, 1, "one exchange, and it could not be written back")
+
+        // A fresh actor is a relaunch: `rejected` is empty again, and only the persisted record
+        // stands between a dead write-back and another spent refresh token.
+        _ = await provider().windows(force: true)
+        let second = await http.count
+        XCTAssertEqual(second, 1, "a relaunch must not spend another refresh token")
+    }
+
+    func testReconnectingLetsRotationTryAgainAfterARelaunch() async throws {
+        let space = try TestSpace()
+        let expired = try token(expiredJSON)
+        let http = HTTPStub([(200, refreshReply, [:]), (200, refreshReply, [:])])
+        func provider() -> ClaudeProvider {
+            ClaudeProvider(defaults: space.defaults,
+                           access: .init(own: { nil }, claudeCode: { nil }, sharedExists: { false },
+                                         shared: { nil }, save: { _ in .failed(-1) },
+                                         load: { [expired] },
+                                         persist: { _, _ in throw ClaudeCredentialStore.Failure.storage }),
+                           now: { self.at }, request: { try await http.send($0) })
+        }
+        let first = provider()
+        _ = await first.windows(force: true)
+        await first.enableSharedKeychain()
+        _ = await provider().windows(force: true)
+        let count = await http.count
+        XCTAssertEqual(count, 2, "设置 → 重新连接 is the way back in, and it outlives the process too")
+    }
+
+    /// `Subprocess.run` is no longer on any keychain path, but it still runs other providers'
+    /// commands and its budget is per call.
     func testTheTimeoutIsThePerCallBudget() {
         XCTAssertNil(Subprocess.run(["/bin/sleep", "2"], timeout: 0.3), "a short budget still bites")
         XCTAssertEqual(Subprocess.run(["/bin/echo", "ok"], timeout: 5), "ok\n")
-        let started = Date()
-        XCTAssertNil(Subprocess.run(["/bin/sleep", "5"], timeout: 0.5))
-        XCTAssertLessThan(Date().timeIntervalSince(started), 4, "the budget is honoured, not ignored")
+    }
+
+    /// The regression that produced 1.0.10: no code that runs on a timer may reach the keychain
+    /// through a path that is allowed to draw. Asserted structurally, because a dialog cannot be
+    /// asserted from a unit test.
+    func testNoBackgroundKeychainReadForksTheSecurityTool() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let store = try String(contentsOf: root.appendingPathComponent("Sources/PWEAIBar/Providers/ClaudeCredentialStore.swift"),
+                               encoding: .utf8)
+        XCTAssertFalse(store.contains("/usr/bin/security"),
+                       "ClaudeCredentialStore runs on the poll timer; it must use Credentials.quietRead")
+        let credentials = try String(contentsOf: root.appendingPathComponent("Sources/PWEAIBar/Providers/Credentials.swift"),
+                                     encoding: .utf8)
+        XCTAssertTrue(credentials.contains("SecKeychainSetUserInteractionAllowed"),
+                      "the classic-ACL dialog has exactly one switch; an LAContext does not close it")
     }
 }
