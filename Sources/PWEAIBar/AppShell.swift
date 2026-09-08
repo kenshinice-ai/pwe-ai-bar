@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem!
     private var popover: NSPopover?
+    private var panelHeight: CGFloat = 0
     private var trophyWindow: NSWindow?
     private var settingsWindow: NSWindow?
     private let store = Store()
@@ -120,7 +121,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   onTrophy: { [weak self] in self?.showTrophy() },
                   onSettings: { [weak self] in self?.showSettings() },
                   onOpen: { [weak self] p in self?.activate(p) },
-                  onEnableQuota: { [weak self] in self?.store.enableRealQuota() })
+                  onEnableQuota: { [weak self] in self?.store.enableRealQuota() },
+                  onHeight: { [weak self] h in self?.resizePanel(to: h) })
+    }
+
+    /// The panel says how tall it wants to be; this is what makes the popover that size.
+    ///
+    /// Left to constraint propagation alone this went wrong twice, in opposite directions — a
+    /// popover stuck at 300 pt with the panel scrolling inside it, then a popover so tall its
+    /// header sat above the menu bar. Setting `contentSize` outright is not a workaround for
+    /// either; it is the size being stated once, by the half of the code that can measure it,
+    /// to the half that owns the window.
+    private func resizePanel(to height: CGFloat) {
+        guard height > 0, abs(height - panelHeight) > 0.5 else { return }
+        panelHeight = height
+        popover?.contentSize = NSSize(width: Theme.panelWidth, height: height)
     }
 
     private func togglePopover() {
@@ -129,6 +144,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         store.refresh()
         let popover = makePopover()
+        // Size it before it is shown. A popover that grows after it is on screen is re-anchored
+        // by AppKit, and on a status item that is how its top ends up off the top of the screen.
+        if panelHeight > 0 {
+            popover.contentSize = NSSize(width: Theme.panelWidth, height: panelHeight)
+        }
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
         button.highlight(true)

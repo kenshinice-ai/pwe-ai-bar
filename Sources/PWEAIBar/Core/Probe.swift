@@ -267,6 +267,73 @@ enum Probe {
         }
     }
 
+    /// Opens the real panel in a real popover on a real status item, and reports its geometry.
+    ///
+    /// This exists because the panel's height went wrong twice and both times the unit tests
+    /// were happy: they measured a hosting view in isolation, which cannot see where AppKit
+    /// actually puts the window or whether it fits on the screen. Everything that was wrong is
+    /// visible in these four numbers.
+    @MainActor static func popoverGeometry() {
+        // NSApp is nil until something touches NSApplication.shared, and a status item needs a
+        // launched app behind it — without this the probe traps before it prints anything.
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+        app.finishLaunching()
+        Theme.registerFonts()
+        let store = Store()
+        store.start()
+
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        item.button?.title = "▍"
+        let popover = NSPopover()
+        popover.behavior = .applicationDefined
+        popover.animates = false
+        var reported: CGFloat = 0
+        // Set this to reproduce what shipped in 1.0.3: the panel measures itself but nobody
+        // acts on it, and AppKit is left to resize a popover that is already on screen.
+        let sizeIt = ProcessInfo.processInfo.environment["PWEBAR_PROBE_NO_RESIZE"] != "1"
+        let panel = PanelView(store: store, onTrophy: {}, onSettings: {}, onOpen: { _ in },
+                              onEnableQuota: {}, onHeight: { h in
+            reported = h
+            if sizeIt { popover.contentSize = NSSize(width: Theme.panelWidth, height: h) }
+        })
+        popover.contentViewController = NSHostingController(rootView: panel)
+
+        guard let button = item.button else { print("no status item button"); exit(1) }
+        // Let a reading land, so the panel is the size it is in real use rather than empty.
+        for _ in 0..<120 { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        for _ in 0..<120 { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+
+        let screen = button.window?.screen ?? NSScreen.main ?? NSScreen.screens[0]
+        let visible = screen.visibleFrame
+        let frame = popover.contentViewController?.view.window?.frame ?? .zero
+        let scroller = popover.contentViewController?.view.firstScrollView()
+
+        print("屏幕            \(Int(screen.frame.width))x\(Int(screen.frame.height)) pt   "
+              + "可用高度 \(Int(visible.height))   可用区间 y \(Int(visible.minY))…\(Int(visible.maxY))")
+        print("面板申请的高度  \(Int(reported)) pt   上限 \(Int(PanelView.ceiling()))")
+        print("弹出框窗口      \(Int(frame.width))x\(Int(frame.height)) pt   "
+              + "y \(Int(frame.minY))…\(Int(frame.maxY))")
+        // The beak and the shadow legitimately overlap the menu bar by a few points; anything
+        // past that is the header and the endurance block being pushed off the screen.
+        let above = frame.maxY - visible.maxY
+        let below = visible.minY - frame.minY
+        print("顶部超出屏幕    " + (above > 8
+            ? "是，\(Int(above)) pt 在屏幕上方（标题栏和续航仪够不着）"
+            : "否\(above > 1 ? "（\(Int(above)) pt 是尖角，正常）" : "")"))
+        print("底部超出屏幕    \(below > 1 ? "是，\(Int(below)) pt" : "否")")
+        if let scroller {
+            let doc = scroller.documentView?.frame.height ?? 0
+            let clip = scroller.contentView.bounds.height
+            print("滚动            \(doc > clip + 1 ? "有（内容 \(Int(doc)) / 可见 \(Int(clip))）" : "无，全部显示")")
+        } else {
+            print("滚动            没有 NSScrollView")
+        }
+        store.stop()
+        exit(0)
+    }
+
     static func stress(into dir: String) {
         var snap = Snapshot()
         snap.windows = [
@@ -477,5 +544,15 @@ enum Probe {
         if d >= 1e9 { return String(format: "%.2fB", d / 1e9) }
         if d >= 1e6 { return String(format: "%.1fM", d / 1e6) }
         return String(format: "%.0fK", d / 1e3)
+    }
+}
+
+extension NSView {
+    /// The first `NSScrollView` in this hierarchy — what SwiftUI's `ScrollView` is made of, and
+    /// therefore the honest answer to "is this panel scrolling".
+    func firstScrollView() -> NSScrollView? {
+        if let me = self as? NSScrollView { return me }
+        for child in subviews { if let found = child.firstScrollView() { return found } }
+        return nil
     }
 }

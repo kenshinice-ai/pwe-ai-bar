@@ -86,6 +86,10 @@ enum PWEAIBarMain {
             Probe.credentialsHelp()
             return
         }
+        if CommandLine.arguments.contains("--popover") {
+            Probe.popoverGeometry()
+            return
+        }
         if CommandLine.arguments.contains("--probe") {
             Probe.run()
             return

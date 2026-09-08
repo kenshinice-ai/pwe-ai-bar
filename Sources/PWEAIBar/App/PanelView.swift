@@ -21,6 +21,8 @@ struct PanelView: View {
     var onEnableQuota: () -> Void
     /// The screen height to size against. Nil asks the real screen; tests state one.
     var usableHeight: CGFloat? = nil
+    /// Reports the height this panel wants, so whoever owns the popover can set it outright.
+    var onHeight: (CGFloat) -> Void = { _ in }
 
     @State private var middleHeight: CGFloat = 0
     @State private var chromeHeight: CGFloat = 0
@@ -51,15 +53,15 @@ struct PanelView: View {
         return max(420, usable - 32)
     }
 
-    /// How much height the middle may take before it has to scroll.
-    private var room: CGFloat {
+    /// The height the panel wants: everything, or the ceiling, whichever is smaller.
+    ///
+    /// Nil until both measurements are in — the first pass exists to measure, and guessing from
+    /// a zero is what produces a panel that is briefly the wrong size and then jumps.
+    var desiredHeight: CGFloat? {
+        guard chromeHeight > 0, middleHeight > 0 else { return nil }
         // The two rules either side of the middle are a point each.
-        max(200, Self.ceiling(usableHeight: usableHeight) - chromeHeight - 2)
+        return min(chromeHeight + 2 + middleHeight, Self.ceiling(usableHeight: usableHeight))
     }
-
-    /// Only true once both measurements are in, so the first pass renders unscrolled and
-    /// measures honestly rather than deciding from a zero.
-    private var mustScroll: Bool { chromeHeight > 0 && middleHeight > room }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -67,31 +69,32 @@ struct PanelView: View {
             // carries the trophy link and how fresh the reading is; neither may scroll away.
             header.measuring(ChromeHeight.self)
             rule
-            // A ScrollView asks for no height at all, so making one unconditionally was what
-            // actually broke this: the popover had nothing pushing it open and simply kept the
-            // size it happened to have — about 300 pt — while the whole panel scrolled inside
-            // it. Raising the cap could not help, because the cap was never what it hit.
-            //
-            // Measured: a plain column pushes a 300 pt window out to the 870 pt it needs; the
-            // same column inside a ScrollView lets it collapse to 70, the header and footer
-            // alone. So the scroller only appears when it is genuinely needed, and when it does
-            // it gets a fixed height, which is a constraint the popover does respect.
-            if mustScroll { scroller } else { measuredMiddle }
+            scroller
             rule
             footer.measuring(ChromeHeight.self)
         }
         .frame(width: Theme.panelWidth)
+        // An explicit height, not a cap and not an ideal. Two releases went out getting this
+        // wrong from both sides: a bare ScrollView asks for no height at all, so the popover
+        // stayed at whatever size it happened to have and the panel scrolled inside a 300 pt
+        // box; dropping the ScrollView instead let the content take its natural height, and the
+        // popover ended up hung off the top of the screen with the header above the menu bar.
+        //
+        // Neither is a layout problem. It is a communication problem: the panel has to state a
+        // height, and whoever owns the popover has to set it. `onHeight` is the other half.
+        .frame(height: desiredHeight)
         .background(Theme.surface)
-        .onPreferenceChange(MiddleHeight.self) { middleHeight = $0 }
-        .onPreferenceChange(ChromeHeight.self) { chromeHeight = $0 }
+        .onPreferenceChange(MiddleHeight.self) { v in middleHeight = v; report() }
+        .onPreferenceChange(ChromeHeight.self) { v in chromeHeight = v; report() }
     }
 
-    private var measuredMiddle: some View { middle.measuring(MiddleHeight.self) }
+    private func report() { if let h = desiredHeight { onHeight(h) } }
 
     private var scroller: some View {
-        let content = ScrollView { measuredMiddle }.frame(height: room)
-        // Without this a panel that only just overflows rubber-bands when you flick it, which
-        // reads as a bug in the one surface that is supposed to feel fixed to the menu bar.
+        // The scroller is always here, so the layout never changes shape as readings arrive —
+        // only its height changes. When everything fits it has nothing to scroll and shows no
+        // bar; when it does not, it is the reason the rows past the fold stay reachable.
+        let content = ScrollView { middle.measuring(MiddleHeight.self) }
         if #available(macOS 14.0, *) { return AnyView(content.scrollBounceBehavior(.basedOnSize)) }
         return AnyView(content)
     }
