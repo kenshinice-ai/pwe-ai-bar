@@ -627,6 +627,30 @@ final class KeychainPromptTests: XCTestCase {
                           "and nothing may be recorded on a path where no exchange happened")
     }
 
+    /// 1.0.10 took the dialog away from every read, which stopped the nagging and also removed
+    /// the only way back in: `claude auth login` recreates the item, its new access list does not
+    /// carry this app, and every quiet read then answers errSecAuthFailed with nothing the reader
+    /// can do. Exactly one door asks, and only a person opens it.
+    func testOnlyTheButtonEverAsksForAuthorisation() async throws {
+        let space = try TestSpace()
+        space.defaults.set(true, forKey: "sharedKeychainOptIn")
+        let asked = Counter()
+        let opened = XCTestExpectation(description: "authorisation requested")
+        let p = ClaudeProvider(
+            defaults: space.defaults,
+            access: .init(own: { nil }, claudeCode: { nil }, sharedExists: { true },
+                          shared: { nil }, save: { _ in .failed(-1) }, load: { [] },
+                          authorise: { asked.bump(); opened.fulfill(); return true }),
+            now: { self.at }, request: { _ in throw ClaudeProvider.Blocker.network })
+
+        for _ in 0..<3 { _ = await p.windows(force: true) }
+        XCTAssertEqual(asked.value, 0, "no poll may ever put a permission prompt on screen")
+
+        await p.enableSharedKeychain()
+        await fulfillment(of: [opened], timeout: 2)
+        XCTAssertEqual(asked.value, 1, "pressing the button is what asks, and it asks once")
+    }
+
     /// `Subprocess.run` is no longer on any keychain path, but it still runs other providers'
     /// commands and its budget is per call.
     func testTheTimeoutIsThePerCallBudget() {

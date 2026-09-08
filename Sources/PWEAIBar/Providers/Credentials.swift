@@ -230,16 +230,23 @@ enum Credentials {
     /// Suppressed rather than skipped: where the ACL does allow the read it still succeeds, so
     /// the panel keeps its numbers instead of going blank. Where it does not, this fails quietly
     /// and the provider reports it. Silence is the fix; not reading was never the fix.
-    static func readShared() -> Token? {
+    ///
+    /// `interactive` is the one exception, and it exists because suppressing everything left no
+    /// way back in. `claude auth login` recreates the item, and the new access list carries only
+    /// whoever created it — so a quiet read answers `errSecAuthFailed` for ever, with nothing the
+    /// reader can do about it. Exactly one door stays openable, and only a person pressing
+    /// 「改用钥匙串授权」 opens it. Never from a timer.
+    static func authoriseShared() -> Bool { readShared(interactive: true) != nil }
+
+    static func readShared(interactive: Bool = false) -> Token? {
         interactionLock.lock()
-        SecKeychainSetUserInteractionAllowed(false)
+        SecKeychainSetUserInteractionAllowed(interactive)
         defer { SecKeychainSetUserInteractionAllowed(true); interactionLock.unlock() }
         for service in sharedServiceCandidates() {
             let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                    kSecAttrService as String: service, kSecAttrAccount as String: NSUserName(),
                                    kSecReturnData as String: true, kSecReturnAttributes as String: true,
-                                   kSecMatchLimit as String: kSecMatchLimitOne,
-                                   kSecUseAuthenticationContext as String: Credentials.noninteractiveContext()]
+                                   kSecMatchLimit as String: kSecMatchLimitOne]
             var item: CFTypeRef?
             guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess,
                   let record = item as? [String: Any], let data = record[kSecValueData as String] as? Data,

@@ -14,6 +14,10 @@ enum PWEAIBarMain {
             print(SettingsView.version)
             return
         }
+        if CommandLine.arguments.contains("--credprobe") {
+            Probe.credentials()
+            return
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--icon"),
            i + 1 < CommandLine.arguments.count {
             Theme.registerFonts()

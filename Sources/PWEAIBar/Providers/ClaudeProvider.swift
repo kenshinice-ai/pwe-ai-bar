@@ -15,12 +15,16 @@ actor ClaudeProvider {
         /// Can the record still be read back, i.e. would the write-back's compare-and-swap
         /// succeed? Asked *before* the exchange, never after.
         var storable: ((Credentials.Token) -> Bool)? = nil
+        /// The single read allowed to put a dialog on screen, run only when a person presses the
+        /// button that asks for it.
+        var authorise: (() -> Bool)? = nil
         static let live = Access(own: Credentials.ownToken, claudeCode: { Credentials.claudeCodeCredential() },
-                                 sharedExists: Credentials.sharedItemExists, shared: Credentials.readShared,
+                                 sharedExists: Credentials.sharedItemExists, shared: { Credentials.readShared() },
                                  save: { Credentials.storeOwnToken($0) },
                                  load: { try ClaudeCredentialStore().load() },
                                  persist: { try ClaudeCredentialStore().save($0, expected: $1) },
-                                 storable: { (try? ClaudeCredentialStore().unchanged($0)) == true })
+                                 storable: { (try? ClaudeCredentialStore().unchanged($0)) == true },
+                                 authorise: Credentials.authoriseShared)
     }
     enum Blocker: Error, Equatable {
         case none, needsSetup, notLoggedIn, keychainRefused, unauthorized, forbidden, network
@@ -584,6 +588,16 @@ actor ClaudeProvider {
         defaults.set(0, forKey: "claudeRotationBlockedUntil")
         defaults.set(false, forKey: "claudeManualTokenSelected")
         invalidate()
+        guard let authorise = access.authorise else { return }
+        // Clearing the flags was never enough on its own: every read this app performs is
+        // incapable of drawing, so on an item whose access list does not carry us they all
+        // answer errSecAuthFailed and the button did nothing anyone could see. This is the one
+        // read allowed to ask, and there is no watchdog on it — what it waits for is a person
+        // reading a permission prompt, and cutting that short is the whole original bug.
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard authorise() else { return }
+            await self?.invalidate()
+        }
     }
 
     func useOwnToken(_ raw: String) async -> TokenUpdate {

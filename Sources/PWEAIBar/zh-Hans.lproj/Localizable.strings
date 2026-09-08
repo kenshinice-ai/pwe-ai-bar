@@ -30,7 +30,7 @@
 "cta.useKeychain.help" = "重新连接 Claude Code 登录，macOS 可能请求钥匙串授权";
 "cta.rateLimited" = "接口限流中，%d 分钟后重试";
 "cta.localOnly" = "只有本地估算，读不到 Claude Code 凭据";
-"cta.keychainRefused" = "钥匙串授权被拒过";
+"cta.keychainRefused" = "钥匙串尚未授权本应用";
 "cta.notLoggedIn" = "先在终端运行 claude auth login";
 "panel.stale.help" = "显示的是上一次成功读到的数字";
 "panel.stale.a11y" = "数据可能已过时";
@@ -47,8 +47,8 @@
 "empty.noCredential.fix" = "下面是本地估算；可在设置里改用钥匙串授权";
 "empty.notLoggedIn" = "还没登录";
 "empty.notLoggedIn.fix" = "在终端运行 claude auth login";
-"empty.keychainRefused" = "钥匙串拒绝了访问";
-"empty.keychainRefused.fix" = "重新运行 claude auth login 即可重建授权";
+"empty.keychainRefused" = "钥匙串尚未授权本应用";
+"empty.keychainRefused.fix" = "点「改用钥匙串授权」并允许一次即可。注意 claude auth login 会重建条目，授权随之清空";
 "empty.needsAttention" = "额度连接需要处理";
 "empty.expired" = "Claude 凭据已过期";
 "empty.rateLimited" = "接口限流中";
@@ -202,7 +202,7 @@
 "blocker.ok" = "已验证，额度连接正常";
 "blocker.needsSetup" = "未能读取登录凭据，可在设置中重新连接";
 "blocker.notLoggedIn" = "未找到凭据，请登录 Claude Code";
-"blocker.keychainRefused" = "钥匙串访问失败或超时，请在设置中重新连接";
+"blocker.keychainRefused" = "钥匙串尚未授权本应用读取该登录";
 "blocker.expired.noDate" = "登录已过期且无法续期 · 在终端运行 claude auth login";
 "blocker.expired.dated" = "Claude Code 的登录已在 %@ 过期 · 在终端运行 claude auth login";
 "blocker.unauthorized" = "凭据已失效，请重新登录 Claude Code 或更换手动令牌";

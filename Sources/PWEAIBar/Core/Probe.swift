@@ -575,3 +575,52 @@ extension NSView {
         return nil
     }
 }
+
+extension Probe {
+    /// Which way of reading Claude Code's item actually works *as this app*, signed as it ships.
+    /// An unsigned test binary is not on the item's access list, so its answers do not transfer —
+    /// this has to run from inside the real bundle. Prints status codes and byte counts only;
+    /// never the credential.
+    ///
+    /// Only the variants that cannot draw are attempted, so running this never nags anyone.
+    static func credentials() {
+        func report(_ name: String, _ status: OSStatus, _ item: CFTypeRef?) {
+            let bytes = (item as? Data)?.count
+            let note: String
+            switch status {
+            case errSecSuccess:              note = "ok, \(bytes ?? -1) bytes"
+            case errSecItemNotFound:         note = "errSecItemNotFound"
+            case errSecInteractionNotAllowed: note = "errSecInteractionNotAllowed"
+            case errSecAuthFailed:           note = "errSecAuthFailed"
+            case errSecParam:                note = "errSecParam"
+            case errSecUserCanceled:         note = "errSecUserCanceled"
+            default:                         note = "OSStatus \(status)"
+            }
+            print(String(format: "  %-34s %@", (name as NSString).utf8String!, note))
+        }
+        let account = NSUserName()
+        for service in Credentials.sharedServiceCandidates() {
+            print("service: \(service)  account: \(account)")
+            var base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                       kSecAttrService as String: service,
+                                       kSecAttrAccount as String: account,
+                                       kSecReturnData as String: true,
+                                       kSecMatchLimit as String: kSecMatchLimitOne]
+            SecKeychainSetUserInteractionAllowed(false)
+            var item: CFTypeRef?
+            report("UI off, no LAContext", SecItemCopyMatching(base as CFDictionary, &item), item)
+
+            base[kSecUseAuthenticationContext as String] = Credentials.noninteractiveContext()
+            item = nil
+            report("UI off, with LAContext", SecItemCopyMatching(base as CFDictionary, &item), item)
+            SecKeychainSetUserInteractionAllowed(true)
+
+            let quiet = Credentials.quietRead(service, account)
+            print(String(format: "  %-34s %@", ("Credentials.quietRead" as NSString).utf8String!,
+                         quiet == nil ? "nil" : "ok, \(quiet!.utf8.count) bytes"))
+            let shared = Credentials.readShared()
+            print(String(format: "  %-34s %@", ("Credentials.readShared" as NSString).utf8String!,
+                         shared == nil ? "nil" : "ok"))
+        }
+    }
+}
