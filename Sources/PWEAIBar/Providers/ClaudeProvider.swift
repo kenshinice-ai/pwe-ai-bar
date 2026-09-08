@@ -10,12 +10,14 @@ actor ClaudeProvider {
         var sharedExists: () -> Bool
         var shared: () -> Credentials.Token?
         var save: (String) -> Credentials.SaveResult
-        var load: (() throws -> [Credentials.Token])? = nil
+        /// `Bool`: may this read touch the keychain, i.e. may it raise a dialog?
+        var load: ((Bool) throws -> [Credentials.Token])? = nil
         var persist: ((Credentials.Token, Credentials.Token) throws -> Bool)? = nil
         static let live = Access(own: Credentials.ownToken, claudeCode: { Credentials.claudeCodeCredential() },
                                  sharedExists: Credentials.sharedItemExists, shared: Credentials.readShared,
                                  save: { Credentials.storeOwnToken($0) },
-                                 load: { try ClaudeCredentialStore().load() },
+                                 load: { keychain in try ClaudeCredentialStore(
+                                    services: keychain ? Credentials.sharedServiceCandidates() : []).load() },
                                  persist: { try ClaudeCredentialStore().save($0, expected: $1) })
     }
     enum Blocker: Error, Equatable {
@@ -123,7 +125,7 @@ actor ClaudeProvider {
         set { defaults.set(newValue?.timeIntervalSince1970 ?? 0, forKey: "quotaRetryAfter") }
     }
 
-    private func offActor<T>(_ work: @escaping () throws -> T) async throws -> T {
+    private func offActor<T>(timeout: TimeInterval = 15, _ work: @escaping () throws -> T) async throws -> T {
         try await withCheckedThrowingContinuation { cont in
             let done = OSAllocatedUnfairLock(initialState: false)
             func claim() -> Bool { done.withLock { value in
@@ -133,7 +135,7 @@ actor ClaudeProvider {
                 let result = Result { try work() }
                 if claim() { cont.resume(with: result) }
             }
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 15) {
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) {
                 if claim() { cont.resume(throwing: Blocker.keychainRefused) }
             }
         }
@@ -144,11 +146,25 @@ actor ClaudeProvider {
         if defaults.bool(forKey: "claudeManualTokenSelected") {
             return try await offActor { access.own().map { [$0] } ?? [] }
         }
+        // This latch used to guard only the fallback further down — never the read below, which
+        // is the one that shells out to `security` and can raise a keychain dialog. So a refusal
+        // latched and changed nothing: the next sweep asked again, and at a 20 s poll that is a
+        // dialog every 20 s until the app is killed. The keychain is asked here or nowhere.
+        let mayPrompt = !defaults.bool(forKey: "keychainRefused")
         var tokens: [Credentials.Token]
         do {
-            if let load = access.load { tokens = try await offActor(load) }
+            // 75 s: long enough to outlast the 60 s the dialog itself is given, so a person
+            // answering it wins rather than racing this watchdog.
+            if let load = access.load { tokens = try await offActor(timeout: 75) { try load(mayPrompt) } }
             else { tokens = try await offActor { access.claudeCode().map { [$0] } ?? [] } }
         } catch {
+            // The fallback on the next line reads the same item in-process, where nothing can
+            // prompt, and it usually succeeds — which is precisely how this looped in silence.
+            // The subprocess read raised a dialog every sweep, failed, and was rescued here, so
+            // no error ever propagated, `classify` never ran, and the latch that exists to stop
+            // the asking could never arm. The quota kept displaying correctly the whole time.
+            // Record the refusal *first*, then recover: recovering is not the same as fine.
+            if case ClaudeCredentialStore.Failure.denied = error { latchKeychainRefusal() }
             if defaults.bool(forKey: "sharedKeychainOptIn"), let shared = try await offActor(access.shared) { return [shared] }
             throw error
         }
@@ -157,10 +173,14 @@ actor ClaudeProvider {
         }
         if tokens.isEmpty || unrefreshable {
             if let own = try await offActor(access.own) { return [own] }
-            if defaults.bool(forKey: "sharedKeychainOptIn"), !defaults.bool(forKey: "keychainRefused") {
-                if let shared = try await offActor(access.shared) { return [shared] }
-            }
+            // Not gated on the latch: this read is in-process and non-interactive, so it cannot
+            // be the thing that nags. Gating it too would trade a dialog storm for a dead panel.
+            if defaults.bool(forKey: "sharedKeychainOptIn"),
+               let shared = try await offActor(access.shared) { return [shared] }
         }
+        // Nothing to show, and the keychain is exactly what we declined to open. Say that,
+        // rather than "not logged in" about a credential sitting right there unread.
+        if tokens.isEmpty, !mayPrompt { throw Blocker.keychainRefused }
         return tokens
     }
 
@@ -500,12 +520,7 @@ actor ClaudeProvider {
         if let error = error as? ClaudeCredentialStore.Failure {
             switch error {
             case .denied:
-                // Latched, and only here. A refusal is a decision the reader made, and asking
-                // again every five minutes for the rest of the day is how an app teaches people
-                // to click Deny on reflex. The timeout path throws the same blocker and must
-                // *not* latch — a keychain that was slow once is not a keychain that said no.
-                // 设置 → 重新连接 clears it (`enableSharedKeychain`).
-                defaults.set(true, forKey: "keychainRefused")
+                latchKeychainRefusal()
                 return .keychainRefused
             case .ambiguous, .changed: return .credentialsChanged
             case .malformed: return .invalidResponse
@@ -515,6 +530,13 @@ actor ClaudeProvider {
         if error is ClaudeUsageMapper.Failure { return .invalidResponse }
         return .network
     }
+
+    /// A refusal is a decision the reader made, and asking again every twenty seconds is how an
+    /// app teaches people to click Deny on reflex. Deny and "left the dialog standing" both land
+    /// here on purpose: from this side they are the same answer, and the second one is the one
+    /// that used to loop. It closes only the interactive door — the in-process read stays open,
+    /// so the panel keeps its numbers. 设置 → 重新连接 reopens it (`enableSharedKeychain`).
+    private func latchKeychainRefusal() { defaults.set(true, forKey: "keychainRefused") }
 
     private func sameIdentity(_ a: Credentials.Token, _ b: Credentials.Token) -> Bool {
         if let first = a.accountKey, let second = b.accountKey { return first == second }

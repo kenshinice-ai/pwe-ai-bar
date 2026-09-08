@@ -279,7 +279,14 @@ enum Subprocess {
         }
     }
 
-    static let line: ProcessLine = { argv in
+    static let line: ProcessLine = { run($0, timeout: 5) }
+
+    /// `timeout` is the caller's patience, and the two callers want very different things.
+    /// Five seconds is right for a command that answers on its own. A command that can put a
+    /// keychain dialog on screen is waiting for a *person*, and killing it at five seconds
+    /// dismisses that dialog before anyone can reach "Always Allow" — so the grant never
+    /// records, and the next read asks again. Give that one a human's patience instead.
+    static func run(_ argv: [String], timeout: TimeInterval) -> String? {
         guard let first = argv.first else { return nil }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: first)
@@ -304,7 +311,7 @@ enum Subprocess {
                 }
             }
         }
-        let timedOut = exited.wait(timeout: .now() + 5) == .timedOut
+        let timedOut = exited.wait(timeout: .now() + timeout) == .timedOut
         if timedOut || process.isRunning {
             process.terminate()
             if exited.wait(timeout: .now() + 0.1) == .timedOut, process.isRunning {

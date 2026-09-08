@@ -20,7 +20,7 @@ private final class ClaudeMemory: @unchecked Sendable {
     }
     var access: ClaudeProvider.Access {
         .init(own: { nil }, claudeCode: { nil }, sharedExists: { false }, shared: { nil }, save: { _ in .failed(-1) },
-              load: { try self.store.load() }, persist: { try self.store.save($0, expected: $1) })
+              load: { _ in try self.store.load() }, persist: { try self.store.save($0, expected: $1) })
     }
 }
 
@@ -259,7 +259,7 @@ final class ClaudeUsageTests: XCTestCase {
             first.refreshToken = nil; second.refreshToken = nil
             let tokens = [first, second]
             let access = ClaudeProvider.Access(own: { nil }, claudeCode: { nil }, sharedExists: { false }, shared: { nil },
-                                               save: { _ in .failed(-1) }, load: { tokens })
+                                               save: { _ in .failed(-1) }, load: { _ in tokens })
             let http = HTTPStub([(401, "{}", [:]), (200, quota, [:])])
             let p = ClaudeProvider(defaults: space.defaults, access: access, now: { self.date }, request: { try await http.send($0) })
             let result = await p.windows()
@@ -519,5 +519,99 @@ final class ClaudeUsageTests: XCTestCase {
         XCTAssertEqual(blocker.message, ClaudeProvider.Blocker.expired(nil).message,
                        "no date may be named once we cannot vouch for it: \(blocker.message)")
         XCTAssertTrue(blocker.message.contains("claude auth login"), "the remedy is still stated")
+    }
+}
+
+/// 1.0.8 shipped a keychain prompt loop: the `keychainRefused` latch guarded the in-process
+/// fallback but not the leg that shells out to `/usr/bin/security`, so a refusal changed
+/// nothing and the 20 s poll re-raised the dialog until the app was force-quit. These pin the
+/// two halves of the fix — the latch is read before the ask, and the ask outlasts a person.
+final class KeychainPromptTests: XCTestCase {
+    /// Records what the credential leg was told about touching the keychain.
+    private final class Asked: @unchecked Sendable {
+        private let lock = NSLock()
+        private var calls: [Bool] = []
+        func note(_ keychain: Bool) { lock.lock(); defer { lock.unlock() }; calls.append(keychain) }
+        var log: [Bool] { lock.lock(); defer { lock.unlock() }; return calls }
+    }
+
+    private func provider(_ space: TestSpace, _ asked: Asked) -> ClaudeProvider {
+        let access = ClaudeProvider.Access(own: { nil }, claudeCode: { nil }, sharedExists: { true },
+                                           shared: { nil }, save: { _ in .failed(-1) },
+                                           load: { keychain in asked.note(keychain); return [] })
+        return ClaudeProvider(defaults: space.defaults, access: access,
+                              now: { Date(timeIntervalSince1970: 1_760_000_000) },
+                              request: { _ in throw ClaudeProvider.Blocker.network })
+    }
+
+    func testARefusedKeychainIsNeverAskedAgain() async throws {
+        let space = try TestSpace()
+        space.defaults.set(true, forKey: "sharedKeychainOptIn")
+        space.defaults.set(true, forKey: "keychainRefused")
+        let asked = Asked(), p = provider(space, asked)
+        for _ in 0..<3 { _ = await p.windows(force: true) }
+        XCTAssertEqual(asked.log, [false, false, false],
+                       "every sweep after a refusal must skip the leg that can raise a dialog")
+        let blocker = await p.blocker
+        XCTAssertEqual(blocker, .keychainRefused,
+                       "and it must say which door it declined to open, not 'not logged in'")
+    }
+
+    func testAnUnrefusedKeychainIsStillRead() async throws {
+        let space = try TestSpace()
+        let asked = Asked(), p = provider(space, asked)
+        _ = await p.windows()
+        XCTAssertEqual(asked.log, [true], "the latch is off, so the keychain is the first place to look")
+    }
+
+    func testReconnectClearsTheLatch() async throws {
+        let space = try TestSpace()
+        space.defaults.set(true, forKey: "keychainRefused")
+        let asked = Asked(), p = provider(space, asked)
+        _ = await p.windows()
+        await p.enableSharedKeychain()
+        _ = await p.windows()
+        XCTAssertEqual(asked.log, [false, true], "设置 → 重新连接 is the way back in")
+    }
+
+    /// The reported bug, exactly. The keychain leg fails; the in-process fallback rescues the
+    /// reading; the panel shows correct numbers — so nothing propagates, and the app asks again
+    /// twenty seconds later, forever. Recovering is not the same as fine, and the latch has to
+    /// arm off the failure rather than off whether anyone noticed it.
+    func testAFallbackThatRescuesTheReadingStillRecordsTheRefusal() async throws {
+        let space = try TestSpace()
+        space.defaults.set(true, forKey: "sharedKeychainOptIn")
+        let asked = Asked(), shared = Counter()
+        let token = try XCTUnwrap(ClaudeCredentialStore.decode(
+            #"{"claudeAiOauth":{"accessToken":"t","refreshToken":"r","expiresAt":1800000000000,"scopes":["user:profile"]}}"#,
+            source: .sharedKeychain))
+        let access = ClaudeProvider.Access(
+            own: { nil }, claudeCode: { nil }, sharedExists: { true },
+            shared: { shared.bump(); return token }, save: { _ in .failed(-1) },
+            load: { keychain in
+                asked.note(keychain)
+                if keychain { throw ClaudeCredentialStore.Failure.denied }
+                return []
+            })
+        let p = ClaudeProvider(defaults: space.defaults, access: access,
+                               now: { Date(timeIntervalSince1970: 1_760_000_000) },
+                               request: { _ in throw ClaudeProvider.Blocker.network })
+        _ = await p.windows(force: true)
+        XCTAssertTrue(space.defaults.bool(forKey: "keychainRefused"),
+                      "the refusal must be recorded even though the fallback made it invisible")
+        _ = await p.windows(force: true)
+        XCTAssertEqual(asked.log, [true, false], "asked once, then never again — this is the whole bug")
+        XCTAssertEqual(shared.value, 2,
+                       "and the door that cannot prompt stays open, so the panel keeps its numbers")
+    }
+
+    /// The dialog is answered by a person. Five seconds killed `security` mid-prompt, so the
+    /// grant never recorded — which is what made the loop endless rather than merely annoying.
+    func testTheTimeoutIsThePerCallBudget() {
+        XCTAssertNil(Subprocess.run(["/bin/sleep", "2"], timeout: 0.3), "a short budget still bites")
+        XCTAssertEqual(Subprocess.run(["/bin/echo", "ok"], timeout: 5), "ok\n")
+        let started = Date()
+        XCTAssertNil(Subprocess.run(["/bin/sleep", "5"], timeout: 0.5))
+        XCTAssertLessThan(Date().timeIntervalSince(started), 4, "the budget is honoured, not ignored")
     }
 }

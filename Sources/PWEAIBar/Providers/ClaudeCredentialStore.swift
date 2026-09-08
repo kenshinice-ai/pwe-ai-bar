@@ -145,8 +145,13 @@ struct ClaudeCredentialStore {
         return rows.compactMap { $0[kSecAttrAccount as String] as? String }
     }
 
+    /// The one call in this app that can put a dialog on screen. It is therefore asked at most
+    /// once per opt-in — `ClaudeProvider.candidates` drops this whole leg once a read has been
+    /// refused — and it is given a minute rather than five seconds, because the thing it is
+    /// waiting for is a person reading a keychain prompt.
     private static func readKeychain(_ service: String, _ account: String) throws -> String? {
-        guard let value = Subprocess.line(["/usr/bin/security", "find-generic-password", "-a", account, "-s", service, "-w"]) else {
+        guard let value = Subprocess.run(["/usr/bin/security", "find-generic-password", "-a", account, "-s", service, "-w"],
+                                         timeout: 60) else {
             throw Failure.denied
         }
         return value
