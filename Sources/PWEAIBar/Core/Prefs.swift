@@ -43,6 +43,20 @@ final class Prefs: ObservableObject {
     /// Whether percentages read as "how much is left" rather than "how much is spent".
     /// Defaults to remaining — see `Readout` for why.
     @Published var showRemaining: Bool { didSet { d.set(showRemaining, forKey: "showRemaining") } }
+
+    /// How far back the trophy page counts.
+    @Published var trophyRange: TrophyRange { didSet { d.set(trophyRange.rawValue, forKey: "trophyRange") } }
+    /// Which currency the subscription is shown in. The equivalent API cost stays in USD
+    /// whatever this says — it is a USD list price, and converting it would need an exchange
+    /// rate this app has no honest source for.
+    @Published var subscriptionCurrency: String { didSet { d.set(subscriptionCurrency, forKey: "subscriptionCurrency") } }
+    /// What the reader actually pays each month, in `subscriptionCurrency`. Zero means "use the
+    /// table for the detected plan" — regional pricing, annual billing and tax all move this,
+    /// so the shipped number is a starting point rather than an answer.
+    @Published var subscriptionMonthly: Double { didSet { d.set(subscriptionMonthly, forKey: "subscriptionMonthly") } }
+    /// The same figure in USD, which is what the multiple is computed against. Separate because
+    /// A$150 and US$100 are both the price of Max 5× and neither is the other times a rate.
+    @Published var subscriptionMonthlyUSD: Double { didSet { d.set(subscriptionMonthlyUSD, forKey: "subscriptionMonthlyUSD") } }
     /// Which provider the stage is pinned to, or empty for "whichever is closest to stopping
     /// you". Pinning exists because the automatic choice answers the question the app thinks
     /// you have; sometimes you came to look at one particular tool and the worst window belongs
@@ -79,6 +93,10 @@ final class Prefs: ObservableObject {
             tracked = initial
         }
         showRemaining = d.object(forKey: "showRemaining") as? Bool ?? true
+        trophyRange = TrophyRange(rawValue: d.string(forKey: "trophyRange") ?? "") ?? .all
+        subscriptionCurrency = d.string(forKey: "subscriptionCurrency") ?? "USD"
+        subscriptionMonthly = d.double(forKey: "subscriptionMonthly")
+        subscriptionMonthlyUSD = d.double(forKey: "subscriptionMonthlyUSD")
         sound       = d.object(forKey: "sound")       as? Bool ?? true
         pushURL     = d.string(forKey: "pushURL") ?? ""
         launchAtLogin = d.object(forKey: "launchAtLogin") as? Bool ?? false

@@ -166,6 +166,32 @@ struct SettingsView: View {
                         .font(Theme.sans(10.5)).foregroundStyle(Theme.text2)
                 }
             }
+            row("订阅价格") {
+                VStack(alignment: .leading, spacing: Theme.s2) {
+                    Picker("", selection: $prefs.subscriptionCurrency) {
+                        Text("美元 USD").tag("USD")
+                        Text("澳元 AUD").tag("AUD")
+                    }
+                    .pickerStyle(.segmented).labelsHidden()
+
+                    HStack(spacing: Theme.s2) {
+                        priceField(prefs.subscriptionCurrency == "AUD" ? "每月 A$" : "每月 US$",
+                                   value: $prefs.subscriptionMonthly)
+                        // The multiple is computed in USD whatever is displayed, so when the
+                        // shown currency is not USD the USD figure is a second, separate number
+                        // rather than a conversion — A$150 and US$100 are both the price of
+                        // Max 5×, and neither is the other times an exchange rate.
+                        if prefs.subscriptionCurrency != "USD" {
+                            priceField("折 US$", value: $prefs.subscriptionMonthlyUSD)
+                        }
+                    }
+
+                    Text("留空按识别到的档位取表内价格。回本倍数一律按 USD 计算——"
+                         + "等效成本本身就是 USD 目录价，换算成别的币种需要一个本应用没有可靠来源的汇率。")
+                        .font(Theme.sans(10.5)).foregroundStyle(Theme.text2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             row("其它") {
                 VStack(alignment: .leading, spacing: Theme.s1) {
                     Toggle("提示音", isOn: $prefs.sound)
@@ -235,6 +261,19 @@ struct SettingsView: View {
             }
         }
         return out
+    }
+
+    /// Zero means "unset", so an empty field reads back as the table default rather than as a
+    /// price of nothing — which would otherwise render a multiple of infinity.
+    private func priceField(_ label: String, value: Binding<Double>) -> some View {
+        HStack(spacing: 4) {
+            Text(label).font(Theme.sans(11.5)).foregroundStyle(Theme.text2)
+            TextField("", text: Binding(
+                get: { value.wrappedValue > 0 ? String(format: "%g", value.wrappedValue) : "" },
+                set: { value.wrappedValue = Double($0.trimmingCharacters(in: .whitespaces)) ?? 0 }))
+                .textFieldStyle(.roundedBorder).font(Theme.figures(11.5))
+                .frame(width: 72)
+        }
     }
 
     private func row<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {

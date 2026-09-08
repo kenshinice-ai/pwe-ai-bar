@@ -8,6 +8,9 @@ import SwiftUI
 /// around the menu bar all day.
 struct TrophyView: View {
     let trophy: Trophy
+    @ObservedObject var prefs = Prefs.shared
+    /// Changing the range changes what has to be re-aggregated, which only the store can do.
+    var onRangeChange: (TrophyRange) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Entrance flourish only — nothing sized or valued depends on it.
@@ -46,31 +49,110 @@ struct TrophyView: View {
         }
     }
 
+    /// The hero, and the only thing on this page that is trying to land a punch.
+    ///
+    /// It used to be three columns of the same weight: the equivalent cost at 44 pt, then the
+    /// subscription and the multiple at 20 pt beside it. That reads as a table, and a table is
+    /// exactly what this is not — **the story is the ratio**, and a ratio told as two separate
+    /// figures makes the reader do the comparison themselves. So the two amounts are drawn once,
+    /// as one bar at one scale, where the subscription is a sliver you have to look for. That
+    /// picture is the argument; the numbers only label it.
     private var hero: some View {
-        HStack(alignment: .bottom, spacing: Theme.s5) {
-            VStack(alignment: .leading, spacing: Theme.s1) {
-                Text("\(t.days) 天等效 API 成本".uppercased()).brandLabel()
+        VStack(alignment: .leading, spacing: Theme.s3) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("\(t.range.label) · \(t.days) 个活跃日".uppercased()).brandLabel()
+                    .foregroundStyle(Theme.hex(Theme.textDark2))
+                Spacer(minLength: Theme.s2)
+                rangePicker
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("等效 API 成本".uppercased()).brandLabel()
                     .foregroundStyle(Theme.hex(Theme.textDark2))
                 Text(money(t.equivalentUSD))
-                    .font(Theme.figures(44)).foregroundStyle(Theme.hex(Theme.amber))
-                    .lineLimit(1).minimumScaleFactor(0.6)
+                    .font(Theme.figures(46)).foregroundStyle(Theme.hex(Theme.amber))
+                    .lineLimit(1).minimumScaleFactor(0.5)
             }
-            VStack(alignment: .leading, spacing: Theme.s1) {
-                Text("订阅同期摊销".uppercased()).brandLabel()
-                    .foregroundStyle(Theme.hex(Theme.textDark2))
-                Text(money(t.subscriptionUSD)).font(Theme.figures(20))
-                    .foregroundStyle(Theme.hex(Theme.textDark))
+
+            comparison
+
+            if let sub = t.subscriptionMonthly {
+                HStack(alignment: .firstTextBaseline, spacing: Theme.s2) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("回本".uppercased()).brandLabel()
+                            .foregroundStyle(Theme.hex(Theme.textDark2))
+                        Text(t.multiple >= 1 ? "\(Int(t.multiple.rounded()))×" : "不到 1×")
+                            .font(Theme.figures(30)).foregroundStyle(Theme.hex(Theme.amber))
+                    }
+                    Spacer(minLength: 0)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("\(sub.display) · \(amount(sub.monthly, sub.currency))/月")
+                            .font(Theme.sans(12, 500)).foregroundStyle(Theme.hex(Theme.textDark))
+                        Text("同期 \(amount(sub.monthly * Double(max(t.days, 1)) / 30, sub.currency))")
+                            .font(Theme.figures(12)).foregroundStyle(Theme.hex(Theme.textDark2))
+                    }
+                }
+            } else {
+                // No invented price, and therefore no multiple. A ratio reads exactly as
+                // confidently whether or not anyone checked the number under it.
+                Text("设置里填上你的订阅价格，才能算回本")
+                    .font(Theme.sans(12)).foregroundStyle(Theme.hex(Theme.textDark2))
             }
-            VStack(alignment: .leading, spacing: Theme.s1) {
-                Text("回本".uppercased()).brandLabel().foregroundStyle(Theme.hex(Theme.textDark2))
-                Text(t.multiple >= 1 ? "\(Int(t.multiple.rounded()))×" : "—")
-                    .font(Theme.figures(20)).foregroundStyle(Theme.hex(Theme.amber))
-            }
-            Spacer(minLength: 0)
         }
         .padding(Theme.s4)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.hex(Theme.navy))
+    }
+
+    /// Both amounts on one scale. The subscription bar is deliberately allowed to be a hairline.
+    private var comparison: some View {
+        let sub = t.subscriptionMonthly.map { _ in t.subscriptionUSD } ?? 0
+        let top = max(t.equivalentUSD, sub, 0.01)
+        return VStack(alignment: .leading, spacing: 5) {
+            GeometryReader { g in
+                VStack(alignment: .leading, spacing: 5) {
+                    Capsule().fill(Theme.hex(Theme.amber))
+                        .frame(width: g.size.width * t.equivalentUSD / top, height: 12)
+                    Capsule().fill(Theme.hex(Theme.textDark).opacity(0.55))
+                        // A floor of one point: at this ratio the honest width rounds to nothing,
+                        // and a bar that is not drawn at all reads as missing data rather than as
+                        // the smallness that is the entire point.
+                        .frame(width: max(1, g.size.width * sub / top), height: 12)
+                }
+            }
+            .frame(height: 29)
+            if t.subscriptionMonthly != nil {
+                Text("上：等效 API 成本　下：同期订阅，同一比例")
+                    .font(Theme.sans(10.5)).foregroundStyle(Theme.hex(Theme.textDark2))
+            }
+        }
+    }
+
+    private var rangePicker: some View {
+        HStack(spacing: 2) {
+            ForEach(TrophyRange.allCases, id: \.self) { r in
+                let on = prefs.trophyRange == r
+                Text(r.label)
+                    .font(Theme.sans(10.5, on ? 600 : 400))
+                    .foregroundStyle(Theme.hex(on ? Theme.navy : Theme.textDark2))
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(on ? Theme.hex(Theme.amber) : .clear, in: Capsule())
+                    .contentShape(Capsule())
+                    .onTapGesture { prefs.trophyRange = r; onRangeChange(r) }
+            }
+        }
+    }
+
+    /// Amounts in the reader's own currency. `A$` rather than `$` because on this page a bare
+    /// dollar sign already means USD — the equivalent cost is a USD list price.
+    private func amount(_ v: Double, _ currency: String) -> String {
+        let prefix = currency == "AUD" ? "A" : ""
+        // No cents on a round figure. "A$150.00/月" reads like a computed result; the price is
+        // just a price, and the two decimals are the only noise in the hero.
+        if v >= 1, v.rounded() == v {
+            return prefix + "$" + (Self.grouped.string(from: NSNumber(value: Int(v))) ?? String(Int(v)))
+        }
+        return prefix + money(v)
     }
 
     private var byModel: some View {
@@ -178,7 +260,8 @@ struct TrophyView: View {
                     .font(Theme.figures(11, 400)).foregroundStyle(Theme.text2)
                     .frame(width: 44, alignment: .trailing)
             }
-            Text(raw ? "\(v)" : big(v)).font(Theme.figures(12, 500)).foregroundStyle(Theme.text)
+            Text(raw ? (Self.grouped.string(from: NSNumber(value: v)) ?? "\(v)") : big(v))
+                .font(Theme.figures(12, 500)).foregroundStyle(Theme.text)
                 .frame(width: 72, alignment: .trailing)
         }
     }

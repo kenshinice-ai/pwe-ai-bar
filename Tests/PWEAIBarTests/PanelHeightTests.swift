@@ -38,7 +38,7 @@ final class PanelHeightTests: XCTestCase {
                                                  request: { _ in throw ClaudeProvider.Blocker.network }),
                           rules: RuleEngine(defaults: space.defaults, away: { false }, remaining: { true }),
                           readEvents: { [] },
-                          readLocal: { .init(trophy: Trophy(), context: nil, lastTurnAt: nil) },
+                          readLocal: { _, _ in .init(trophy: Trophy(), context: nil, lastTurnAt: nil) },
                           readCodex: { ([], nil) },
                           deliver: { _, _ in XCTFail("Measuring must not notify"); return false },
                           tracks: { (false, false) })

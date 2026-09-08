@@ -110,7 +110,8 @@ struct ClaudeCredentialStore {
                                  refreshExpiresAt: refreshExpiry.map { Date(timeIntervalSince1970: $0 / 1000) },
                                  scopes: scopes, document: document, origin: origin,
                                  accountKey: identity.map { ClaudeValue.fingerprint(Data($0.utf8)) },
-                                 plan: ClaudeValue.text(node["subscriptionType"]))
+                                 plan: ClaudeValue.text(node["subscriptionType"]),
+                                 rateLimitTier: ClaudeValue.text(node["rateLimitTier"]))
     }
 
     static func rotated(_ token: Credentials.Token, response: [String: Any], now: Date) throws -> Credentials.Token {

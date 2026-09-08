@@ -24,20 +24,34 @@ actor Transcript {
     /// One file's contribution, already reduced. Keys are absolute — a day number and an hour
     /// number since the epoch in local time — so a cached bucket stays valid as time passes and
     /// merging never needs to re-bucket anything.
-    private struct Digest {
-        var perModel: [String: (turns: Int, input: Int, output: Int, cacheWrite: Int, cacheRead: Int)] = [:]
-        var perDay: [Int: Double] = [:]
+    /// One model's contribution to one day.
+    struct Counts: Equatable {
+        var turns = 0, input = 0, output = 0, cacheWrite = 0, cacheRead = 0
+        var usd = 0.0
+        static func += (l: inout Counts, r: Counts) {
+            l.turns += r.turns; l.input += r.input; l.output += r.output
+            l.cacheWrite += r.cacheWrite; l.cacheRead += r.cacheRead; l.usd += r.usd
+        }
+    }
+
+    struct Digest {
+        /// Day number → model → counts. Kept two-dimensional so the trophy page can be asked
+        /// for a date range: totals per model and per token kind used to be a single all-time
+        /// sum, which meant a range could only ever have moved the headline figures while
+        /// "by model" and "Token" silently stayed all-time — more confusing than not offering
+        /// a range at all. Bounded by days × models, which is a few thousand rows at worst.
+        var perDayModel: [Int: [String: Counts]] = [:]
         var perHour: [Int: Double] = [:]
         var latest: (at: Date, model: String, contextTokens: Int)?
 
+        mutating func add(day: Int, model: String, _ c: Counts) {
+            perDayModel[day, default: [:]][model, default: Counts()] += c
+        }
+
         mutating func merge(_ other: Digest) {
-            for (m, v) in other.perModel {
-                var cur = perModel[m] ?? (0, 0, 0, 0, 0)
-                cur.turns += v.turns; cur.input += v.input; cur.output += v.output
-                cur.cacheWrite += v.cacheWrite; cur.cacheRead += v.cacheRead
-                perModel[m] = cur
+            for (day, models) in other.perDayModel {
+                for (m, v) in models { perDayModel[day, default: [:]][m, default: Counts()] += v }
             }
-            for (d, c) in other.perDay { perDay[d, default: 0] += c }
             for (h, c) in other.perHour { perHour[h, default: 0] += c }
             if let o = other.latest, latest == nil || o.at > latest!.at { latest = o }
         }
@@ -71,7 +85,8 @@ actor Transcript {
 
     // MARK: Sweep
 
-    func refresh(pricing: Pricing) -> Result {
+    func refresh(pricing: Pricing, range: TrophyRange = .all,
+                 subscription: Subscription? = nil) -> Result {
         // Set the stamp before loading: `loadDisk` validates the file against it, and the
         // first call of a fresh process starts with an empty stamp. Comparing before assigning
         // meant that branch always won and the disk cache was never read at all — a cache that
@@ -131,7 +146,7 @@ actor Transcript {
         }
         if changed { saveDiskThrottled() }
 
-        return Self.assemble(total, pricing: pricing)
+        return Self.assemble(total, pricing: pricing, range: range, subscription: subscription)
     }
 
     // MARK: Parsing
@@ -157,18 +172,15 @@ actor Transcript {
             let cacheWrite = u["cache_creation_input_tokens"] as? Int ?? 0
             let cacheRead = u["cache_read_input_tokens"] as? Int ?? 0
 
-            var m = d.perModel[model] ?? (0, 0, 0, 0, 0)
-            m.turns += 1; m.input += input; m.output += output
-            m.cacheWrite += cacheWrite; m.cacheRead += cacheRead
-            d.perModel[model] = m
-
             let cost = pricing.cost(model: model, input: input, output: output,
                                     cacheWrite: cacheWrite, cacheRead: cacheRead)
             // Integer arithmetic, not Calendar and DateFormatter: calling either once per turn
             // cost most of a five-second sweep, and neither does anything here that an offset
             // and a division cannot.
             let local = at.timeIntervalSince1970 + zone
-            d.perDay[Int(floor(local / 86400)), default: 0] += cost
+            d.add(day: Int(floor(local / 86400)), model: model,
+                  Counts(turns: 1, input: input, output: output,
+                         cacheWrite: cacheWrite, cacheRead: cacheRead, usd: cost))
             d.perHour[Int(floor(local / 3600)), default: 0] += cost
 
             if d.latest == nil || at > d.latest!.at {
@@ -178,27 +190,48 @@ actor Transcript {
         return (d, end)
     }
 
-    private static func assemble(_ d: Digest, pricing: Pricing) -> Result {
+    static func assemble(_ d: Digest, pricing: Pricing, range: TrophyRange,
+                                 subscription: Subscription?) -> Result {
         var t = Trophy()
-        var byModel: [(String, Int, Double)] = []
+        let zone = Double(TimeZone.current.secondsFromGMT())
+        let today = Int(floor((Date().timeIntervalSince1970 + zone) / 86400))
+        // The range is counted in calendar days back from today, not in active days: "last 7
+        // days" has to mean the same span whether you worked all seven of them or two.
+        let days: [Int]
+        if let back = range.days {
+            let cutoff = today - back
+            days = d.perDayModel.keys.filter { $0 > cutoff }
+        } else {
+            days = Array(d.perDayModel.keys)
+        }
 
-        for (model, v) in d.perModel {
+        var perModel: [String: Counts] = [:]
+        var perDay: [Int: Double] = [:]
+        for day in days {
+            for (model, v) in d.perDayModel[day] ?? [:] {
+                perModel[model, default: Counts()] += v
+                perDay[day, default: 0] += v.usd
+            }
+        }
+
+        var byModel: [(String, Int, Double)] = []
+        for (model, v) in perModel {
             t.turns += v.turns
             t.tokens.input += v.input; t.tokens.output += v.output
             t.tokens.cacheWrite += v.cacheWrite; t.tokens.cacheRead += v.cacheRead
-            let cost = pricing.cost(model: model, input: v.input, output: v.output,
-                                    cacheWrite: v.cacheWrite, cacheRead: v.cacheRead)
-            t.equivalentUSD += cost
-            byModel.append((model, v.turns, cost))
+            t.equivalentUSD += v.usd
+            byModel.append((model, v.turns, v.usd))
         }
         t.byModel = byModel.sorted { $0.2 > $1.2 }.map { ($0.0, $0.1, $0.2) }
-        t.days = d.perDay.count
+        // Active days within the range, which is what the amortised subscription is charged
+        // against — a range with two working days in it did not cost you seven days of plan.
+        t.days = perDay.count
+        t.range = range
 
-        let zone = Double(TimeZone.current.secondsFromGMT())
         let dayFmt = DateFormatter(); dayFmt.dateFormat = "yyyy-MM-dd"
-        t.byDay = d.perDay.keys.sorted().map { day in
+        t.byDay = perDay.keys.sorted().map { day in
             (dayFmt.string(from: Date(timeIntervalSince1970: Double(day) * 86400 - zone)),
-             d.perDay[day] ?? 0)
+             perDay[day] ?? 0)
         }
         // Empty hours keep their slot: a gap is information, and closing it up would make a
         // quiet night look busy.
@@ -207,7 +240,10 @@ actor Transcript {
             let h = thisHour - back
             return (Date(timeIntervalSince1970: Double(h) * 3600 - zone), d.perHour[h] ?? 0)
         }
-        t.subscriptionUSD = pricing.subscriptionMonthlyUSD * Double(max(t.days, 1)) / 30.0
+        if let subscription {
+            t.subscriptionUSD = subscription.monthlyUSD * Double(max(t.days, 1)) / 30.0
+            t.subscriptionMonthly = subscription
+        }
 
         var ctx: Double?
         if let l = d.latest, Date().timeIntervalSince(l.at) < 6 * 3600 {
@@ -248,7 +284,7 @@ actor Transcript {
         loadedFromDisk = true
         guard let data = try? Data(contentsOf: Self.diskCache),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              root["version"] as? Int == 2,
+              root["version"] as? Int == 3,
               root["pricing"] as? String == pricingStamp,
               let files = root["files"] as? [String: [String: Any]] else { return }
 
@@ -256,11 +292,13 @@ actor Transcript {
             guard let modified = entry["m"] as? Double,
                   let size = entry["s"] as? Int else { continue }
             var d = Digest()
-            for (model, v) in (entry["models"] as? [String: [Int]] ?? [:]) where v.count == 5 {
-                d.perModel[model] = (v[0], v[1], v[2], v[3], v[4])
-            }
-            for (k, v) in (entry["days"] as? [String: Double] ?? [:]) {
-                if let key = Int(k) { d.perDay[key] = v }
+            for (dayKey, models) in (entry["daymodels"] as? [String: [String: [Double]]] ?? [:]) {
+                guard let day = Int(dayKey) else { continue }
+                for (model, v) in models where v.count == 6 {
+                    d.perDayModel[day, default: [:]][model] = Counts(
+                        turns: Int(v[0]), input: Int(v[1]), output: Int(v[2]),
+                        cacheWrite: Int(v[3]), cacheRead: Int(v[4]), usd: v[5])
+                }
             }
             for (k, v) in (entry["hours"] as? [String: Double] ?? [:]) {
                 if let key = Int(k) { d.perHour[key] = v }
@@ -285,17 +323,19 @@ actor Transcript {
         for (path, entry) in cache {
             var e: [String: Any] = ["m": entry.modified.timeIntervalSince1970,
                                     "s": entry.size, "p": entry.parsedUpTo]
-            e["models"] = entry.digest.perModel.mapValues {
-                [$0.turns, $0.input, $0.output, $0.cacheWrite, $0.cacheRead]
-            }
-            e["days"] = Dictionary(uniqueKeysWithValues: entry.digest.perDay.map { (String($0.key), $0.value) })
+            e["daymodels"] = Dictionary(uniqueKeysWithValues: entry.digest.perDayModel.map {
+                (String($0.key), $0.value.mapValues {
+                    [Double($0.turns), Double($0.input), Double($0.output),
+                     Double($0.cacheWrite), Double($0.cacheRead), $0.usd]
+                })
+            })
             e["hours"] = Dictionary(uniqueKeysWithValues: entry.digest.perHour.map { (String($0.key), $0.value) })
             if let l = entry.digest.latest {
                 e["latest"] = ["at": l.at.timeIntervalSince1970, "model": l.model, "ctx": l.contextTokens]
             }
             files[path] = e
         }
-        let root: [String: Any] = ["version": 2, "pricing": pricingStamp, "files": files]
+        let root: [String: Any] = ["version": 3, "pricing": pricingStamp, "files": files]
         guard let data = try? JSONSerialization.data(withJSONObject: root) else { return }
         try? data.write(to: Self.diskCache, options: .atomic)
     }

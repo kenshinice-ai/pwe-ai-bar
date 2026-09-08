@@ -20,7 +20,7 @@ final class RenderingTests: XCTestCase {
         let http = HTTPStub([(200, body, [:]), (429, "{}", ["Retry-After": "120"])])
         let p = ClaudeProvider(defaults: space.defaults, access: auth, request: { try await http.send($0) })
         let store = Store(claude: p, rules: RuleEngine(defaults: space.defaults, away: { false }, remaining: { true }),
-                          readEvents: { [] }, readLocal: { .init(trophy: Trophy(), context: nil, lastTurnAt: nil) },
+                          readEvents: { [] }, readLocal: { _, _ in .init(trophy: Trophy(), context: nil, lastTurnAt: nil) },
                           readCodex: { ([], nil) }, deliver: { _, _ in XCTFail("No real notifications"); return false },
                           tracks: { (true, false) }, tracksExtra: { _ in false }, observe: { $0 })
         let output = ProcessInfo.processInfo.environment["PWEBAR_TEST_ARTIFACTS"].map { URL(fileURLWithPath: $0) } ?? space.root
@@ -50,7 +50,7 @@ final class RenderingTests: XCTestCase {
         let p = provider(space, clock: clock, credential: credential, http: HTTPStub([]))
         let rules = RuleEngine(defaults: space.defaults, away: { false }, remaining: { true })
         let store = Store(claude: p, rules: rules, readEvents: { [] },
-                          readLocal: { .init(trophy: Trophy(), context: nil, lastTurnAt: nil) }, readCodex: { ([], nil) },
+                          readLocal: { _, _ in .init(trophy: Trophy(), context: nil, lastTurnAt: nil) }, readCodex: { ([], nil) },
                           deliver: { _, _ in XCTFail("Rendering must not deliver notifications"); return false },
                           tracks: { (false, false) })
         var snap = Snapshot()

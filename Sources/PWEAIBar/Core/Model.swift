@@ -351,6 +351,49 @@ struct Snapshot {
 
 /// The trophy figures. On a subscription the interesting number is not what you spent — you
 /// spent the subscription — but what the same tokens would have cost at API rates.
+/// How far back the trophy page counts.
+///
+/// Calendar days back from today, not active days: "last 7 days" has to mean the same span
+/// whether you worked all seven of them or two, or the figure moves for two different reasons
+/// at once and stops being comparable with itself.
+enum TrophyRange: String, CaseIterable, Codable, Sendable {
+    case week, month, quarter, all
+
+    var days: Int? {
+        switch self {
+        case .week: return 7
+        case .month: return 30
+        case .quarter: return 90
+        case .all: return nil
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .week: return "7 天"
+        case .month: return "30 天"
+        case .quarter: return "90 天"
+        case .all: return "全部"
+        }
+    }
+}
+
+/// What the reader actually pays, and the basis the multiple is computed on.
+///
+/// Two amounts rather than one because they are not a currency conversion of each other:
+/// Anthropic prices by region, so A$150 and US$100 are both "the price of Max 5×" and neither
+/// is the other times an exchange rate. `monthly` is what to show the person paying it;
+/// `monthlyUSD` is what to compare against an equivalent cost that is itself a USD list price.
+/// Converting the equivalent into AUD instead would need a rate this app has no honest source
+/// for, so it does not.
+struct Subscription: Equatable, Sendable {
+    var plan: String
+    var display: String
+    var currency: String
+    var monthly: Double
+    var monthlyUSD: Double
+}
+
 struct Trophy {
     var days: Int = 0
     var turns: Int = 0
@@ -363,6 +406,12 @@ struct Trophy {
     /// filling in over the following day.
     var byHour: [(hour: Date, usd: Double)] = []
     var tokens: (input: Int, output: Int, cacheWrite: Int, cacheRead: Int) = (0, 0, 0, 0)
+    /// The window these figures cover, carried so the page can say so rather than implying
+    /// "all time" for numbers that are not.
+    var range: TrophyRange = .all
+    /// Nil when no price is known for the detected plan. The page then shows the equivalent
+    /// cost and *no multiple* — a ratio against a price nobody confirmed is worse than none.
+    var subscriptionMonthly: Subscription?
 
     var multiple: Double { subscriptionUSD > 0 ? equivalentUSD / subscriptionUSD : 0 }
 }

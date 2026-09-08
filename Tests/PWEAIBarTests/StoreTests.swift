@@ -23,7 +23,7 @@ final class StoreTests: XCTestCase {
         let store = Store(claude: p,
                           rules: RuleEngine(defaults: space.defaults, away: { false }, remaining: { true }),
                           readEvents: { [] },
-                          readLocal: { localCalled = true; return .init(trophy: Trophy(), context: nil, lastTurnAt: nil) },
+                          readLocal: { _, _ in localCalled = true; return .init(trophy: Trophy(), context: nil, lastTurnAt: nil) },
                           readCodex: { try? await Task.sleep(nanoseconds: 600_000_000); return ([], nil) },
                           deliver: { _, _ in false }, tracks: { (true, true) }, tracksExtra: { _ in false },
                           observe: { $0 })
@@ -46,7 +46,7 @@ final class StoreTests: XCTestCase {
         let rules = RuleEngine(defaults: space.defaults, away: { false }, remaining: { true })
         var delivered: [RuleEngine.Alert] = []
         let store = Store(claude: p, rules: rules, readEvents: { await reader.events() },
-                          readLocal: { .init(trophy: Trophy(), context: nil, lastTurnAt: nil) }, readCodex: { ([], nil) },
+                          readLocal: { _, _ in .init(trophy: Trophy(), context: nil, lastTurnAt: nil) }, readCodex: { ([], nil) },
                           deliver: { alert, _ in delivered.append(alert); return true }, tracks: { (true, false) },
                           lastActivity: Date().addingTimeInterval(-7200))
         store.start(observeSystem: false)

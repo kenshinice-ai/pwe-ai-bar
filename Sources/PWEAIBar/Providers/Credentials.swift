@@ -41,6 +41,9 @@ enum Credentials {
         var origin: ClaudeCredentialStore.Origin? = nil
         var accountKey: String? = nil
         var plan: String? = nil
+        /// The server's own rate-limit tier, e.g. `default_claude_max_5x`. The only field that
+        /// separates Max 5× from Max 20×, which is a factor of two in what the plan costs.
+        var rateLimitTier: String? = nil
 
         var hasUsageScope: Bool { scopes?.isEmpty != false || scopes!.contains("user:profile") }
         var generation: String {

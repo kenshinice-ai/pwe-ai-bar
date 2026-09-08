@@ -225,7 +225,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showTrophy() {
         closePopover()
-        let view = TrophyView(trophy: store.snapshot.trophy)
+        // Observing the store rather than snapshotting the trophy: changing the range has to
+        // re-aggregate, and a window holding a value copied at open time would keep showing the
+        // old span while the picker said otherwise.
+        let view = TrophyWindow(store: store, onRangeChange: { [weak self] _ in self?.store.refresh() })
         if let w = trophyWindow {
             w.contentView = NSHostingView(rootView: view)
             present(w); return
@@ -333,4 +336,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 final class KeyableWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+}
+
+/// The trophy page as a window: live, so the range picker has something to change.
+private struct TrophyWindow: View {
+    @ObservedObject var store: Store
+    var onRangeChange: (TrophyRange) -> Void
+    var body: some View {
+        TrophyView(trophy: store.snapshot.trophy, onRangeChange: onRangeChange)
+    }
 }

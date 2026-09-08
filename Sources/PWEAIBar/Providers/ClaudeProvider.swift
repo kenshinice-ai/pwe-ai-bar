@@ -70,6 +70,9 @@ actor ClaudeProvider {
     }
     struct Details {
         var plan: String?
+        /// The server's rate-limit tier. Separates Max 5× from Max 20×, which the plan name
+        /// does not, and that difference is a factor of two in what the subscription costs.
+        var tier: String?
         var spend: ClaudeSpend?
         var lastSuccessAt: Date?
         var lastAttemptAt: Date?
@@ -232,7 +235,8 @@ actor ClaudeProvider {
             blocker = failure
             switch failure {
             case .unauthorized, .forbidden, .expired, .notLoggedIn, .storage, .credentialsChanged:
-                cache = []; details.spend = nil; details.plan = nil; details.lastSuccessAt = nil
+                cache = []; details.spend = nil; details.plan = nil; details.tier = nil
+            details.lastSuccessAt = nil
             case .network, .invalidResponse:
                 retryNetworkAt = now().addingTimeInterval(60)
             default: break
@@ -291,7 +295,8 @@ actor ClaudeProvider {
             w.observationNamespace = historyNamespace ?? token.generation
             return w
         }
-        details.plan = token.plan; details.spend = mapped.spend; details.lastSuccessAt = now()
+        details.plan = token.plan; details.tier = token.rateLimitTier
+        details.spend = mapped.spend; details.lastSuccessAt = now()
         details.source = token.source
         blocker = .none; retryNetworkAt = nil
         return (cache, cache.contains(where: \.isStale))

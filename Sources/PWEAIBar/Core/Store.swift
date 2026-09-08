@@ -21,13 +21,27 @@ final class Store: ObservableObject {
     private let claude: ClaudeProvider
     private let rules: RuleEngine
     private let readEvents: () async -> [AgentEvent]
-    private let readLocal: () async -> Transcript.Result
+    private let readLocal: (TrophyRange, Subscription?) async -> Transcript.Result
+    private let pricing = Pricing.load()
     private let readCodex: () async -> ([QuotaWindow], String?)
     private let deliver: (RuleEngine.Alert, Bool) async -> Bool
     private let tracks: () -> (claude: Bool, codex: Bool)
     private let tracksExtra: (Provider) -> Bool
     private let readExtras: ([Provider]) async -> ExtraStore.Result
     private let observe: ([QuotaWindow]) async -> [QuotaWindow]
+
+    /// What the reader pays, resolved from the account's own words and their settings.
+    ///
+    /// Nil when nothing can say — an unrecognised plan, or "max" with no tier to tell 5× from
+    /// 20×. The trophy page renders that as no multiple at all rather than a ratio against a
+    /// price nobody confirmed.
+    func subscription() -> Subscription? {
+        let prefs = Prefs.shared
+        let key = Pricing.planKey(tier: snapshot.claudeDetails.tier, type: snapshot.claudeDetails.plan)
+        return pricing.subscription(planKey: key, currency: prefs.subscriptionCurrency,
+                                    override: prefs.subscriptionMonthly > 0 ? prefs.subscriptionMonthly : nil,
+                                    overrideUSD: prefs.subscriptionMonthlyUSD > 0 ? prefs.subscriptionMonthlyUSD : nil)
+    }
     private func tracks(extra p: Provider) -> Bool { tracksExtra(p) }
     private let eventInterval: TimeInterval
     private var eventTimer: Timer?
@@ -37,7 +51,7 @@ final class Store: ObservableObject {
 
     init(claude: ClaudeProvider = ClaudeProvider(), rules: RuleEngine? = nil,
          readEvents: (() async -> [AgentEvent])? = nil,
-         readLocal: (() async -> Transcript.Result)? = nil,
+         readLocal: ((TrophyRange, Subscription?) async -> Transcript.Result)? = nil,
          readCodex: (() async -> ([QuotaWindow], String?))? = nil,
          deliver: ((RuleEngine.Alert, Bool) async -> Bool)? = nil,
          tracks: (() -> (claude: Bool, codex: Bool))? = nil,
@@ -54,8 +68,10 @@ final class Store: ObservableObject {
         }
         if let readLocal { self.readLocal = readLocal }
         else {
-            let pricing = Pricing.load()
-            self.readLocal = { await Transcript.shared.refresh(pricing: pricing) }
+            let table = Pricing.load()
+            self.readLocal = { range, sub in
+                await Transcript.shared.refresh(pricing: table, range: range, subscription: sub)
+            }
         }
         self.deliver = deliver ?? { await Notifier.shared.deliver($0, away: $1) }
         self.tracks = tracks ?? { (Prefs.shared.trackClaude, Prefs.shared.trackCodex) }
@@ -174,7 +190,7 @@ final class Store: ObservableObject {
             // Record what every window reads before anything downstream looks at them, so the
             // pace they report is measured rather than averaged over the whole window.
             snap.windows = await observe(snap.windows)
-            let local = await readLocal()
+            let local = await readLocal(Prefs.shared.trophyRange, subscription())
             snap.trophy = local.trophy
             snap.contextPercent = local.context
             snap.windows += snapshot.windows(of: .claude)

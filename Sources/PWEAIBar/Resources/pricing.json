@@ -3,23 +3,128 @@
   "_checked": "2026-09-06",
   "_note": "每 100 万 token 的目录价。cacheWriteMultiple 是 5 分钟缓存写（1.25×）；1 小时写是 2×，但 transcript 里分不出是哪一种，所以按 5 分钟计。cacheReadMultiple 通常 0.1×，Fable 5.1 与 Mythos 5.1 是 0.025×。",
   "models": {
-    "claude-fable-5-1":   { "input": 10,   "output": 50,   "cacheWriteMultiple": 1.25, "cacheReadMultiple": 0.025 },
-    "claude-mythos-5-1":  { "input": 10,   "output": 50,   "cacheWriteMultiple": 1.25, "cacheReadMultiple": 0.025 },
-    "claude-fable-5":     { "input": 10,   "output": 50,   "cacheWriteMultiple": 1.25, "cacheReadMultiple": 0.1 },
-    "claude-mythos-5":    { "input": 10,   "output": 50,   "cacheWriteMultiple": 1.25, "cacheReadMultiple": 0.1 },
-    "claude-opus-5":      { "input": 5,    "output": 25,   "cacheWriteMultiple": 1.25, "cacheReadMultiple": 0.1 },
-    "claude-opus-4-8":    { "input": 5,    "output": 25,   "cacheWriteMultiple": 1.25, "cacheReadMultiple": 0.1 },
-    "claude-opus-4-7":    { "input": 5,    "output": 25,   "cacheWriteMultiple": 1.25, "cacheReadMultiple": 0.1 },
-    "claude-opus-4-6":    { "input": 5,    "output": 25,   "cacheWriteMultiple": 1.25, "cacheReadMultiple": 0.1 },
-    "claude-opus-4-5":    { "input": 5,    "output": 25,   "cacheWriteMultiple": 1.25, "cacheReadMultiple": 0.1 },
-    "claude-opus-4-1":    { "input": 15,   "output": 75,   "cacheWriteMultiple": 1.25, "cacheReadMultiple": 0.1 },
-    "claude-opus-4":      { "input": 15,   "output": 75,   "cacheWriteMultiple": 1.25, "cacheReadMultiple": 0.1 },
-    "claude-sonnet-5":    { "input": 2,    "output": 10,   "cacheWriteMultiple": 1.25, "cacheReadMultiple": 0.1 },
-    "claude-sonnet-4-6":  { "input": 3,    "output": 15,   "cacheWriteMultiple": 1.25, "cacheReadMultiple": 0.1 },
-    "claude-sonnet-4-5":  { "input": 3,    "output": 15,   "cacheWriteMultiple": 1.25, "cacheReadMultiple": 0.1 },
-    "claude-sonnet-4":    { "input": 3,    "output": 15,   "cacheWriteMultiple": 1.25, "cacheReadMultiple": 0.1 },
-    "claude-haiku-4-5":   { "input": 1,    "output": 5,    "cacheWriteMultiple": 1.25, "cacheReadMultiple": 0.1 },
-    "claude-haiku-3-5":   { "input": 0.80, "output": 4,    "cacheWriteMultiple": 1.25, "cacheReadMultiple": 0.1 }
+    "claude-fable-5-1": {
+      "input": 10,
+      "output": 50,
+      "cacheWriteMultiple": 1.25,
+      "cacheReadMultiple": 0.025
+    },
+    "claude-mythos-5-1": {
+      "input": 10,
+      "output": 50,
+      "cacheWriteMultiple": 1.25,
+      "cacheReadMultiple": 0.025
+    },
+    "claude-fable-5": {
+      "input": 10,
+      "output": 50,
+      "cacheWriteMultiple": 1.25,
+      "cacheReadMultiple": 0.1
+    },
+    "claude-mythos-5": {
+      "input": 10,
+      "output": 50,
+      "cacheWriteMultiple": 1.25,
+      "cacheReadMultiple": 0.1
+    },
+    "claude-opus-5": {
+      "input": 5,
+      "output": 25,
+      "cacheWriteMultiple": 1.25,
+      "cacheReadMultiple": 0.1
+    },
+    "claude-opus-4-8": {
+      "input": 5,
+      "output": 25,
+      "cacheWriteMultiple": 1.25,
+      "cacheReadMultiple": 0.1
+    },
+    "claude-opus-4-7": {
+      "input": 5,
+      "output": 25,
+      "cacheWriteMultiple": 1.25,
+      "cacheReadMultiple": 0.1
+    },
+    "claude-opus-4-6": {
+      "input": 5,
+      "output": 25,
+      "cacheWriteMultiple": 1.25,
+      "cacheReadMultiple": 0.1
+    },
+    "claude-opus-4-5": {
+      "input": 5,
+      "output": 25,
+      "cacheWriteMultiple": 1.25,
+      "cacheReadMultiple": 0.1
+    },
+    "claude-opus-4-1": {
+      "input": 15,
+      "output": 75,
+      "cacheWriteMultiple": 1.25,
+      "cacheReadMultiple": 0.1
+    },
+    "claude-opus-4": {
+      "input": 15,
+      "output": 75,
+      "cacheWriteMultiple": 1.25,
+      "cacheReadMultiple": 0.1
+    },
+    "claude-sonnet-5": {
+      "input": 2,
+      "output": 10,
+      "cacheWriteMultiple": 1.25,
+      "cacheReadMultiple": 0.1
+    },
+    "claude-sonnet-4-6": {
+      "input": 3,
+      "output": 15,
+      "cacheWriteMultiple": 1.25,
+      "cacheReadMultiple": 0.1
+    },
+    "claude-sonnet-4-5": {
+      "input": 3,
+      "output": 15,
+      "cacheWriteMultiple": 1.25,
+      "cacheReadMultiple": 0.1
+    },
+    "claude-sonnet-4": {
+      "input": 3,
+      "output": 15,
+      "cacheWriteMultiple": 1.25,
+      "cacheReadMultiple": 0.1
+    },
+    "claude-haiku-4-5": {
+      "input": 1,
+      "output": 5,
+      "cacheWriteMultiple": 1.25,
+      "cacheReadMultiple": 0.1
+    },
+    "claude-haiku-3-5": {
+      "input": 0.8,
+      "output": 4,
+      "cacheWriteMultiple": 1.25,
+      "cacheReadMultiple": 0.1
+    }
   },
-  "subscriptionMonthlyUSD": 20
+  "subscriptionMonthlyUSD": 20,
+  "subscriptions": {
+    "_source": "https://claude.com/pricing",
+    "_checked": "2026-09-08",
+    "_note": "每月订阅价。Anthropic 按地区定价，A$150 与 US$100 都是 Max 5× 的价，彼此不是汇率换算的结果。max_5x 的两个数字由账户持有人确认；其余为目录价，未逐一核实，设置里可以改。回本倍数一律按 USD 计算，因为等效成本本身就是 USD 目录价。",
+    "plans": {
+      "pro": {
+        "display": "Pro",
+        "USD": 20
+      },
+      "max_5x": {
+        "display": "Max 5×",
+        "USD": 100,
+        "AUD": 150
+      },
+      "max_20x": {
+        "display": "Max 20×",
+        "USD": 200
+      }
+    }
+  }
 }
