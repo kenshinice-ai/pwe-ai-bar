@@ -143,3 +143,27 @@ final class PanelHeightTests: XCTestCase {
         XCTAssertTrue(scrollable, "capped with nothing to scroll means the rest is simply gone")
     }
 }
+
+/// The settings window used to be a fixed 380 × 560 with a 620 pt cap inside it, so on a large
+/// display it showed about half of itself and no amount of rearranging would have fixed that.
+/// It now follows the same rule as the panel, from the same owner, with its own chrome inset.
+final class SurfaceCeilingTests: XCTestCase {
+    func testEverySurfaceIsCappedByItsScreenAndNothingElse() {
+        XCTAssertEqual(Theme.ceiling(usableHeight: 1334, inset: 32), 1302, "the panel keeps its beak")
+        XCTAssertEqual(Theme.ceiling(usableHeight: 1334, inset: 88), 1246, "the window keeps its title bar")
+        XCTAssertEqual(PanelView.ceiling(usableHeight: 1334), 1302)
+        XCTAssertEqual(SettingsView.ceiling(usableHeight: 1334), 1246)
+    }
+
+    func testABiggerScreenAlwaysBuysMoreRoom() {
+        for inset in [CGFloat(32), 88] {
+            XCTAssertGreaterThan(Theme.ceiling(usableHeight: 1600, inset: inset),
+                                 Theme.ceiling(usableHeight: 1000, inset: inset),
+                                 "a second cap chosen on taste would flatten this out")
+        }
+    }
+
+    func testAPathologicalScreenStillLeavesSomethingReadable() {
+        XCTAssertEqual(Theme.ceiling(usableHeight: 200, inset: 88), 420)
+    }
+}

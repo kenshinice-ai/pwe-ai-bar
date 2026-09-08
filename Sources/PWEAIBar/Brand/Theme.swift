@@ -143,3 +143,16 @@ extension View {
             .tracking(Theme.labelTracking(size * 0.18))
     }
 }
+
+extension Theme {
+    /// The only legitimate cap on a surface's height is the screen it is on. Anything else is
+    /// taste presented as a constraint, and taste costs the reader room they actually have —
+    /// the panel once capped at 860 pt and threw away 474 pt on a 1334 pt display.
+    ///
+    /// `inset` is the chrome that surface carries: a popover has a beak and margins, a titled
+    /// window has a title bar. The floor exists only so a pathological screen still leaves
+    /// something readable.
+    static func ceiling(usableHeight: CGFloat?, inset: CGFloat) -> CGFloat {
+        max(420, (usableHeight ?? NSScreen.main?.visibleFrame.height ?? 860) - inset)
+    }
+}

@@ -50,7 +50,8 @@ final class BilingualRenderTests: XCTestCase {
             }
             let settings = SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
                                         enableRealQuota: {}, prefs: prefs,
-                                        tokenEditor: TokenEditor(hasToken: false), hookInstalled: false)
+                                        tokenEditor: TokenEditor(hasToken: false), hookInstalled: false,
+                                        usableHeight: { 1334 })
             try shoot(AnyView(settings), width: 380, to: out.appendingPathComponent("settings-\(lang.rawValue).png"))
             // The trophy page with the shape real data actually has: five-figure turn counts and
             // a model the price table does not carry.

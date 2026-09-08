@@ -250,12 +250,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return await self.store.saveToken(t)
             },
             enableRealQuota: { [weak self] in self?.store.enableRealQuota() })
+        // Sized to what the page needs, not to a number. The view clamps itself to the screen,
+        // so `fittingSize` is already the smaller of "everything" and "what fits" — a fixed
+        // 560 pt showed about half of this page and no amount of rearranging fixes that.
+        let host = NSHostingView(rootView: view)
         if let w = settingsWindow {
-            w.contentView = NSHostingView(rootView: view)
+            w.contentView = host
+            w.setContentSize(NSSize(width: 380, height: host.fittingSize.height))
             present(w); return
         }
         let w = panelWindow(title: L("window.settings", "Settings"), size: NSSize(width: 380, height: 560))
-        w.contentView = NSHostingView(rootView: view)
+        w.contentView = host
+        w.setContentSize(NSSize(width: 380, height: host.fittingSize.height))
+        w.center()
         settingsWindow = w
         present(w)
     }

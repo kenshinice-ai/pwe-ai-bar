@@ -197,6 +197,10 @@
 "score.multiple" = "Return";
 "settings.alertPlacement" = "Where alerts land";
 "settings.detecting" = "detecting";
+"settings.group.alerts" = "Alerts";
+"settings.group.display" = "Display";
+"settings.group.general" = "General";
+"settings.group.sources" = "Sources";
 "settings.hooks.install" = "Install";
 "settings.hooks.reinstall" = "Reinstall";
 "settings.inUSD" = "as US$";
@@ -206,7 +210,6 @@
 "settings.launchAtLogin" = "Launch at login";
 "settings.menuBar" = "Menu bar";
 "settings.noNotch" = "This Mac has no camera housing, so that option is unavailable.";
-"settings.other" = "Other";
 "settings.panel" = "Panel";
 "settings.perMonth.aud" = "per month A$";
 "settings.perMonth.usd" = "per month US$";

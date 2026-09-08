@@ -135,7 +135,6 @@
 "settings.perMonth.usd" = "每月 US$";
 "settings.inUSD" = "折 US$";
 "settings.subscription.note" = "留空按识别到的档位取表内价格。回本倍数一律按 USD 计算——等效成本本身就是 USD 目录价，换算成别的币种需要一个本应用没有可靠来源的汇率。";
-"settings.other" = "其它";
 "settings.sound" = "提示音";
 "settings.launchAtLogin" = "开机启动";
 "settings.source.found" = "已发现 Claude Code 登录条目；实际连接与系统访问结果请查看额度面板。";
@@ -277,3 +276,7 @@
 "outcome.renewed" = "已续期";
 "outcome.unknown" = "未知";
 "trophy.unpriced" = "—  这个模型没有公开定价，所以在这里按零计";
+"settings.group.sources" = "数据来源";
+"settings.group.display" = "显示";
+"settings.group.alerts" = "提醒";
+"settings.group.general" = "通用";

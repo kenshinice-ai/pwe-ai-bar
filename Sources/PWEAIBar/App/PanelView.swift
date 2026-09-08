@@ -52,8 +52,7 @@ struct PanelView: View {
     /// `visibleFrame` already excludes the menu bar; 32 pt covers the popover's beak and its
     /// margins. The floor exists only so a pathological screen still leaves something readable.
     static func ceiling(usableHeight: CGFloat? = nil) -> CGFloat {
-        let usable = usableHeight ?? NSScreen.main?.visibleFrame.height ?? 860
-        return max(420, usable - 32)
+        Theme.ceiling(usableHeight: usableHeight, inset: 32)
     }
 
     /// The height the panel wants: everything, or the ceiling, whichever is smaller.
