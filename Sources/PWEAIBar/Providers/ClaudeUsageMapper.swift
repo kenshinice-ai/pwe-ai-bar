@@ -70,8 +70,8 @@ enum ClaudeUsageMapper {
             guard let kind = ClaudeValue.text(node["kind"]) else { continue }
             let id: String, label: String, channel: Channel
             switch kind {
-            case "session": id = "five_hour"; label = L("channel.session", "5-hour window"); channel = .session
-            case "weekly_all": id = "seven_day"; label = L("channel.week", "Weekly window"); channel = .week
+            case "session": id = "five_hour"; label = L("channel.session", "5-hour"); channel = .session
+            case "weekly_all": id = "seven_day"; label = L("channel.week", "Weekly"); channel = .week
             default:
                 guard kind == "weekly_scoped" || node["group"] as? String == "weekly" else { continue }
                 let scope = node["scope"] as? [String: Any] ?? [:]
@@ -146,8 +146,8 @@ enum ClaudeUsageMapper {
     }
 
     private static func title(_ id: String) -> String {
-        if id == "five_hour" { return L("channel.session", "5-hour window") }
-        if id == "seven_day" { return L("channel.week", "Weekly window") }
+        if id == "five_hour" { return L("channel.session", "5-hour") }
+        if id == "seven_day" { return L("channel.week", "Weekly") }
         return id.replacingOccurrences(of: "seven_day_",
                                       with: String(format: L("channel.weekScoped", "Weekly · %@"), ""))
             .replacingOccurrences(of: "_", with: " ").capitalized

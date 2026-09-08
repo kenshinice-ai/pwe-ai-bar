@@ -39,8 +39,8 @@
 "blocker.unauthorized" = "The credential is no longer valid — sign in to Claude Code again or replace the manual token";
 "channel.context" = "Context";
 "channel.other" = "Other";
-"channel.session" = "5-hour window";
-"channel.week" = "Weekly window";
+"channel.session" = "5-hour";
+"channel.week" = "Weekly";
 "channel.weekScoped" = "Weekly · %@";
 "chart.nowPartial" = "now · partial";
 "chart.peak" = "peak %@/h";
@@ -248,7 +248,7 @@
 "tokens.input" = "Input";
 "tokens.output" = "Output";
 "tokens.roundTrips" = "Round trips";
-"trophy.barLegend" = "Above: equivalent API cost.  Below: the subscription over the same span, same scale";
+"trophy.barLegend" = "Same scale: cost above, subscription below";
 "trophy.byDay" = "By day";
 "trophy.byModel" = "By model";
 "trophy.dayPeak" = "peak %@ · %@";
@@ -258,8 +258,9 @@
 "trophy.planPerMonth" = "%@ · %@/mo";
 "trophy.rangeDays" = "%@ · %d active days";
 "trophy.sameSpan" = "%@ over the same span";
-"trophy.turns" = "%d turns";
+"trophy.turns" = "%@ turns";
 "trophy.underOne" = "under 1×";
+"trophy.unpriced" = "— no published price for that model, so it counts as nothing here";
 "verdict.blind" = "No reading for %@";
 "verdict.makesIt" = "%@ to spare at reset";
 "verdict.noReset" = "This quota has no reset time, so endurance cannot be computed";

@@ -124,8 +124,7 @@ struct TrophyView: View {
             }
             .frame(height: 29)
             if t.subscriptionMonthly != nil {
-                Text(L("trophy.barLegend",
-                       "Above: equivalent API cost.  Below: the subscription over the same span, same scale"))
+                Text(L("trophy.barLegend", "Same scale: cost above, subscription below"))
                     .font(Theme.sans(10.5)).foregroundStyle(Theme.hex(Theme.textDark2))
             }
         }
@@ -175,13 +174,23 @@ struct TrophyView: View {
                     HStack(spacing: Theme.s1 + 1) {
                         RoundedRectangle(cornerRadius: 2).fill(modelColour(i))
                             .frame(width: 9, height: 9)
-                        Text(short(m.model)).font(Theme.sans(12)).foregroundStyle(Theme.text)
+                        Text(shortModelName(m.model)).font(Theme.sans(12)).foregroundStyle(Theme.text)
                             .lineLimit(1).truncationMode(.middle)
-                        Text(String(format: L("trophy.turns", "%d turns"), m.turns)).font(Theme.figures(11, 400))
-                            .foregroundStyle(Theme.text2)
+                        Text(String(format: L("trophy.turns", "%@ turns"), grouped(m.turns)))
+                            .font(Theme.figures(11, 400)).foregroundStyle(Theme.text2)
                         Spacer()
-                        Text(money(m.usd)).font(Theme.figures(12, 500)).foregroundStyle(Theme.text)
+                        // A model with turns but no cost is one the price table does not carry —
+                        // rendering that as "$0.00" says the work was free, which is a different
+                        // claim entirely and the wrong one.
+                        Text(m.usd > 0 ? money(m.usd) : "—")
+                            .font(Theme.figures(12, 500))
+                            .foregroundStyle(m.usd > 0 ? Theme.text : Theme.text2)
                     }
+                }
+                if t.byModel.contains(where: { $0.usd <= 0 && $0.turns > 0 }) {
+                    Text(L("trophy.unpriced", "— no published price for that model, so it counts as nothing here"))
+                        .font(Theme.sans(10.5)).foregroundStyle(Theme.text2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -251,6 +260,12 @@ struct TrophyView: View {
         i == 3 ? modelColour(0) : Theme.accent.opacity(0.4 + 0.2 * Double(i))
     }
 
+    /// Thousand separators, used wherever a raw count is shown. `53264 turns` was the one place
+    /// on this page a figure was printed without them.
+    private func grouped(_ v: Int) -> String {
+        Self.grouped.string(from: NSNumber(value: v)) ?? "\(v)"
+    }
+
     private func grid(_ k: String, _ v: Int, raw: Bool = false, share: Double? = nil,
                       swatch: Color? = nil) -> some View {
         HStack {
@@ -267,7 +282,7 @@ struct TrophyView: View {
                     .font(Theme.figures(11, 400)).foregroundStyle(Theme.text2)
                     .frame(width: 44, alignment: .trailing)
             }
-            Text(raw ? (Self.grouped.string(from: NSNumber(value: v)) ?? "\(v)") : big(v))
+            Text(raw ? grouped(v) : big(v))
                 .font(Theme.figures(12, 500)).foregroundStyle(Theme.text)
                 .frame(width: 72, alignment: .trailing)
         }
@@ -284,9 +299,23 @@ struct TrophyView: View {
         i == 0 ? Theme.dyn(light: Theme.navy, dark: 0x8FA9D6) : Theme.accent
     }
 
-    private func short(_ m: String) -> String {
-        m.replacingOccurrences(of: "claude-", with: "")
-         .replacingOccurrences(of: "-", with: " ")
+    /// `claude-fable-5-1` → `fable 5.1`.
+    ///
+    /// Turning every hyphen into a space rendered the point release as a third word — `fable 5 1`
+    /// reads as two numbers, and on the row above it `opus 5` is one. Consecutive numeric
+    /// segments are a version, so they are rejoined with a dot; everything else stays a word.
+    func shortModelName(_ m: String) -> String {
+        var parts = m.replacingOccurrences(of: "claude-", with: "").split(separator: "-").map(String.init)
+        var out: [String] = []
+        for part in parts {
+            if let last = out.last, last.allSatisfy(\.isNumber), part.allSatisfy(\.isNumber) {
+                out[out.count - 1] = last + "." + part
+            } else {
+                out.append(part)
+            }
+        }
+        parts = out
+        return parts.joined(separator: " ")
     }
 
     /// `%,.0f` is not a thing in Swift — that is Python's and Java's grouping flag, and here it

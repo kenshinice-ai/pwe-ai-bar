@@ -111,7 +111,7 @@ final class QuotaTests: XCTestCase {
         XCTAssertEqual(reading.planType, "team")
         XCTAssertEqual(reading.resetCredits, 2)
         XCTAssertEqual(reading.windows.map(\.percent), [83, 44, nil])
-        XCTAssertEqual(reading.windows.map(\.title), ["5-hour window", "Weekly window", "Extra credits"])
+        XCTAssertEqual(reading.windows.map(\.title), ["5-hour", "Weekly", "Extra credits"])
         XCTAssertEqual(reading.windows.map(\.id), ["codex_300", "codex_10080", "codex_credits"])
         // The spent add-on pool is its own row, never the quota's headline.
         XCTAssertFalse(reading.windows[0].confirmedExhausted)

@@ -38,7 +38,7 @@ enum Channel: Int, CaseIterable {
     var label: String { ["CTX", "CDX", "ETC", "7D", "5H"][rawValue] }
     var name: String {
         [L("channel.context", "Context"), "Codex", L("channel.other", "Other"),
-         L("channel.week", "Weekly window"), L("channel.session", "5-hour window")][rawValue]
+         L("channel.week", "Weekly"), L("channel.session", "5-hour")][rawValue]
     }
 
     /// Percent thresholds. Only used when a source gives us a bare number and no severity of

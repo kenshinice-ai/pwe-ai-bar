@@ -170,9 +170,9 @@
 "trophy.planPerMonth" = "%@ · %@/月";
 "trophy.sameSpan" = "同期 %@";
 "trophy.needPrice" = "设置里填上你的订阅价格，才能算回本";
-"trophy.barLegend" = "上：等效 API 成本　下：同期订阅，同一比例";
+"trophy.barLegend" = "同一比例：上为成本，下为订阅";
 "trophy.byModel" = "按模型";
-"trophy.turns" = "%d 次";
+"trophy.turns" = "%@ 次";
 "trophy.byDay" = "按天";
 "trophy.dayRange" = "%@ 至 %@ · %d 个活跃日";
 "trophy.dayPeak" = "最高 %@ · %@";
@@ -276,3 +276,4 @@
 "outcome.changedUnderUs" = "写回时凭据已被改动";
 "outcome.renewed" = "已续期";
 "outcome.unknown" = "未知";
+"trophy.unpriced" = "—  这个模型没有公开定价，所以在这里按零计";

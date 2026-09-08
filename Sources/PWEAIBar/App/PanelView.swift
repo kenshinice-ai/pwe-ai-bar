@@ -487,9 +487,13 @@ struct PanelView: View {
         HStack(spacing: Theme.s2) {
             // Fixed columns keep the four baselines aligned down the whole panel; truncation
             // is what stops an unexpectedly long name from pushing the number off the edge.
+            //
+            // Two widths, because 66 pt was measured against 「周窗口」. The same meaning in Latin
+            // runs two to three times longer — "Weekly · Fable" arrived as "Weekly · F…" — and a
+            // column sized for Han truncates almost every English label it is given.
             Text(w.title).font(Theme.sans(11)).foregroundStyle(Theme.text2)
                 .lineLimit(1).truncationMode(.tail)
-                .frame(width: 66, alignment: .leading)
+                .frame(width: Loc.isCJK ? 66 : 92, alignment: .leading)
             track(w).frame(maxWidth: .infinity)
             Text(Readout.panelText(w, remaining: prefs.showRemaining)).font(Theme.figures(11.5, 600))
                 .foregroundStyle(Theme.health(w.band, dark: isDark))

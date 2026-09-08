@@ -51,3 +51,18 @@ final class LocalisationTests: XCTestCase {
         }
     }
 }
+
+/// Small display formatters that were each wrong in a way a screenshot showed and a test did not.
+final class TrophyFormattingTests: XCTestCase {
+    override func setUp() { super.setUp(); Loc.language = .en }
+
+    /// `claude-fable-5-1` used to render as `fable 5 1` — two numbers, next to `opus 5` which is
+    /// one. A point release is a version, not a third word.
+    @MainActor func testAPointReleaseStaysOneNumber() {
+        let v = TrophyView(trophy: Trophy())
+        XCTAssertEqual(v.shortModelName("claude-fable-5-1"), "fable 5.1")
+        XCTAssertEqual(v.shortModelName("claude-opus-5"), "opus 5")
+        XCTAssertEqual(v.shortModelName("claude-haiku-4-5"), "haiku 4.5")
+        XCTAssertEqual(v.shortModelName("gpt-5-6-sol"), "gpt 5.6 sol")
+    }
+}

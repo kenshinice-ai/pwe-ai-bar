@@ -146,8 +146,8 @@ actor CodexProvider {
         // Chinese numerals for the two everyone has, so Codex's rows read the same as Claude's;
         // digits for anything unusual, where being exact matters more than matching.
         switch minutes {
-        case .some(300):                       return L("channel.session", "5-hour window")
-        case .some(10080):                     return L("channel.week", "Weekly window")
+        case .some(300):                       return L("channel.session", "5-hour")
+        case .some(10080):                     return L("channel.week", "Weekly")
         case .some(let m) where m <= 60:       return String(format: L("window.minutes", "%d-minute window"), m)
         case .some(let m) where m < 1440:      return String(format: L("window.hours", "%d-hour window"), m / 60)
         case .some(let m) where m % 1440 == 0: return String(format: L("window.days", "%d-day window"), m / 1440)

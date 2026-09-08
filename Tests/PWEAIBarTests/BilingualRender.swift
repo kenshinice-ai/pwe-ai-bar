@@ -26,13 +26,18 @@ final class BilingualRenderTests: XCTestCase {
             var snap = Snapshot()
             let at = Date()
             snap.windows = [
-                QuotaWindow(id: "w", provider: .claude, channel: .week, title: "Weekly", percent: 72,
+                // The longest label the mapper can actually produce: a model-scoped weekly window.
+                QuotaWindow(id: "ws", provider: .claude, channel: .week,
+                            title: String(format: L("channel.weekScoped", "Weekly · %@"), "Fable"),
+                            percent: 97, severity: .critical,
+                            resetsAt: at.addingTimeInterval(86400)),
+                QuotaWindow(id: "w", provider: .claude, channel: .week, title: L("channel.week", "Weekly"), percent: 72,
                             severity: .normal, resetsAt: at.addingTimeInterval(86400),
                             isActive: true, windowLength: 7 * 86400),
-                QuotaWindow(id: "s", provider: .claude, channel: .session, title: "5-hour", percent: 41,
+                QuotaWindow(id: "s", provider: .claude, channel: .session, title: L("channel.session", "5-hour"), percent: 41,
                             severity: .normal, resetsAt: at.addingTimeInterval(5400),
                             isActive: true, windowLength: 5 * 3600),
-                QuotaWindow(id: "c", provider: .codex, channel: .codex, title: "5-hour", percent: 88,
+                QuotaWindow(id: "c", provider: .codex, channel: .codex, title: L("channel.session", "5-hour"), percent: 88,
                             severity: .warning, resetsAt: at.addingTimeInterval(7200)),
             ]
             snap.contextPercent = 23.5
@@ -47,6 +52,29 @@ final class BilingualRenderTests: XCTestCase {
                                         enableRealQuota: {}, prefs: prefs,
                                         tokenEditor: TokenEditor(hasToken: false), hookInstalled: false)
             try shoot(AnyView(settings), width: 380, to: out.appendingPathComponent("settings-\(lang.rawValue).png"))
+            // The trophy page with the shape real data actually has: five-figure turn counts and
+            // a model the price table does not carry.
+            var t = Trophy()
+            t.days = 39; t.turns = 68_967
+            t.equivalentUSD = 20_673; t.subscriptionUSD = 130
+            t.range = .all
+            t.subscriptionMonthly = Subscription(plan: "max_5x", display: "Max 5×",
+                                                 currency: "USD", monthly: 100, monthlyUSD: 100)
+            let models: [(model: String, turns: Int, usd: Double)] = [
+                ("claude-opus-5", 53_264, 13_461), ("claude-fable-5", 11_973, 5_521),
+                ("claude-fable-5-1", 3_151, 1_662), ("claude-sonnet-5", 81, 29.63),
+                ("gpt-5-6-sol", 498, 0),
+            ]
+            t.byModel = models
+            let shape: [Double] = [120, 940, 310, 60, 620, 1480, 205]
+            t.byDay = (0..<39).map { (i: Int) -> (String, Double) in
+                (String(format: "2026-08-%02d", i % 28 + 1), shape[i % 7] + Double(i * 9))
+            }
+            t.tokens = (18_402_113, 2_940_881, 41_002_774, 1_884_339_002)
+            for dark in [true, false] {
+                try shoot(AnyView(TrophyView(trophy: t, prefs: prefs)), width: 460, dark: dark,
+                          to: out.appendingPathComponent("trophy-\(lang.rawValue)-\(dark ? "dark" : "light").png"))
+            }
             store.stop()
         }
         Loc.language = .en
