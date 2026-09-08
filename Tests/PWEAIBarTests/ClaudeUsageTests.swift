@@ -606,6 +606,27 @@ final class KeychainPromptTests: XCTestCase {
         XCTAssertEqual(count, 2, "设置 → 重新连接 is the way back in, and it outlives the process too")
     }
 
+    /// The one that cost a real login. The exchange makes the server rotate the refresh token,
+    /// and the reply carries the only copy of the replacement — so if the record cannot be
+    /// written back, the exchange must not happen at all. Checked before, not after.
+    func testARecordThatCannotBeWrittenBackIsNeverExchangedFor() async throws {
+        let space = try TestSpace()
+        let expired = try token(expiredJSON)
+        let http = HTTPStub([(200, refreshReply, [:])])
+        let p = ClaudeProvider(
+            defaults: space.defaults,
+            access: .init(own: { nil }, claudeCode: { nil }, sharedExists: { false },
+                          shared: { nil }, save: { _ in .failed(-1) }, load: { [expired] },
+                          persist: { _, _ in XCTFail("must not reach the write-back"); return false },
+                          storable: { _ in false }),
+            now: { self.at }, request: { try await http.send($0) })
+        _ = await p.windows(force: true)
+        let count = await http.count
+        XCTAssertEqual(count, 0, "a refresh token that cannot be replaced must not be spent")
+        XCTAssertNotEqual(space.defaults.string(forKey: "claudeRefreshOutcome"), "invalidated",
+                          "and nothing may be recorded on a path where no exchange happened")
+    }
+
     /// `Subprocess.run` is no longer on any keychain path, but it still runs other providers'
     /// commands and its budget is per call.
     func testTheTimeoutIsThePerCallBudget() {

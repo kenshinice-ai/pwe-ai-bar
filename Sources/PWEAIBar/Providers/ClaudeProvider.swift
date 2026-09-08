@@ -12,11 +12,15 @@ actor ClaudeProvider {
         var save: (String) -> Credentials.SaveResult
         var load: (() throws -> [Credentials.Token])? = nil
         var persist: ((Credentials.Token, Credentials.Token) throws -> Bool)? = nil
+        /// Can the record still be read back, i.e. would the write-back's compare-and-swap
+        /// succeed? Asked *before* the exchange, never after.
+        var storable: ((Credentials.Token) -> Bool)? = nil
         static let live = Access(own: Credentials.ownToken, claudeCode: { Credentials.claudeCodeCredential() },
                                  sharedExists: Credentials.sharedItemExists, shared: Credentials.readShared,
                                  save: { Credentials.storeOwnToken($0) },
                                  load: { try ClaudeCredentialStore().load() },
-                                 persist: { try ClaudeCredentialStore().save($0, expected: $1) })
+                                 persist: { try ClaudeCredentialStore().save($0, expected: $1) },
+                                 storable: { (try? ClaudeCredentialStore().unchanged($0)) == true })
     }
     enum Blocker: Error, Equatable {
         case none, needsSetup, notLoggedIn, keychainRefused, unauthorized, forbidden, network
@@ -425,6 +429,21 @@ actor ClaudeProvider {
         // Deliberately no `note()` here: this path performs no exchange, and writing a record
         // once per poll would erase the one that says why the write-back failed.
         if rotationBlockedUntil != nil { throw Blocker.storage }
+        // The exchange spends a refresh token that is single-use in the worst case, and the
+        // reply carries the only copy of its replacement. So the order matters more than it
+        // looks: prove the record can still be read back *first*, and a broken write-back costs
+        // a poll. Prove it afterwards — which is all this did — and it costs the reader the
+        // login their CLI shares.
+        //
+        // That is not hypothetical. On 2026-09-08 the compare-and-swap read failed after three
+        // exchanges, because it forked a tool that raised a dialog nobody could answer in time.
+        // Each exchange had already made the server rotate the refresh token; each replacement
+        // was lost; the credential in the keychain was dead by the third. The read is quiet now
+        // and that particular cause is gone, but the ordering was the deeper mistake.
+        if let storable = access.storable, !storable(token) {
+            rotationBlockedUntil = now().addingTimeInterval(30 * 60)
+            throw Blocker.storage
+        }
 
         // 1.0.1 also skipped the exchange outright when `refreshTokenExpiresAt` had passed. That
         // is gone, and three separate reasons say it should be:
