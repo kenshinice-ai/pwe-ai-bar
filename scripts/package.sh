@@ -115,7 +115,10 @@ if [[ "$NOTARIZE" == "1" ]]; then
   echo "▸ Submitting to Apple (profile: $PROFILE)…"
   # --wait exits 0 on a finished submission whatever Apple decided, so the status has to be
   # read rather than inferred; on a rejection the log is the only thing that says why.
-  SUBMIT="$(xcrun notarytool submit "$IMAGE" --keychain-profile "$PROFILE" --wait 2>&1)"
+  # `|| true`: a plain assignment inherits the substitution's status, so an upload failure or a
+  # bad profile aborted the script one line before the output that says which — on exactly the
+  # failures where Apple's message is the only clue the operator has.
+  SUBMIT="$(xcrun notarytool submit "$IMAGE" --keychain-profile "$PROFILE" --wait 2>&1)" || true
   echo "$SUBMIT" | sed 's/^/    /'
   if ! grep -q "status: Accepted" <<<"$SUBMIT"; then
     ID="$(grep -m1 "  id: " <<<"$SUBMIT" | awk '{print $2}')"

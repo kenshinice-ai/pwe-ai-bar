@@ -7,7 +7,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem!
     private var popover: NSPopover?
-    private var panelHeight: CGFloat = 0
+    /// Remembered across launches. The panel cannot be measured until it has been laid out, and
+    /// it is not laid out until it is first shown — so on the first click of every launch there
+    /// was nothing to size the popover with, and it opened at its natural height with its top
+    /// off the screen. Last run's height is a far better opening guess than none.
+    private var panelHeight: CGFloat = UserDefaults.standard.double(forKey: "panelHeight")
     private var trophyWindow: NSWindow?
     private var settingsWindow: NSWindow?
     private let store = Store()
@@ -122,6 +126,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   onSettings: { [weak self] in self?.showSettings() },
                   onOpen: { [weak self] p in self?.activate(p) },
                   onEnableQuota: { [weak self] in self?.store.enableRealQuota() },
+                  // The screen the status item is actually on. `NSScreen.main` is the screen
+                  // holding the key window, which for a menu-bar app is whatever other app is
+                  // frontmost — with a laptop plus an external display that is routinely the
+                  // wrong one, and the panel would size against the wrong height.
+                  usableHeight: { [weak self] in
+                      self?.statusItem?.button?.window?.screen?.visibleFrame.height
+                  },
                   onHeight: { [weak self] h in self?.resizePanel(to: h) })
     }
 
@@ -135,6 +146,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func resizePanel(to height: CGFloat) {
         guard height > 0, abs(height - panelHeight) > 0.5 else { return }
         panelHeight = height
+        UserDefaults.standard.set(height, forKey: "panelHeight")
+        // Deliberately not applied while the panel is open. Resizing a popover that is already
+        // on screen makes AppKit re-anchor it, and on a status item that is how its top ends up
+        // above the menu bar. A reading that arrives mid-view scrolls instead — the content
+        // stays reachable — and the new height takes effect the next time it is opened.
+        guard popover?.isShown != true else { return }
         popover?.contentSize = NSSize(width: Theme.panelWidth, height: height)
     }
 

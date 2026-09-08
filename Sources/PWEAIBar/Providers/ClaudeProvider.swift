@@ -255,7 +255,7 @@ actor ClaudeProvider {
             expected = signature(current)
             generation = expected
         }
-        if let expiry = token.expiresAt, expiry <= now() { throw Blocker.expired(token.refreshExpiresAt) }
+        if let expiry = token.expiresAt, expiry <= now() { throw Blocker.expired(expiryToReport(token)) }
         details.source = token.source
         details.lastAttemptAt = now()
         var reply = try await request(ClaudeUsageClient.usage(token: token.value))
@@ -337,27 +337,35 @@ actor ClaudeProvider {
     /// instead of racing it.
     private var rotations: [String: Task<Credentials.Token, Error>] = [:]
 
+    /// The expiry date it is honest to put in front of the reader, or nil.
+    ///
+    /// `refreshTokenExpiresAt` describes the refresh token Claude Code wrote. `rotated` rewrites
+    /// `accessToken`, `refreshToken` and `expiresAt` but deliberately not this field — invariant
+    /// one forbids reshaping a record we co-own — so once this app has swapped a token, the date
+    /// on disk may belong to a refresh token that no longer exists. Naming a date we cannot vouch
+    /// for is worse than naming none: the reader would go looking for what happened that day.
+    private func expiryToReport(_ token: Credentials.Token) -> Date? {
+        defaults.integer(forKey: "claudeRefreshCount") == 0 ? token.refreshExpiresAt : nil
+    }
+
     private func rotate(_ token: Credentials.Token, expected: String, version: Int) async throws -> Credentials.Token {
         guard let refresh = token.refreshToken, let persist = access.persist
-        else { throw Blocker.expired(token.refreshExpiresAt) }
+        else { throw Blocker.expired(expiryToReport(token)) }
 
-        // The record says when the refresh token dies. Presenting a dead one can only come back
-        // `invalid_grant`, so the round-trip buys nothing and the reader waits for it — and every
-        // exchange we do not start is one that cannot land in the window between a successful
-        // swap and a failed write-back, which is the one way this app could log someone out of
-        // their own CLI.
+        // 1.0.1 also skipped the exchange outright when `refreshTokenExpiresAt` had passed. That
+        // is gone, and three separate reasons say it should be:
         //
-        // Gated on never having rotated successfully, because in that case the stored expiry is
-        // certainly Claude Code's own and certainly describes the token in hand. Once we have
-        // swapped a token ourselves the field may describe a refresh token that no longer
-        // exists, and refusing to renew a live credential would be far worse than one wasted
-        // request. Nil, as always, means unknown: try it.
-        if let dies = token.refreshExpiresAt, dies <= now(),
-           defaults.integer(forKey: "claudeRefreshCount") == 0 {
-            note("登录已过期，未尝试换发")
-            throw Blocker.expired(dies)
-        }
-
+        //   * it was gated on `claudeRefreshCount == 0`, a global counter that only ever goes up
+        //     and is never reset — so the skip was unreachable on any install that had rotated
+        //     even once, which is every install more than an hour old;
+        //   * it ran ahead of the signature check below, so a reader who had just fixed their
+        //     login with `claude auth login` was told "已过期" for another poll instead of the
+        //     mismatch being caught and re-read within the same cycle;
+        //   * it called `note()` on a path where no exchange happened, once per poll, which
+        //     overwrites the one record that says a write-back failed.
+        //
+        // Saving a round-trip was always the minor half of that idea. The half worth keeping is
+        // telling the reader the date, and that needs no gate — see `expiryToReport`.
         guard signature(try await candidates()) == expected else { throw Blocker.credentialsChanged }
         try check(version)
 
@@ -395,7 +403,7 @@ actor ClaudeProvider {
         if http.statusCode == 400 || http.statusCode == 401 {
             let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             if body?["error"] as? String == "invalid_grant" || http.statusCode == 401 {
-                note("凭据已失效"); throw Blocker.expired(token.refreshExpiresAt)
+                note("凭据已失效"); throw Blocker.expired(expiryToReport(token))
             }
             rejected[token.generation] = .invalidResponse
             note("换发被拒 \(http.statusCode)")

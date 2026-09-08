@@ -19,8 +19,13 @@ struct PanelView: View {
     var onSettings: () -> Void
     var onOpen: (Provider) -> Void
     var onEnableQuota: () -> Void
-    /// The screen height to size against. Nil asks the real screen; tests state one.
-    var usableHeight: CGFloat? = nil
+    /// The usable height of the screen the panel will hang from.
+    ///
+    /// A closure, and supplied by whoever owns the status item, because `NSScreen.main` is the
+    /// screen holding the *key window* — for an accessory app that is whatever other app is
+    /// frontmost. With a laptop and an external display that is routinely the wrong screen, and
+    /// the panel would size against 1408 pt of external while hanging off an 843 pt laptop.
+    var usableHeight: () -> CGFloat? = { nil }
     /// Reports the height this panel wants, so whoever owns the popover can set it outright.
     var onHeight: (CGFloat) -> Void = { _ in }
 
@@ -47,9 +52,7 @@ struct PanelView: View {
     /// `visibleFrame` already excludes the menu bar; 32 pt covers the popover's beak and its
     /// margins. The floor exists only so a pathological screen still leaves something readable.
     static func ceiling(usableHeight: CGFloat? = nil) -> CGFloat {
-        let usable = usableHeight
-            ?? (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame.height
-            ?? 860
+        let usable = usableHeight ?? NSScreen.main?.visibleFrame.height ?? 860
         return max(420, usable - 32)
     }
 
@@ -60,7 +63,7 @@ struct PanelView: View {
     var desiredHeight: CGFloat? {
         guard chromeHeight > 0, middleHeight > 0 else { return nil }
         // The two rules either side of the middle are a point each.
-        return min(chromeHeight + 2 + middleHeight, Self.ceiling(usableHeight: usableHeight))
+        return min(chromeHeight + 2 + middleHeight, Self.ceiling(usableHeight: usableHeight()))
     }
 
     var body: some View {
@@ -84,11 +87,14 @@ struct PanelView: View {
         // height, and whoever owns the popover has to set it. `onHeight` is the other half.
         .frame(height: desiredHeight)
         .background(Theme.surface)
-        .onPreferenceChange(MiddleHeight.self) { v in middleHeight = v; report() }
-        .onPreferenceChange(ChromeHeight.self) { v in chromeHeight = v; report() }
+        .onPreferenceChange(MiddleHeight.self) { middleHeight = $0 }
+        .onPreferenceChange(ChromeHeight.self) { chromeHeight = $0 }
+        // One report, derived. Calling `onHeight` from inside each preference callback published
+        // `newMiddle + oldChrome` first and the correct sum a moment later, so a panel that was
+        // open resized twice — the re-anchoring this whole mechanism exists to avoid.
+        .onChange(of: desiredHeight) { if let h = $0 { onHeight(h) } }
+        .onAppear { if let h = desiredHeight { onHeight(h) } }
     }
-
-    private func report() { if let h = desiredHeight { onHeight(h) } }
 
     private var scroller: some View {
         // The scroller is always here, so the layout never changes shape as readings arrive —
@@ -104,29 +110,29 @@ struct PanelView: View {
     private var middle: some View {
         VStack(spacing: 0) {
             stage
-            rule
 
             // Lean means lean. Showing the same provider sections with two rows instead of
             // three made it 440 points against standard's 469 — a mode that promises less and
             // delivers the same thing is just a mode nobody picks. It gets one line instead.
             if prefs.panelMode == .lean {
-                minorRow
                 rule
+                minorRow
                 // The way to turn real quota on cannot live only in the modes that show
                 // provider sections, or picking the compact one hides the single button the
                 // app needs you to press.
                 if let cta = claudeCallToAction {
-                    ctaRow(cta)
                     rule
+                    ctaRow(cta)
                 }
             } else {
                 ForEach(activeProviders, id: \.self) { p in
-                    providerSection(p)
                     rule
+                    providerSection(p)
                 }
             }
 
             if prefs.panelMode == .full {
+                rule
                 chartSection
                 rule
                 scoreRow

@@ -32,13 +32,32 @@ CASK="Casks/pwe-ai-bar.rb"
 
 MOUNT=""
 BUMPED=""
+TAGGED=""
+SCRATCH=()
 cleanup() {
   local rc=$?
-  [[ -n "$MOUNT" ]] && hdiutil detach "$MOUNT" -quiet 2>/dev/null
-  # A failure after the bump used to leave VERSION and the cask modified, so the next run
-  # stopped at "working tree is dirty" pointing at debris this script itself created.
-  if [[ $rc -ne 0 && -n "$BUMPED" ]]; then
-    git checkout -- VERSION "$CASK" 2>/dev/null && echo "! failed — VERSION and cask restored, tree left clean"
+  # `[[ … ]] && cmd` here is a trap for the trap: the last command of an AND-list is not exempt
+  # from `set -e`, so a detach that fails — a volume Spotlight is still indexing is enough —
+  # aborted the handler before the restore below and rewrote the exit code to 1. That fired
+  # precisely when `spctl` had just rejected the app, which is the failure worth reporting.
+  if [[ -n "$MOUNT" ]]; then hdiutil detach "$MOUNT" -quiet >/dev/null 2>&1 || true; fi
+  for dir in ${SCRATCH[@]+"${SCRATCH[@]}"}; do rm -rf "$dir"; done
+  if [[ $rc -ne 0 ]]; then
+    # Only while the bump is still uncommitted. It used to stay set past `git commit`, so a
+    # failure at `gh release create` printed "tree left clean" over a `git checkout` that did
+    # nothing — while the tag was already pushed and the next run refused to start because of it.
+    if [[ -n "$BUMPED" ]]; then
+      git checkout -- VERSION "$CASK" 2>/dev/null \
+        && echo "! failed before publishing — VERSION and cask restored, tree left clean"
+    fi
+    if [[ -n "$TAGGED" ]]; then
+      echo
+      echo "! $TAGGED is already committed and pushed. Nothing above can undo that for you."
+      echo "  To retry this version, remove it first:"
+      echo "      git push --delete origin $TAGGED && git tag -d $TAGGED"
+      echo "      git reset --hard HEAD~1 && git push --force-with-lease origin main"
+      echo "  Or bump to the next patch version instead, which is usually the safer move."
+    fi
   fi
   exit $rc
 }
@@ -76,7 +95,19 @@ echo "✓ working tree clean"
 # by writing "Forecast 2.swift" beside "Forecast.swift". SwiftPM does not compile them, so the
 # build stays correct and nothing warns — they are invisible until something stages broadly.
 # The v1.0.0 commit carried fourteen of them, 3,444 lines, into the published tag.
-CONFLICTS=$(git ls-files | grep -E ' [0-9]\.[A-Za-z0-9]+$' || true)
+# Matched by shape *and* by having a sibling: iCloud writes "Forecast 2.swift" beside
+# "Forecast.swift", so the sibling is what separates a conflict copy from a file that is simply
+# called "Chapter 3.md". The old pattern required one digit and exactly one extension, which
+# missed "VERSION 2" — and VERSION is the one file both machines are guaranteed to write —
+# along with "Forecast 10.swift" and "archive 2.tar.gz", while flagging "Chapter 3.md".
+CONFLICTS=$(git ls-files | while IFS= read -r f; do
+  base="${f%% [0-9]}"; base="${base%% [0-9][0-9]}"
+  if [[ "$base" != "$f" && -e "$base" ]]; then echo "$f"; continue; fi
+  name="${f##*/}"; dir="${f%/*}"; [[ "$dir" == "$f" ]] && dir="."
+  stem="${name%%.*}"; ext="${name#"$stem"}"
+  trimmed="${stem%% [0-9]}"; trimmed="${trimmed%% [0-9][0-9]}"
+  if [[ "$trimmed" != "$stem" && -e "$dir/$trimmed$ext" ]]; then echo "$f"; fi
+done)
 [[ -z "$CONFLICTS" ]] || {
   echo "✗ iCloud conflict copies are tracked in this repository:"
   sed 's/^/    /' <<<"$CONFLICTS"
@@ -98,7 +129,13 @@ echo "── tests ────────────────────�
 # `tail -3` here used to show only the swift-testing summary — "0 tests in 0 suites" — while
 # the line that says 116 XCTest cases passed scrolled off. The gate was right and the report
 # was misleading, which is its own kind of wrong.
-swift test 2>&1 | grep -E "Executed [0-9]+ tests|error:" | tail -3
+# `grep` returning 1 on a run with no matching line would abort a *passing* build under
+# pipefail, so the test result is taken from swift itself and grep only shapes the report.
+set +o pipefail
+TEST_OUT="$(swift test 2>&1)"; TEST_RC=$?
+set -o pipefail
+grep -E "Executed [0-9]+ tests|error:" <<<"$TEST_OUT" | tail -3
+[[ $TEST_RC -eq 0 ]] || { echo "✗ tests failed"; exit 1; }
 
 echo
 echo "── version $VERSION ──────────────────────────────────────"
@@ -139,9 +176,11 @@ sed -i '' -E "s/^  version \".*\"/  version \"$VERSION\"/; s/^  sha256 \".*\"/  
 # cask and nothing else, so that `git show` on a tag is readable a year later.
 git add VERSION "$CASK"
 git commit -q -m "Release $VERSION"
+BUMPED=""            # committed: there is no longer a working-tree change to restore
 git tag -a "v$VERSION" -m "PWE AI Bar $VERSION"
 git push -q origin HEAD
 git push -q origin "v$VERSION"
+TAGGED="v$VERSION"   # past here a failure needs a human, and cleanup says exactly what to run
 echo "✓ tagged v$VERSION and pushed"
 
 if [[ -n "$NOTES_FILE" && -f "$NOTES_FILE" ]]; then
@@ -158,7 +197,7 @@ echo "── what is actually being served ────────────�
 # The local .dmg being notarised proves nothing about the bytes on the release page. A CI run
 # once overwrote a notarised disk image 53 seconds after the local release and spctl on the
 # published file read "no usable signature" — so download it back and judge that copy.
-BACK=$(mktemp -d)
+BACK=$(mktemp -d); SCRATCH+=("$BACK")
 gh release download "v$VERSION" --repo "$REPO" -p '*.dmg' -D "$BACK" >/dev/null
 PUB_SHA=$(shasum -a 256 "$BACK"/*.dmg | cut -d' ' -f1)
 [[ "$PUB_SHA" == "$SHA" ]] || {
@@ -171,7 +210,7 @@ rm -rf "$BACK"
 
 echo
 echo "── Homebrew tap ──────────────────────────────────────────"
-TAP_DIR=$(mktemp -d)
+TAP_DIR=$(mktemp -d); SCRATCH+=("$TAP_DIR")
 git clone -q "https://github.com/$TAP_REPO.git" "$TAP_DIR"
 mkdir -p "$TAP_DIR/Casks"
 cp "$CASK" "$TAP_DIR/Casks/pwe-ai-bar.rb"

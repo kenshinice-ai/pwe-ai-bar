@@ -4,9 +4,9 @@ dist/
 .DS_Store
 *.xcuserstate
 
-# iCloud Drive conflict copies. This repository lives in iCloud, and the file provider
-# resolves a two-machine conflict by writing "Forecast 2.swift" beside "Forecast.swift".
-# SwiftPM does not compile them, so nothing breaks — they just get committed by anything
-# that stages broadly, which is how 3,444 lines of them reached the v1.0.0 tag.
-* [0-9].*
-* [0-9]
+# iCloud Drive conflict copies ("Forecast 2.swift" beside "Forecast.swift") are NOT ignored
+# here on purpose. A glob wide enough to catch them — `* [0-9].*` — also silently swallows
+# "docs/Chapter 3.md", and a file that cannot be staged with no explanation is worse than one
+# that gets caught loudly. `scripts/release.sh` refuses to release while any file whose name
+# matches the conflict shape *and* has a same-named sibling is tracked, which is precise, and
+# it says which files. That is the check; this is the note saying why there is no glob.

@@ -459,63 +459,62 @@ final class ClaudeUsageTests: XCTestCase {
         XCTAssertEqual(memory.writes, 1)
     }
 
-    /// A refresh token the record itself says is dead is not worth presenting.
+    /// When the login is past saving, the reader is told the date and the command.
     ///
-    /// Found on a real machine: the CLI credential had been sitting untouched since the first of
-    /// the month, both tokens long past their dates, and the app's only contribution was to POST
-    /// a four-day-dead refresh token and report back "凭据已失效" — true, unhelpful, and one
-    /// network round-trip the reader waited for. The record carried `refreshTokenExpiresAt` the
-    /// whole time.
+    /// Found on a real machine: the CLI credential had sat untouched for days, both tokens past
+    /// their dates, and all the app could say was "凭据已失效" — true, and leaving the reader
+    /// with nothing to do. The record carried `refreshTokenExpiresAt` the whole time.
     ///
-    /// Two things are asserted here because both matter: the exchange does not happen, and the
-    /// sentence the reader gets names the date and the command that fixes it.
-    func testADeadRefreshTokenIsNotSpentOnADoomedExchange() async throws {
+    /// 1.0.1 also skipped the exchange when that date had passed. That is gone: it was gated on
+    /// a counter that only ever goes up, so it was unreachable on any install older than its
+    /// first rotation. The exchange happening is therefore asserted here too — it is the
+    /// behaviour, not a regression.
+    func testAnUnsaveableLoginNamesTheDateAndTheCommand() async throws {
         let space = try TestSpace(); let memory = ClaudeMemory()
         let died = date.timeIntervalSince1970 - 4 * 86400
         memory.put("/synthetic/auth.json",
                    auth(expiry: date.timeIntervalSince1970 - 5 * 86400, refreshExpiry: died))
-        let http = HTTPStub([(200, #"{"access_token":"never","expires_in":3600}"#, [:])])
+        let http = HTTPStub([(400, #"{"error":"invalid_grant"}"#, [:])])
         let provider = ClaudeProvider(defaults: space.defaults, access: memory.access,
                                       now: { self.date }, request: { try await http.send($0) })
 
         _ = await provider.windows()
 
-        let count = await http.count
-        XCTAssertEqual(count, 0, "the record said the refresh token was dead — nothing to ask the server")
-        XCTAssertEqual(memory.writes, 0, "and nothing was written over the reader's own credential")
-
+        XCTAssertEqual(memory.writes, 0, "a refused exchange must not write over the credential")
         let blocker = await provider.blocker
         XCTAssertTrue(blocker.isExpired)
         XCTAssertTrue(blocker.message.contains("claude auth login"),
                       "the message has to end in something the reader can paste: \(blocker.message)")
-        XCTAssertFalse(blocker.message.contains("凭据已失效"),
-                       "that was the old wording, and it told the reader nothing")
+        // Compared against the two shapes the case can produce rather than against a substring,
+        // so rewording either one cannot quietly turn this assertion into a tautology.
+        XCTAssertEqual(blocker.message, ClaudeProvider.Blocker.expired(Date(timeIntervalSince1970: died)).message,
+                       "the dated form is the whole point when the date is ours to vouch for")
+        XCTAssertNotEqual(blocker.message, ClaudeProvider.Blocker.expired(nil).message)
     }
 
-    /// The gate must not fire on an expiry we may have outdated ourselves.
+    /// But a date this app may have outdated itself is not stated as fact.
     ///
-    /// `refreshTokenExpiresAt` describes the refresh token Claude Code wrote. Once this app has
-    /// swapped one successfully the field may describe a token that no longer exists, and
-    /// refusing to renew a live credential on the strength of a stale date would be far worse
-    /// than one wasted request. So the skip is gated on never having rotated — and this is the
-    /// test that says so.
-    func testAnExpiryThisAppMayHaveOutdatedIsStillWorthTrying() async throws {
+    /// `ClaudeCredentialStore.rotated` rewrites the access token, the refresh token and the
+    /// access expiry, and deliberately leaves `refreshTokenExpiresAt` alone — invariant one
+    /// forbids reshaping a record Claude Code also owns. So after this app has swapped a token
+    /// once, the date on disk may describe a refresh token that no longer exists. Naming it
+    /// would send the reader looking for what happened on a day that means nothing.
+    func testADateThisAppMayHaveOutdatedIsNotStatedAsFact() async throws {
         let space = try TestSpace(); let memory = ClaudeMemory()
-        space.defaults.set(1, forKey: "claudeRefreshCount")
+        space.defaults.set(1, forKey: "claudeRefreshCount")   // we have rotated before
         memory.put("/synthetic/auth.json",
                    auth(expiry: date.timeIntervalSince1970 - 5 * 86400,
                         refreshExpiry: date.timeIntervalSince1970 - 4 * 86400))
-        let http = HTTPStub([
-            (200, #"{"access_token":"rotated","refresh_token":"rotated-refresh","expires_in":3600}"#, [:]),
-            (200, quota, [:]),
-        ])
+        let http = HTTPStub([(400, #"{"error":"invalid_grant"}"#, [:])])
         let provider = ClaudeProvider(defaults: space.defaults, access: memory.access,
                                       now: { self.date }, request: { try await http.send($0) })
 
-        let reading = await provider.windows()
+        _ = await provider.windows()
 
-        let count = await http.count
-        XCTAssertEqual(count, 2, "a date we may have outdated is not evidence — ask the server")
-        XCTAssertFalse(reading.windows.isEmpty, "and the exchange succeeded, which is the point")
+        let blocker = await provider.blocker
+        XCTAssertTrue(blocker.isExpired)
+        XCTAssertEqual(blocker.message, ClaudeProvider.Blocker.expired(nil).message,
+                       "no date may be named once we cannot vouch for it: \(blocker.message)")
+        XCTAssertTrue(blocker.message.contains("claude auth login"), "the remedy is still stated")
     }
 }

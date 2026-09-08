@@ -293,7 +293,11 @@ enum Probe {
         // acts on it, and AppKit is left to resize a popover that is already on screen.
         let sizeIt = ProcessInfo.processInfo.environment["PWEBAR_PROBE_NO_RESIZE"] != "1"
         let panel = PanelView(store: store, onTrophy: {}, onSettings: {}, onOpen: { _ in },
-                              onEnableQuota: {}, onHeight: { h in
+                              onEnableQuota: {},
+                              // The same screen the app uses, or this check measures one display
+                              // while the panel sized itself against another.
+                              usableHeight: { item.button?.window?.screen?.visibleFrame.height },
+                              onHeight: { h in
             reported = h
             if sizeIt { popover.contentSize = NSSize(width: Theme.panelWidth, height: h) }
         })
@@ -331,7 +335,10 @@ enum Probe {
             print("滚动            没有 NSScrollView")
         }
         store.stop()
-        exit(0)
+        // Non-zero when the verdict is bad, so this can gate a release the way the handover says
+        // it should. It already exits 1 for a missing status item; exiting 0 after printing
+        // "顶部超出屏幕 是" made the check un-gateable and easy to skim past.
+        exit(above > 8 || below > 8 ? 1 : 0)
     }
 
     static func stress(into dir: String) {
@@ -454,8 +461,8 @@ enum Probe {
             case .needsSetup: why = "未授权（面板点「启用真实额度」，或用 --token 设长期令牌）"
             case .notLoggedIn: why = "未登录（运行 claude auth login）"
             case .keychainRefused: why = "钥匙串拒绝（重新运行 claude auth login 即可重建授权）"
-            case .unauthorized, .forbidden, .network, .storage, .invalidResponse, .credentialsChanged: why = blocker.message
-            case .expired: why = blocker.message
+            case .unauthorized, .forbidden, .network, .storage, .invalidResponse,
+                 .credentialsChanged, .expired: why = blocker.message
             case .rateLimited(let d): why = "限流至 \(f(d))"
             }
             print("登录        \(loggedIn ? "是" : "否")     数据陈旧  \(stale ? "是" : "否")")
