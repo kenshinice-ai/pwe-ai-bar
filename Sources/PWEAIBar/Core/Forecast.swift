@@ -297,7 +297,8 @@ struct Forecast: Equatable {
     /// figure can never point at different moments.
     var headingLeft: String {
         if trip == nil { return "" }
-        return headlineIsEndurance ? "至少能跑" : "到重置"
+        return headlineIsEndurance ? L("forecast.heading.endurance", "Lasts at least")
+                                   : L("forecast.heading.toReset", "To reset")
     }
 
     /// Right of the heading row: the rate, and the stretch it was measured over. A rate with no
@@ -305,8 +306,10 @@ struct Forecast: Equatable {
     var paceText: String? {
         guard let rate, let evidence else { return nil }
         let mid = (rate.low + rate.high) / 2
-        let stretch = evidence.isMeasured ? "最近 \(Forecast.span(evidence.span))" : "开窗以来"
-        return "\(stretch) 耗速 \(Forecast.percentPerHour(mid))%/时"
+        let stretch = evidence.isMeasured
+            ? L("forecast.pace.recent", "last") + " " + Forecast.span(evidence.span)
+            : L("forecast.pace.sinceOpen", "since the window opened")
+        return String(format: L("forecast.pace", "%@ · %@%%/h"), stretch, Forecast.percentPerHour(mid))
     }
 
     /// The one line that is allowed to be coloured, and the only place the verdict is stated.
@@ -314,14 +317,17 @@ struct Forecast: Equatable {
     /// what the duration cannot say.
     var verdictText: String {
         switch verdict {
-        case .spent: return "已用尽"
-        case .fallsShort(let gap): return "缺口 \(Forecast.span(gap))"
-        case .tooClose: return "临界，说不准"
-        case .makesIt(let spare): return "到点至少剩 \(Forecast.spare(spare))"
-        case .sampling: return "还在采样"
-        case .blind(let since): return "\(Forecast.span(since))没有新读数"
-        case .noTimeline(.noReset): return "这个额度没有重置时间，算不出续航"
-        case .noTimeline(.resetPassed): return "已过重置时间，等新读数确认"
+        case .spent: return L("verdict.spent", "Spent")
+        case .fallsShort(let gap): return String(format: L("verdict.short", "Short by %@"), Forecast.span(gap))
+        case .tooClose: return L("verdict.tooClose", "Too close to call")
+        case .makesIt(let spare):
+            return String(format: L("verdict.makesIt", "%@ to spare at reset"), Forecast.spare(spare))
+        case .sampling: return L("verdict.sampling", "Still sampling")
+        case .blind(let since): return String(format: L("verdict.blind", "No reading for %@"), Forecast.span(since))
+        case .noTimeline(.noReset):
+            return L("verdict.noReset", "This quota has no reset time, so endurance cannot be computed")
+        case .noTimeline(.resetPassed):
+            return L("verdict.resetPassed", "Past its reset — waiting for a fresh reading to confirm")
         }
     }
 
@@ -331,13 +337,13 @@ struct Forecast: Equatable {
     var spoken: String {
         guard let trip else { return verdictText }
         let head = headlineIsEndurance
-            ? "按最快的估计还能跑 \(Forecast.span(headline ?? 0))"
-            : "到重置还有 \(Forecast.span(trip))"
+            ? String(format: L("forecast.fastest", "%@ left at the fastest estimate"), Forecast.span(headline ?? 0))
+            : String(format: L("forecast.toReset", "%@ to the reset"), Forecast.span(trip))
         var out = [head]
         if let pace = paceText { out.append(pace) }
         out.append(verdictText)
-        if case .blind = verdict, unreadable { out.append("先把连接修好") }
-        if let thinness { out.append("原因：\(thinness.rawValue)") }
+        if case .blind = verdict, unreadable { out.append(L("forecast.fixConnection", "Fix the connection first")) }
+        if let thinness { out.append(String(format: L("forecast.reason", "Reason: %@"), thinness.rawValue)) }
         return out.joined(separator: "，")
     }
 
@@ -380,20 +386,22 @@ struct Forecast: Equatable {
     /// One duration format for the whole app. Split into number and unit so the figures can take
     /// the tabular face and the units can stay in the interface face.
     static func parts(_ seconds: TimeInterval) -> [(text: String, isNumber: Bool)] {
-        guard seconds.isFinite else { return [("很久", false)] }
+        guard seconds.isFinite else { return [(L("span.ages", "a long time"), false)] }
         let s = max(0, Int(seconds))
-        if s < 3600 { return [("\(max(1, s / 60))", true), ("分", false)] }
+        if s < 3600 { return [("\(max(1, s / 60))", true), (L("span.min", "m"), false)] }
         if s < 86400 {
             let h = s / 3600, m = (s % 3600) / 60
-            return m == 0 ? [("\(h)", true), ("小时", false)]
-                          : [("\(h)", true), ("小时", false), ("\(m)", true), ("分", false)]
+            return m == 0 ? [("\(h)", true), (L("span.hour", "h"), false)]
+                          : [("\(h)", true), (L("span.hour", "h"), false),
+                             ("\(m)", true), (L("span.min", "m"), false)]
         }
         if s < 172_800 {
             let d = s / 86400, h = (s % 86400) / 3600
-            return h == 0 ? [("\(d)", true), ("天", false)]
-                          : [("\(d)", true), ("天", false), ("\(h)", true), ("小时", false)]
+            return h == 0 ? [("\(d)", true), (L("span.day", "d"), false)]
+                          : [("\(d)", true), (L("span.day", "d"), false),
+                             ("\(h)", true), (L("span.hour", "h"), false)]
         }
-        return [("\(s / 86400)", true), ("天以上", false)]
+        return [("\(s / 86400)", true), (L("span.dayPlus", "d+"), false)]
     }
 
     /// The same duration as a plain string, spaced the way the panel writes them everywhere
@@ -409,8 +417,8 @@ struct Forecast: Equatable {
 
     static func resetLabel(_ reset: Date?, trip: TimeInterval) -> String {
         guard let reset else { return "" }
-        if trip < 86400 { return "\(clock(reset)) 重置" }
-        return "\(max(1, Int((trip / 86400).rounded()))) 天后重置"
+        if trip < 86400 { return String(format: L("reset.at", "%@ reset"), clock(reset)) }
+        return String(format: L("reset.inDays", "resets in %@d"), "\(max(1, Int((trip / 86400).rounded())))")
     }
 }
 

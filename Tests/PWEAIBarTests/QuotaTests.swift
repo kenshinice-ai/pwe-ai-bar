@@ -3,6 +3,13 @@ import XCTest
 @testable import PWEAIBar
 
 final class QuotaTests: XCTestCase {
+
+    /// Pinned, because `verdictText` is localised now and `.system` resolves against whatever
+    /// language the machine running the tests happens to use — these would pass in London and
+    /// fail in Shanghai. English is the pin because it is written at the call site: a missing
+    /// zh-Hans key must not fail a test about forecast *logic*. `Tools/loccheck` guards the
+    /// translations; this guards the arithmetic.
+    override func setUp() { super.setUp(); Loc.language = .en }
     func testInterleavedPoolsUseRecordTimeAndIgnoreInvalidTail() async throws {
         let space = try TestSpace(); let clock = TestClock()
         let at = clock.date.addingTimeInterval(-300)
@@ -204,7 +211,7 @@ final class QuotaTests: XCTestCase {
             XCTAssertNil(f.rate, label)
             XCTAssertEqual(f.verdict, .sampling, label)
             XCTAssertEqual(f.thinness, expected, label)
-            XCTAssertEqual(f.verdictText, "还在采样", label)
+            XCTAssertEqual(f.verdictText, "Still sampling", label)
         }
 
         // An hour with no new reading is not thin evidence, it is silence, and it is named.

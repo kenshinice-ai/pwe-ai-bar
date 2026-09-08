@@ -9,6 +9,13 @@ import XCTest
 /// fact, a boolean standing in for how good the evidence was, and four if-chains in the view
 /// deciding copy — which is how "we cannot tell you" ended up in the same grey as "you are fine".
 final class ForecastTests: XCTestCase {
+
+    /// Pinned, because `verdictText` is localised now and `.system` resolves against whatever
+    /// language the machine running the tests happens to use — these would pass in London and
+    /// fail in Shanghai. English is the pin because it is written at the call site: a missing
+    /// zh-Hans key must not fail a test about forecast *logic*. `Tools/loccheck` guards the
+    /// translations; this guards the arithmetic.
+    override func setUp() { super.setUp(); Loc.language = .en }
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
     private func window(percent: Double?, resetIn: TimeInterval, length: TimeInterval? = 5 * 3600,
@@ -128,13 +135,13 @@ final class ForecastTests: XCTestCase {
             .forecast(at: now)
         XCTAssertEqual(f.verdict, .blind(since: 7 * 3600))
         XCTAssertEqual(f.tone, .warm)
-        XCTAssertEqual(f.verdictText, "7 小时没有新读数")
-        XCTAssertTrue(f.spoken.contains("先把连接修好"), "this one has a remedy and names it")
+        XCTAssertEqual(f.verdictText, "No reading for 7 h")
+        XCTAssertTrue(f.spoken.contains("Fix the connection first"), "this one has a remedy and names it")
 
         // A silence with nothing broken behind it says the same true thing and offers no cure:
         // Codex reads its figure out of a session log, so hours can pass with nobody at fault.
         let quiet = window(percent: 26, resetIn: 2 * 3600, observedAgo: 7 * 3600).forecast(at: now)
-        XCTAssertEqual(quiet.verdictText, "7 小时没有新读数")
+        XCTAssertEqual(quiet.verdictText, "No reading for 7 h")
         XCTAssertFalse(quiet.spoken.contains("先把连接修好"))
 
         // A window whose stale reset has drifted into the past still gets told to go and look.
@@ -149,7 +156,7 @@ final class ForecastTests: XCTestCase {
         let brief = window(percent: 40, resetIn: 2 * 3600, stale: true, observedAgo: 400)
             .forecast(at: now)
         XCTAssertEqual(brief.verdict, .sampling)
-        XCTAssertEqual(brief.verdictText, "还在采样")
+        XCTAssertEqual(brief.verdictText, "Still sampling")
     }
 
     /// Seven outcomes, three colours, and the assignment is part of the spec rather than of the
@@ -157,15 +164,15 @@ final class ForecastTests: XCTestCase {
     /// verdict with no tone decided for it is a verdict that reads as good news.
     func testEveryVerdictCarriesExactlyOneTone() {
         let cases: [(Forecast, Forecast.Tone, String)] = [
-            (window(percent: 100, resetIn: 3600, spent: true).forecast(at: now), .hot, "已用尽"),
-            (window(percent: 70, resetIn: 2 * 3600).forecast(at: now), .hot, "缺口 40 分"),
+            (window(percent: 100, resetIn: 3600, spent: true).forecast(at: now), .hot, "Spent"),
+            (window(percent: 70, resetIn: 2 * 3600).forecast(at: now), .hot, "Short by 40 m"),
             (window(percent: 95, resetIn: 4 * 3600,
-                    samples: [(-1800, 94), (0, 95)]).forecast(at: now), .warm, "临界，说不准"),
-            (window(percent: 20, resetIn: 2 * 3600).forecast(at: now), .plain, "到点至少剩 66%"),
-            (window(percent: nil, resetIn: 2 * 3600).forecast(at: now), .plain, "还在采样"),
+                    samples: [(-1800, 94), (0, 95)]).forecast(at: now), .warm, "Too close to call"),
+            (window(percent: 20, resetIn: 2 * 3600).forecast(at: now), .plain, "66% to spare at reset"),
+            (window(percent: nil, resetIn: 2 * 3600).forecast(at: now), .plain, "Still sampling"),
             (window(percent: nil, resetIn: 2 * 3600, stale: true,
-                    observedAgo: 7 * 3600).forecast(at: now), .warm, "7 小时没有新读数"),
-            (window(percent: 40, resetIn: -60).forecast(at: now), .plain, "已过重置时间，等新读数确认"),
+                    observedAgo: 7 * 3600).forecast(at: now), .warm, "No reading for 7 h"),
+            (window(percent: 40, resetIn: -60).forecast(at: now), .plain, "Past its reset — waiting for a fresh reading to confirm"),
         ]
         for (f, tone, text) in cases {
             XCTAssertEqual(f.tone, tone, text)
@@ -190,12 +197,12 @@ final class ForecastTests: XCTestCase {
         ] {
             XCTAssertFalse(f.headlineIsEndurance, "\(f.verdict)")
             XCTAssertEqual(f.headline, f.trip, "\(f.verdict)")
-            XCTAssertEqual(f.headingLeft, "到重置", "\(f.verdict)")
+            XCTAssertEqual(f.headingLeft, "To reset", "\(f.verdict)")
         }
 
         let short = window(percent: 70, resetIn: 2 * 3600).forecast(at: now)
         XCTAssertTrue(short.headlineIsEndurance)
-        XCTAssertEqual(short.headingLeft, "至少能跑")
+        XCTAssertEqual(short.headingLeft, "Lasts at least")
         XCTAssertLessThan(try XCTUnwrap(short.headline), try XCTUnwrap(short.trip))
     }
 

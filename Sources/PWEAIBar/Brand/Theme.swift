@@ -99,6 +99,11 @@ enum Theme {
         return NSFont(descriptor: desc, size: size) ?? fallback
     }
 
+    /// §7.2: a Han label runs one point larger than its Latin counterpart.
+    static func labelSize(_ size: CGFloat) -> CGFloat { Loc.isCJK ? size + 1 : size }
+    /// §7.2: and at 0.4× the tracking. Spacing out 汉字 separates a word rather than opening a line.
+    static func labelTracking(_ t: CGFloat) -> CGFloat { Loc.isCJK ? t * 0.4 : t }
+
     static func sans(_ size: CGFloat, _ weight: CGFloat = 400) -> Font {
         Font(variable("Inter", size: size, weight: weight,
                       fallback: .systemFont(ofSize: size)))
@@ -127,7 +132,14 @@ enum Theme {
 
 extension View {
     /// The brand's small caps label: Inter Semibold, +0.18em tracking, upper case.
-    func brandLabel(_ size: CGFloat = 9.5) -> some View {
-        font(Theme.sans(size, 600)).tracking(size * 0.18)
+    ///
+    /// The tracking is a **Latin** rule — §6 of the brand standard — and §7.2 carves out the
+    /// exception: Han runs one point larger and at 0.4× the tracking, because letter-spacing
+    /// applied to 汉字 pulls a word apart instead of opening a line up. The default size named
+    /// here is therefore the Latin one; Han reaches 9.5 pt through the exception rather than by
+    /// being the default, which is how it was written while the app was Chinese-only.
+    func brandLabel(_ size: CGFloat = 8.5) -> some View {
+        font(Theme.sans(Theme.labelSize(size), 600))
+            .tracking(Theme.labelTracking(size * 0.18))
     }
 }
