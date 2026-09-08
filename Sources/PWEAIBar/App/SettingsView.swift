@@ -3,13 +3,43 @@ import SwiftUI
 /// Density is a preference, not a house opinion — some people want every reading in the bar and
 /// some want one glyph. What is not a preference is arrangement: whichever density you pick,
 /// the same alignment rules hold.
+/// Whether the Claude Code hooks are in place. A case, not the words shown for it: this used to
+/// be a `String` compared against 「未安装」 to decide what the button says and does, which
+/// survives exactly until the string is translated.
+enum HookState: Equatable {
+    case absent, installed, stale, failed
+    var label: String {
+        switch self {
+        case .absent:    return L("hooks.absent", "not installed")
+        case .installed: return L("hooks.installed", "installed")
+        case .stale:     return L("hooks.stale", "script needs updating")
+        case .failed:    return L("hooks.failed", "failed")
+        }
+    }
+}
+
+/// What detection found for one provider — again a case rather than its own label, for the same
+/// reason: `states[.claude] == "已登录"` decided which sentence the settings page shows.
+enum Detected: Equatable {
+    case signedIn, signedOut, present, absent, detected
+    var label: String {
+        switch self {
+        case .signedIn:  return L("detected.signedIn", "signed in")
+        case .signedOut: return L("detected.signedOut", "signed out")
+        case .present:   return L("detected.present", "installed")
+        case .absent:    return L("detected.absent", "not installed")
+        case .detected:  return L("detected.found", "detected")
+        }
+    }
+}
+
 struct SettingsView: View {
     @ObservedObject var prefs = Prefs.shared
     var installHooks: () -> Bool
     var saveToken: (String) async -> ClaudeProvider.TokenUpdate
     var enableRealQuota: () -> Void
-    @State private var hookState: String
-    @State private var states: [Provider: String] = [:]
+    @State private var hookState: HookState
+    @State private var states: [Provider: Detected] = [:]
     @State private var token: String = ""
     @StateObject private var tokenEditor: TokenEditor
 
@@ -27,7 +57,7 @@ struct SettingsView: View {
         let installed = hookInstalled ?? HookProvider.isInstalled
         let current = HookProvider.installedScriptIsCurrent(
             source: Bundle.module.url(forResource: "pwe-ai-bar-hook", withExtension: "sh"))
-        _hookState = State(initialValue: !installed ? "未安装" : current ? "已安装" : "脚本待更新")
+        _hookState = State(initialValue: !installed ? .absent : current ? .installed : .stale)
     }
 
     var body: some View {
@@ -49,30 +79,44 @@ struct SettingsView: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
-            row("菜单栏") {
+            row(L("settings.language", "Language")) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Picker("", selection: $prefs.language) {
+                        ForEach(Language.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden()
+                    Text(L("settings.language.note",
+                           "Following the system is not always right: plenty of Chinese speakers "
+                           + "run macOS in English on purpose, and would never see the Chinese build."))
+                        .font(Theme.sans(10.5)).foregroundStyle(Theme.text2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            row(L("settings.menuBar", "Menu bar")) {
                 Picker("", selection: $prefs.menuBarMode) {
                     ForEach(MenuBarMode.allCases) { Text($0.label).tag($0) }
                 }.pickerStyle(.segmented).labelsHidden()
             }
-            row("面板") {
+            row(L("settings.panel", "Panel")) {
                 Picker("", selection: $prefs.panelMode) {
                     ForEach(PanelMode.allCases) { Text($0.label).tag($0) }
                 }.pickerStyle(.segmented).labelsHidden()
             }
-            row("百分比口径") {
+            row(L("settings.readout", "Percentage basis")) {
                 VStack(alignment: .leading, spacing: 5) {
                     Picker("", selection: $prefs.showRemaining) {
                         Text(Readout.label.remaining).tag(true)
                         Text(Readout.label.used).tag(false)
                     }
                     .pickerStyle(.segmented).labelsHidden()
-                    Text("Codex 自己显示的是剩余，Claude 的接口给的是已用。"
-                         + "统一成一种，免得同一个数看着像两回事。")
+                    Text(L("settings.readout.note",
+                           "Codex shows what is left; Claude's endpoint gives what is used. "
+                           + "One convention, so the same window does not read as two things."))
                         .font(Theme.sans(10.5)).foregroundStyle(Theme.text2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            row("提醒落点") {
+            row(L("settings.alertPlacement", "Where alerts land")) {
                 VStack(alignment: .leading, spacing: 5) {
                     // The notch choice is removed, not greyed. A segmented control cannot show
                     // a disabled item convincingly — it looks identical to a live one until you
@@ -86,12 +130,12 @@ struct SettingsView: View {
                     .pickerStyle(.segmented).labelsHidden()
 
                     if !Prefs.hasNotch {
-                        Text("这台机器没有刘海，所以没有那个选项。")
+                        Text(L("settings.noNotch", "This Mac has no camera housing, so that option is unavailable."))
                             .font(Theme.sans(10.5)).foregroundStyle(Theme.text2)
                     }
                 }
             }
-            row("额度数据来源") {
+            row(L("settings.source", "Quota source")) {
                 VStack(alignment: .leading, spacing: Theme.s2) {
                     // The whole point of this section is that the default never shows a dialog.
                     // Say which of the three states you are in — a permission prompt the user
@@ -103,9 +147,11 @@ struct SettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                     HStack(spacing: Theme.s1 + 1) {
-                        SecureField("高级选项：粘贴有额度读取权限的令牌", text: $token)
+                        SecureField(L("settings.token.field", "Advanced: paste a token with quota read access"), text: $token)
                             .textFieldStyle(.roundedBorder).font(Theme.sans(11.5))
-                        Button(tokenEditor.isSaving ? "验证中…" : tokenEditor.hasToken && token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "清除" : "保存") {
+                        Button(tokenEditor.isSaving ? L("settings.token.verifying", "Verifying…")
+                               : tokenEditor.hasToken && token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                 ? L("settings.token.clear", "Clear") : L("settings.token.save", "Save")) {
                             Task { @MainActor in
                                 if await tokenEditor.submit(token, save: saveToken) { token = "" }
                             }
@@ -119,8 +165,13 @@ struct SettingsView: View {
                         // Telling someone how to get a token they already have is noise; the
                         // useful thing to say at that point is where it lives and how to remove it.
                         Text(tokenEditor.hasToken
-                             ? "令牌保存在本 app 的钥匙串中，仍可能失效或被撤销。可直接粘贴新令牌更换，或清空输入后点「清除」。"
-                             : "通常无需填写。自动复用 Claude Code 登录；可续期时更新原凭据。手动令牌必须通过额度接口验证，长期有效不代表具备用量权限。")
+                             ? L("settings.token.stored",
+                                 "The token is kept in this app's keychain and can still expire or be "
+                                 + "revoked. Paste a new one to replace it, or clear the field and press Clear.")
+                             : L("settings.token.none",
+                                 "Usually unnecessary. The Claude Code login is reused automatically and "
+                                 + "renewed in place when it can be. A manual token must pass the quota "
+                                 + "endpoint; being long-lived does not mean it can read usage."))
                             .font(Theme.sans(10.5)).foregroundStyle(Theme.text2)
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: Theme.s1)
@@ -128,9 +179,11 @@ struct SettingsView: View {
                         // Code's credential the quiet way did not work. With a token in hand it
                         // would change nothing, so it is not offered.
                         if !tokenEditor.hasToken {
-                            Button("改用钥匙串授权") { enableRealQuota() }
+                            Button(L("cta.useKeychain", "Use keychain access")) { enableRealQuota() }
                                 .font(Theme.sans(11))
-                                .help("读不到 Claude Code 凭据时的退路，会弹一次系统授权框")
+                                .help(L("settings.keychain.help",
+                                        "The fallback when the Claude Code credential cannot be read; "
+                                        + "macOS will ask for authorisation once"))
                         }
                     }
                     if !tokenEditor.message.isEmpty {
@@ -139,63 +192,71 @@ struct SettingsView: View {
                     }
                 }
             }
-            row("追踪") {
+            row(L("settings.tracking", "Tracking")) {
                 VStack(alignment: .leading, spacing: 7) {
                     ForEach(Provider.allCases, id: \.rawValue) { p in providerRow(p) }
-                    Text("关掉的不会被查询。「未安装」指本机找不到该工具存下的登录信息。")
+                    Text(L("settings.tracking.note",
+                           "Anything switched off is never queried. \"Not installed\" means no login "
+                           + "for that tool was found on this Mac."))
                         .font(Theme.sans(10)).foregroundStyle(Theme.text2)
                         .fixedSize(horizontal: false, vertical: true).padding(.top, 2)
                 }
             }
-            row("会话事件") {
+            row(L("settings.sessionEvents", "Session events")) {
                 HStack {
-                    Text("Claude Code hooks · \(hookState)")
+                    Text("Claude Code hooks · \(hookState.label)")
                         .font(Theme.sans(12)).foregroundStyle(Theme.text2)
                     Spacer()
-                    Button(hookState == "未安装" ? "安装" : "重新安装") {
-                        hookState = installHooks() ? "已安装" : "失败"
+                    Button(hookState == .absent ? L("settings.hooks.install", "Install")
+                                                : L("settings.hooks.reinstall", "Reinstall")) {
+                        hookState = installHooks() ? .installed : .failed
                     }
                     .font(Theme.sans(12))
                 }
             }
-            row("离座时推送") {
+            row(L("settings.pushAway", "Push when you are away")) {
                 VStack(alignment: .leading, spacing: 4) {
-                    TextField("ntfy / Bark 的 URL，留空则不推送", text: $prefs.pushURL)
+                    TextField(L("settings.push.field", "ntfy / Bark URL — leave empty for no push"), text: $prefs.pushURL)
                         .textFieldStyle(.roundedBorder).font(Theme.sans(11.5))
-                    Text("只在你离开键盘超过 5 分钟时才会用到。")
+                    Text(L("settings.push.note", "Only used once you have been away from the keyboard for five minutes."))
                         .font(Theme.sans(10.5)).foregroundStyle(Theme.text2)
                 }
             }
-            row("订阅价格") {
+            row(L("settings.subscription", "Subscription price")) {
                 VStack(alignment: .leading, spacing: Theme.s2) {
                     Picker("", selection: $prefs.subscriptionCurrency) {
-                        Text("美元 USD").tag("USD")
-                        Text("澳元 AUD").tag("AUD")
+                        Text(L("currency.usd", "USD")).tag("USD")
+                        Text(L("currency.aud", "AUD")).tag("AUD")
                     }
                     .pickerStyle(.segmented).labelsHidden()
 
                     HStack(spacing: Theme.s2) {
-                        priceField(prefs.subscriptionCurrency == "AUD" ? "每月 A$" : "每月 US$",
+                        priceField(prefs.subscriptionCurrency == "AUD"
+                                     ? L("settings.perMonth.aud", "per month A$")
+                                     : L("settings.perMonth.usd", "per month US$"),
                                    value: $prefs.subscriptionMonthly)
                         // The multiple is computed in USD whatever is displayed, so when the
                         // shown currency is not USD the USD figure is a second, separate number
                         // rather than a conversion — A$150 and US$100 are both the price of
                         // Max 5×, and neither is the other times an exchange rate.
                         if prefs.subscriptionCurrency != "USD" {
-                            priceField("折 US$", value: $prefs.subscriptionMonthlyUSD)
+                            priceField(L("settings.inUSD", "as US$"), value: $prefs.subscriptionMonthlyUSD)
                         }
                     }
 
-                    Text("留空按识别到的档位取表内价格。回本倍数一律按 USD 计算——"
-                         + "等效成本本身就是 USD 目录价，换算成别的币种需要一个本应用没有可靠来源的汇率。")
+                    Text(L("settings.subscription.note",
+                           "Leave empty to use the table price for the detected plan. The multiple is "
+                           + "always computed in USD — the equivalent cost is itself a USD list price, "
+                           + "and converting it would need an exchange rate this app has no reliable "
+                           + "source for."))
                         .font(Theme.sans(10.5)).foregroundStyle(Theme.text2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            row("其它") {
+            row(L("settings.other", "Other")) {
                 VStack(alignment: .leading, spacing: Theme.s1) {
-                    Toggle("提示音", isOn: $prefs.sound)
-                    Toggle("开机启动", isOn: $prefs.launchAtLogin)
+                    Toggle(L("settings.sound", "Sound"), isOn: $prefs.sound)
+                    Toggle(L("settings.launchAtLogin", "Launch at login"), isOn: $prefs.launchAtLogin)
                 }
                 .toggleStyle(.switch).font(Theme.sans(12))
             }
@@ -208,16 +269,22 @@ struct SettingsView: View {
     /// now the fallback, and a settings page that says otherwise is telling a small lie about
     /// where someone's credential is being read from.
     private var sourceLine: String {
-        if states[.claude] == "已登录" {
-            return "已发现 Claude Code 登录条目；实际连接与系统访问结果请查看额度面板。"
+        if states[.claude] == .signedIn {
+            return L("settings.source.found",
+                     "A Claude Code login was found. Whether it connects, and what macOS allows, "
+                     + "is shown in the quota panel.")
         }
         if tokenEditor.hasToken {
-            return "已保存高级手动令牌；其权限和有效性由额度接口验证。"
+            return L("settings.source.manualToken",
+                     "A manual token is saved. Its permissions and validity are decided by the "
+                     + "quota endpoint.")
         }
         if prefs.sharedKeychainOptIn {
-            return "已选择钥匙串授权，连接结果请查看额度面板。"
+            return L("settings.source.keychain",
+                     "Keychain access is selected; the result is shown in the quota panel.")
         }
-        return "未发现可用的 Claude Code 登录信息；请先运行 claude auth login。"
+        return L("settings.source.none",
+                 "No usable Claude Code login was found — run claude auth login first.")
     }
 
     /// One line per provider, whether or not it is here. A tool that is installed but signed
@@ -225,7 +292,7 @@ struct SettingsView: View {
     /// the panel — so both are listed, and each says which it is.
     private func providerRow(_ p: Provider) -> some View {
         let reason = p.unavailableReason
-        let detected = states[p]
+        let detected = states[p]?.label
         return HStack(spacing: 7) {
             ProviderMarkView(provider: p, tint: reason == nil ? Theme.text : Theme.text2)
                 .frame(width: 13, height: 13)
@@ -242,7 +309,8 @@ struct SettingsView: View {
                 .disabled(reason != nil)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(p.name)，\(reason ?? detected ?? "检测中")")
+        .accessibilityLabel(String(format: L("settings.provider.a11y", "%@, %@"), p.name,
+                                   reason ?? detected ?? L("settings.detecting", "detecting")))
     }
 
     /// Detection only: whether a credential exists, never whether it still works. Saying
@@ -251,13 +319,13 @@ struct SettingsView: View {
     /// Run once, off the main thread, and never from inside a view body: finding these costs
     /// `sqlite3` and `security` subprocesses, and SwiftUI re-evaluates a body far more often
     /// than anyone installs an IDE.
-    nonisolated private static func detect() -> [Provider: String] {
-        var out: [Provider: String] = [:]
+    nonisolated private static func detect() -> [Provider: Detected] {
+        var out: [Provider: Detected] = [:]
         for p in Provider.allCases where p.unavailableReason == nil {
             switch p {
-            case .claude: out[p] = Credentials.sharedItemExists() ? "已登录" : "未登录"
-            case .codex:  out[p] = CodexAppServer.executable() != nil ? "已安装" : "未安装"
-            default:      out[p] = ExtraProviders.installed(p) ? "检测到" : "未安装"
+            case .claude: out[p] = Credentials.sharedItemExists() ? .signedIn : .signedOut
+            case .codex:  out[p] = CodexAppServer.executable() != nil ? .present : .absent
+            default:      out[p] = ExtraProviders.installed(p) ? .detected : .absent
             }
         }
         return out

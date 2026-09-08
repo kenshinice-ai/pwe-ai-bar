@@ -35,10 +35,10 @@ enum StatusIcon {
         // An event outranks every measurement. Someone is waiting on you; the numbers can wait.
         if let a = snap.attention {
             let tint = Theme.ns(dark ? Theme.amber : Theme.amberDeep)
-            let who = snap.waiting > 1 ? "\(snap.waiting) 个会话"
+            let who = snap.waiting > 1 ? String(format: L("menu.sessions", "%d sessions"), snap.waiting)
                 : String(a.provider.name.split(separator: " ").first ?? "Claude")
             segments = [Segment(text: "●", colour: tint),
-                        Segment(text: "\(who) 在等你", colour: tint)]
+                        Segment(text: String(format: L("menu.waiting", "%@ waiting"), who), colour: tint)]
         } else {
             switch mode {
             case .icon:
@@ -165,6 +165,6 @@ enum StatusIcon {
         // Past a day, hours stop being a unit anyone reads. A weekly window rendered as
         // "215:59", which is not a time so much as a dare.
         if s < 86400 { return String(format: "%d:%02d", s / 3600, (s % 3600) / 60) }
-        return "\(s / 86400)天"
+        return String(format: L("compact.day", "%dd"), s / 86400)
     }
 }

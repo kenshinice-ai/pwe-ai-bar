@@ -3,6 +3,10 @@ import XCTest
 @testable import PWEAIBar
 
 final class RuleTests: XCTestCase {
+
+    /// Pinned: `Readout` is localised now, and `.system` would resolve against whatever language
+    /// the machine running the tests uses — these would pass here and fail on a Chinese Mac.
+    override func setUp() { super.setUp(); Loc.language = .en }
     @MainActor func testPendingResetSurvivesMissingStaleAndRestartThenAcknowledgesOnce() async throws {
         let space = try TestSpace(); let clock = TestClock()
         let reset = clock.date.addingTimeInterval(10)
@@ -212,16 +216,16 @@ final class RuleTests: XCTestCase {
             XCTAssertEqual(Readout.text(w, remaining: true), "1%", "\(pct) must not read 0% left")
         }
         XCTAssertTrue(window(100).confirmedExhausted)
-        XCTAssertEqual(Readout.text(window(100), remaining: false), "已用尽")
-        XCTAssertEqual(Readout.text(window(100), remaining: true), "已用尽")
+        XCTAssertEqual(Readout.text(window(100), remaining: false), "Spent")
+        XCTAssertEqual(Readout.text(window(100), remaining: true), "Spent")
 
         // The server saying so is enough on its own, with or without a percentage.
         var stated = QuotaWindow(id: "w", provider: .claude, channel: .session, title: "t",
-                                 percent: nil, severity: .critical, note: "已用尽",
+                                 percent: nil, severity: .critical, note: "Spent",
                                  confirmedExhausted: true)
-        XCTAssertEqual(Readout.text(stated, remaining: false), "已用尽")
+        XCTAssertEqual(Readout.text(stated, remaining: false), "Spent")
         stated.percent = 40
-        XCTAssertEqual(Readout.text(stated, remaining: false), "已用尽",
+        XCTAssertEqual(Readout.text(stated, remaining: false), "Spent",
                        "the server's word outranks a stale-looking ratio")
 
         // Ordinary values are untouched by the boundary rule.

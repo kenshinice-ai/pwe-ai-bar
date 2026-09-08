@@ -44,6 +44,14 @@ final class Prefs: ObservableObject {
     /// Defaults to remaining — see `Readout` for why.
     @Published var showRemaining: Bool { didSet { d.set(showRemaining, forKey: "showRemaining") } }
 
+    /// Interface language.
+    ///
+    /// Setting it pushes straight into `Loc`, which is what every `L()` reads — an override that
+    /// only reached the store would leave the strings following the system until relaunch.
+    @Published var language: Language {
+        didSet { d.set(language.rawValue, forKey: "language"); Loc.language = language }
+    }
+
     /// How far back the trophy page counts.
     @Published var trophyRange: TrophyRange { didSet { d.set(trophyRange.rawValue, forKey: "trophyRange") } }
     /// Which currency the subscription is shown in. The equivalent API cost stays in USD
@@ -93,6 +101,7 @@ final class Prefs: ObservableObject {
             tracked = initial
         }
         showRemaining = d.object(forKey: "showRemaining") as? Bool ?? true
+        language = Language(rawValue: d.string(forKey: "language") ?? "") ?? .system
         trophyRange = TrophyRange(rawValue: d.string(forKey: "trophyRange") ?? "") ?? .all
         subscriptionCurrency = d.string(forKey: "subscriptionCurrency") ?? "USD"
         subscriptionMonthly = d.double(forKey: "subscriptionMonthly")

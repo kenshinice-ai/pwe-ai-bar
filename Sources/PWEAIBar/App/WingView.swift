@@ -23,7 +23,7 @@ struct WingView: NSViewRepresentable {
         v.tint = NSColor(tint)
         v.ink = NSColor(Theme.text)
         v.setAccessibilityRole(.image)
-        v.setAccessibilityLabel(spoken ?? "PWE 翼形仪表")
+        v.setAccessibilityLabel(spoken ?? L("wing.a11y", "PWE wing gauge"))
         v.needsDisplay = true
     }
 }

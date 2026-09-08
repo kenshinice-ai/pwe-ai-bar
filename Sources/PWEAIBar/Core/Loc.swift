@@ -54,9 +54,19 @@ enum Loc {
 
     /// `Bundle.module`, not `Bundle.main`: this is a Swift package, and the `.lproj` directories
     /// are target resources. `Bundle.main` here is the app wrapper, which carries none of them.
+    ///
+    /// Matched case-insensitively by hand rather than through `path(forResource:ofType:)`, because
+    /// SwiftPM writes `zh-Hans.lproj` into the bundle as `zh-hans.lproj` and the lookup missed it.
+    /// The way it missed is the reason this is spelled out: a nil bundle falls back to the English
+    /// at each call site, so the app rendered *identically* in both languages and looked fine.
+    /// `LocalisationTests` asserts the bundle resolves, because nothing else would notice.
     private static func resolve() -> Bundle? {
-        guard let p = Bundle.module.path(forResource: effective, ofType: "lproj") else { return nil }
-        return Bundle(path: p)
+        let wanted = effective.lowercased() + ".lproj"
+        guard let dir = Bundle.module.resourceURL,
+              let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path),
+              let match = names.first(where: { $0.lowercased() == wanted })
+        else { return nil }
+        return Bundle(url: dir.appendingPathComponent(match))
     }
 
     static func string(_ key: String, _ english: String) -> String {

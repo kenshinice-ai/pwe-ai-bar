@@ -38,10 +38,10 @@ struct UsageChart: View {
                 // stands for a $2 afternoon and a $200 one. The peak is the cheapest thing that
                 // turns it back into a reading.
                 if peak > 0.01 {
-                    Text("峰值 \(money(peak))/时").font(Theme.sans(9.5))
+                    Text(String(format: L("chart.peak", "peak %@/h"), money(peak))).font(Theme.sans(9.5))
                 }
                 Spacer()
-                Text("现在 · 未满").font(Theme.sans(9.5))
+                Text(L("chart.nowPartial", "now · partial")).font(Theme.sans(9.5))
             }
             .foregroundStyle(Theme.text2)
         }

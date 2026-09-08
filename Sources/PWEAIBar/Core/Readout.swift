@@ -31,7 +31,7 @@ enum Readout {
         // The one state where a number is the wrong answer. "100%" and "0%" are the same fact
         // written two ways, and both need reading twice; at a glance in a menu bar, neither
         // says *you are stopped*. Two characters do.
-        if w.confirmedExhausted { return "已用尽" }
+        if w.confirmedExhausted { return L("verdict.spent", "Spent") }
         guard let pct = w.percent else { return w.note ?? "—" }
         let shown = remaining ? max(0, 100 - pct) : pct
         var value = Int(shown.rounded())
@@ -52,5 +52,7 @@ enum Readout {
         return min(1, max(0, shown / 100))
     }
 
-    static var label: (used: String, remaining: String) { ("已用", "剩余") }
+    static var label: (used: String, remaining: String) {
+        (L("readout.used", "used"), L("readout.remaining", "left"))
+    }
 }

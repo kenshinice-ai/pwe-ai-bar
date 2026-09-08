@@ -36,7 +36,10 @@ enum Channel: Int, CaseIterable {
     case context = 0, codex, other, week, session
 
     var label: String { ["CTX", "CDX", "ETC", "7D", "5H"][rawValue] }
-    var name: String { ["上下文", "Codex", "其它", "周窗口", "五小时窗口"][rawValue] }
+    var name: String {
+        [L("channel.context", "Context"), "Codex", L("channel.other", "Other"),
+         L("channel.week", "Weekly window"), L("channel.session", "5-hour window")][rawValue]
+    }
 
     /// Percent thresholds. Only used when a source gives us a bare number and no severity of
     /// its own — the Claude endpoint grades itself, and its word wins over these.

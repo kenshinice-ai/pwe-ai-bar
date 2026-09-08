@@ -22,9 +22,21 @@ func swiftFiles(_ dir: String) -> [String] {
     return e.compactMap { $0 as? String }.filter { $0.hasSuffix(".swift") }.map { "\(dir)/\($0)" }.sorted()
 }
 
-// Key first, English second, tolerating a line break between the two arguments.
-let call = try! NSRegularExpression(pattern: #"\bL\(\s*"((?:[^"\\]|\\.)*)"\s*,\s*"((?:[^"\\]|\\.)*)"\s*\)"#,
-                                    options: [.dotMatchesLineSeparators])
+// Key first, English second, tolerating line breaks between the arguments and `+` between
+// adjacent string literals — long copy is written that way, and a call site the scanner cannot
+// see turns its key into a phantom orphan rather than a missing translation.
+let call = try! NSRegularExpression(
+    pattern: #"\bL\(\s*"((?:[^"\\]|\\.)*)"\s*,\s*((?:"(?:[^"\\]|\\.)*"\s*\+?\s*)+)\)"#,
+    options: [.dotMatchesLineSeparators])
+/// Joins `"a" + "b"` into `ab`, leaving the source-level escapes alone — they are exactly what a
+/// .strings file wants.
+let literal = try! NSRegularExpression(pattern: #""((?:[^"\\]|\\.)*)""#)
+func joined(_ expr: String) -> String {
+    let r = NSRange(expr.startIndex..., in: expr)
+    return literal.matches(in: expr, range: r).compactMap {
+        Range($0.range(at: 1), in: expr).map { String(expr[$0]) }
+    }.joined()
+}
 
 var english: [String: String] = [:]
 var whereUsed: [String: String] = [:]
@@ -44,7 +56,7 @@ for path in swiftFiles("\(root)/Sources") {
         let lead = text[lineStart..<whole.lowerBound].trimmingCharacters(in: .whitespaces)
         if lead.hasPrefix("//") || lead.hasPrefix("*") { continue }
         do {
-            let key = String(text[k]), value = String(text[v])
+            let key = String(text[k]), value = joined(String(text[v]))
             let n = text[..<whole.lowerBound].filter { $0 == "\n" }.count
             let site = "\(path.replacingOccurrences(of: root + "/", with: "")):\(n + 1)"
             if let prior = english[key], prior != value {
@@ -65,13 +77,13 @@ func table(_ pairs: [(String, String)]) -> String {
 }
 
 func read(_ lproj: String) -> [String: String] {
-    let p = "\(root)/Sources/PWEAIBar/Resources/\(lproj).lproj/Localizable.strings"
+    let p = "\(root)/Sources/PWEAIBar/\(lproj).lproj/Localizable.strings"
     guard let d = NSDictionary(contentsOfFile: p) as? [String: String] else { return [:] }
     return d
 }
 
 // en.lproj is generated, so it cannot be wrong.
-let enDir = "\(root)/Sources/PWEAIBar/Resources/en.lproj"
+let enDir = "\(root)/Sources/PWEAIBar/en.lproj"
 try? fm.createDirectory(atPath: enDir, withIntermediateDirectories: true)
 try! table(english.map { ($0.key, $0.value) }).write(toFile: "\(enDir)/Localizable.strings", atomically: true, encoding: .utf8)
 

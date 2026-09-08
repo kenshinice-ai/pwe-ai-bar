@@ -144,7 +144,7 @@ struct EnduranceView: View {
             if let headline = f.headline {
                 duration(headline)
             } else {
-                Text("没有重置时间").font(Theme.sans(15, 600)).foregroundStyle(Theme.text2)
+                Text(L("endurance.noReset", "No reset time")).font(Theme.sans(15, 600)).foregroundStyle(Theme.text2)
             }
             Spacer(minLength: Theme.s1)
             if f.hasTimeline {
@@ -296,7 +296,7 @@ struct EnduranceView: View {
             // Unconditional. It used to yield its place whenever the dry-time label wanted the
             // room, which left a *future* clock time sitting at the axis origin — the one point
             // on the rule that is definitionally not the future.
-            Text("现在").font(Theme.sans(9.5)).foregroundStyle(Theme.text2)
+            Text(L("endurance.now", "now")).font(Theme.sans(9.5)).foregroundStyle(Theme.text2)
             Text(Forecast.resetLabel(window.resetsAt, trip: plan.trip))
                 .font(Theme.sans(9.5)).foregroundStyle(Theme.text2)
                 .frame(width: W, alignment: .trailing)
@@ -310,7 +310,8 @@ struct EnduranceView: View {
             // the same figure and the verdict line says the same thing in words.
             if let certain, certain > 51, certain <= 209, certain < W - 1, f.headlineIsEndurance,
                let headline = f.headline {
-                Text("\(Forecast.clock(now.addingTimeInterval(headline))) 见底")
+                Text(String(format: L("endurance.empties", "%@ empty"),
+                            Forecast.clock(now.addingTimeInterval(headline))))
                     .font(Theme.sans(9.5)).foregroundStyle(colour(f.tone))
                     .fixedSize()
                     .frame(width: 90, alignment: .center)

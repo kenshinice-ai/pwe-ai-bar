@@ -173,7 +173,7 @@ enum Provider: String, CaseIterable, Codable {
     /// settings databases — no quota field anywhere — and the CLI's `gemini_cli.token.usage` is
     /// a token count behind opt-in telemetry, which is not the same measurement.
     var unavailableReason: String? {
-        self == .gemini ? "本地没有额度来源" : nil
+        self == .gemini ? L("provider.gemini.unavailable", "No local quota source") : nil
     }
 }
 
@@ -334,18 +334,22 @@ struct Snapshot {
         var parts: [String] = []
         for w in windows.sorted(by: { $0.strain > $1.strain }) {
             let value = w.percent.map {
-                remaining ? "剩余 \(Int((100 - $0).rounded()))%" : "已用 \(Int($0.rounded()))%"
-            } ?? (w.note ?? "无数据")
+                remaining ? String(format: L("a11y.remaining", "%d%% left"), Int((100 - $0).rounded()))
+                          : String(format: L("a11y.used", "%d%% used"), Int($0.rounded()))
+            } ?? (w.note ?? L("a11y.noData", "no data"))
             parts.append("\(w.provider.name) \(w.title) \(value)")
         }
         if let c = contextPercent {
-            parts.append("上下文 \(remaining ? "剩余 \(Int((100 - c).rounded()))" : "已用 \(Int(c.rounded()))")%")
+            parts.append(L("channel.context", "Context") + " "
+                + (remaining ? String(format: L("a11y.remaining", "%d%% left"), Int((100 - c).rounded()))
+                             : String(format: L("a11y.used", "%d%% used"), Int(c.rounded()))))
         }
         if let a = attention { parts.insert(a.text, at: 0) }
         // Only when there is actually an old number on screen. Saying it while a provider has
         // no data at all points at nothing — the panel's own line explains that case.
-        if stale, !windows.isEmpty { parts.append("显示的是上一次成功读到的数字") }
-        return parts.isEmpty ? "PWE AI Bar，暂无数据" : parts.joined(separator: "，")
+        if stale, !windows.isEmpty { parts.append(L("panel.stale.help", "Showing the last figure that was read successfully")) }
+        return parts.isEmpty ? L("a11y.empty", "PWE AI Bar, no data yet")
+                             : parts.joined(separator: L("a11y.separator", ", "))
     }
 }
 
@@ -370,10 +374,10 @@ enum TrophyRange: String, CaseIterable, Codable, Sendable {
 
     var label: String {
         switch self {
-        case .week: return "7 天"
-        case .month: return "30 天"
-        case .quarter: return "90 天"
-        case .all: return "全部"
+        case .week: return String(format: L("dur.days", "%d d"), 7)
+        case .month: return String(format: L("dur.days", "%d d"), 30)
+        case .quarter: return String(format: L("dur.days", "%d d"), 90)
+        case .all: return L("range.all", "All")
         }
     }
 }
