@@ -1,19 +1,26 @@
+<div align="center">
+
 # PWE AI Bar
 
-**Every AI coding quota you have, in the 22 points beside your clock. But its real job is to find
-you at the moment it is your turn.**
+**Every AI coding quota you have, in the 22 points beside your clock.**
+But its real job is to find you at the moment it is your turn.
 
-<sub>English · [简体中文](README.zh-Hans.md) — the interface ships in both, switchable in settings</sub>
+[![Download](https://img.shields.io/badge/download-latest%20release-0E1729?style=flat-square)](https://github.com/kenshinice-ai/pwe-ai-bar/releases/latest)
+[![macOS](https://img.shields.io/badge/macOS-13%2B-A16207?style=flat-square)](#install)
+[![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1–M5-A16207?style=flat-square)](#install)
+[![License](https://img.shields.io/badge/license-MIT-0E1729?style=flat-square)](LICENSE)
 
-![Menu bar](docs/menubar.png)
+*A PARADISE PRODUCTION · 天域文创出品*
 
-```
-[wing] ✳ 68% / 88%   ⚛ spent   ↻17:18
-```
+**English** · [简体中文](README.zh-Hans.md)
 
-The wing gauge · Claude's five-hour and weekly windows · Codex's state · a countdown to the reset.
+<img src="docs/menubar-crop.png" alt="Menu bar readout" width="250">
 
-![Panel](docs/panel.png)
+<img src="docs/panel-en-dark.png" alt="Panel, dark" width="330"> <img src="docs/panel-en-light.png" alt="Panel, light" width="330">
+
+<sub>English and 简体中文, following the Mac or set in the app.</sub>
+
+</div>
 
 ---
 

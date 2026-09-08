@@ -39,21 +39,22 @@ final class BilingualRenderTests: XCTestCase {
             store.injectForTesting(snap)
             let panel = PanelView(store: store, prefs: prefs, onTrophy: {}, onSettings: {},
                                   onOpen: { _ in }, onEnableQuota: {}, usableHeight: { 1334 })
-            try shoot(AnyView(panel), width: Theme.panelWidth,
-                      to: out.appendingPathComponent("panel-\(lang.rawValue).png"))
+            for dark in [true, false] {
+                try shoot(AnyView(panel), width: Theme.panelWidth, dark: dark,
+                          to: out.appendingPathComponent("panel-\(lang.rawValue)-\(dark ? "dark" : "light").png"))
+            }
             let settings = SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
                                         enableRealQuota: {}, prefs: prefs,
                                         tokenEditor: TokenEditor(hasToken: false), hookInstalled: false)
-            try shoot(AnyView(settings), width: 380,
-                      to: out.appendingPathComponent("settings-\(lang.rawValue).png"))
+            try shoot(AnyView(settings), width: 380, to: out.appendingPathComponent("settings-\(lang.rawValue).png"))
             store.stop()
         }
         Loc.language = .en
     }
 
-    @MainActor private func shoot(_ v: AnyView, width: CGFloat, to url: URL) throws {
-        let host = NSHostingView(rootView: v.environment(\.colorScheme, .dark))
-        host.appearance = NSAppearance(named: .darkAqua)
+    @MainActor private func shoot(_ v: AnyView, width: CGFloat, dark: Bool = true, to url: URL) throws {
+        let host = NSHostingView(rootView: v.environment(\.colorScheme, dark ? .dark : .light))
+        host.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         host.frame = NSRect(x: 0, y: 0, width: width, height: host.fittingSize.height)
         host.layoutSubtreeIfNeeded()
         let bmp = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))

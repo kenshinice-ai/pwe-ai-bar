@@ -1,18 +1,26 @@
+<div align="center">
+
 # PWE AI Bar
 
-**你所有 AI 编码工具的额度，收进菜单栏那 22 点。但它的本职是在该你出手的那一刻找到你。**
+**你所有 AI 编码工具的额度，收进菜单栏那 22 点。**
+但它的本职是在该你出手的那一刻找到你。
 
-<sub>[English](README.md) · 简体中文 — 界面双语，设置里可切换（跟随系统 / English / 简体中文）</sub>
+[![下载](https://img.shields.io/badge/下载-最新版本-0E1729?style=flat-square)](https://github.com/kenshinice-ai/pwe-ai-bar/releases/latest)
+[![macOS](https://img.shields.io/badge/macOS-13%2B-A16207?style=flat-square)](#装)
+[![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1–M5-A16207?style=flat-square)](#装)
+[![许可](https://img.shields.io/badge/许可-MIT-0E1729?style=flat-square)](LICENSE)
 
-![菜单栏](docs/menubar.png)
+*A PARADISE PRODUCTION · 天域文创出品*
 
-```
-[翼] ✳ 68% / 88%   ⚛ 额度耗尽   ↻17:18
-```
+[English](README.md) · **简体中文**
 
-翼形仪表 · Claude 的五小时与周窗口 · Codex 状态 · 距重置倒计时。
+<img src="docs/menubar-crop.png" alt="菜单栏读数" width="250">
 
-![面板](docs/panel.png)
+<img src="docs/panel-zh-Hans-dark.png" alt="面板，深色" width="330"> <img src="docs/panel-zh-Hans-light.png" alt="面板，浅色" width="330">
+
+<sub>中英双语，跟随系统或在应用内切换。</sub>
+
+</div>
 
 ---
 
