@@ -12,6 +12,17 @@ BUNDLE_ID="com.paradiseproduction.pweaibar"
 VERSION="$(cat VERSION 2>/dev/null || echo 0.1.0)"
 CONFIG="${1:-release}"
 
+# Gate, not a reminder. A key used in Sources but absent from zh-Hans ships as one English row
+# inside an otherwise Chinese panel — the kind of defect that survives a demo. Building the
+# checker costs about a second; discovering the gap from a screenshot costs a release.
+echo "▸ Checking the string tables…"
+LOCCHECK="${PWEBAR_BUILD_ROOT:-.build}/loccheck"
+mkdir -p "$(dirname "$LOCCHECK")"
+if [[ ! -x "$LOCCHECK" || Tools/loccheck/main.swift -nt "$LOCCHECK" ]]; then
+  swiftc -O Tools/loccheck/main.swift -o "$LOCCHECK"
+fi
+"$LOCCHECK" .
+
 echo "▸ Building ($CONFIG)…"
 BUILD_ARGS=(-c "$CONFIG")
 [[ -n "${PWEBAR_BUILD_ROOT:-}" ]] && BUILD_ARGS+=(--scratch-path "$PWEBAR_BUILD_ROOT")

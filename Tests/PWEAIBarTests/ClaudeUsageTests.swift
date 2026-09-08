@@ -50,6 +50,9 @@ private final class Counter: @unchecked Sendable {
 }
 
 final class ClaudeUsageTests: XCTestCase {
+
+    /// Pinned: the rotation record renders through `Loc` now.
+    override func setUp() { super.setUp(); Loc.language = .en }
     private let date = Date(timeIntervalSince1970: 1_800_000_000)
     private func auth(_ value: String = "first", expiry: Double = 1_800_003_600, scope: String = "user:profile", account: String = "A",
                       refreshExpiry: Double? = nil) -> String {
@@ -373,7 +376,7 @@ final class ClaudeUsageTests: XCTestCase {
 
         // And it is recorded as our own doing, in the language the rest of the readout uses.
         let record = try XCTUnwrap(ClaudeProvider.refreshRecord(space.defaults))
-        XCTAssertEqual(record.outcome, "已续期")
+        XCTAssertEqual(record.outcome, ClaudeProvider.Outcome.renewed.message)
         XCTAssertEqual(record.count, 1, "the tally no longer depends on matching an English literal")
     }
 

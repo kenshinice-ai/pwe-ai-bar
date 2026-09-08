@@ -154,11 +154,17 @@ enum Probe {
     /// `--cred`: what the setup is, in words. Named apart from `credentials()` because two
     /// functions differing only by `async` is a coin toss at the call site.
     static func credentialsHelp() {
-        print("PWE AI Bar — 凭据配置")
-        print("手动令牌记录：\(Credentials.hasStoredOwnToken ? "有" : "无")")
-        print("默认复用 Claude Code 登录。实际来源和成功时间以额度面板为准。")
-        print("可用 refresh token 会用于续期并安全写回原来源；失败需重新登录。")
-        print("钥匙串访问由 macOS 控制，本命令不验证是否获准。")
+        print("PWE AI Bar — " + L("probe.credConfig", "credential configuration"))
+        print(L("probe.manualToken", "Manual token on record") + ": "
+              + (Credentials.hasStoredOwnToken ? L("probe.yes", "yes") : L("probe.no", "no")))
+        print(L("probe.reuseNote",
+                "The Claude Code login is reused by default. The panel is authoritative for which "
+                + "source was used and when it last worked."))
+        print(L("probe.refreshNote",
+                "A usable refresh token is spent on renewal and written safely back to where it came "
+                + "from; if that fails, sign in again."))
+        print(L("probe.keychainNote",
+                "Keychain access is macOS's decision; this command does not test whether it is granted."))
     }
 
     /// `--stress DIR` renders the panel against data designed to break it: every bucket the
@@ -187,19 +193,25 @@ enum Probe {
         let reading = await provider.windows(force: true)
         let details = await provider.details
         let state = await provider.blocker
-        print("PWE AI Bar — Claude 额度检查（\(readOnly ? "不续期" : "正常续期")）")
-        print("状态：\(state.message)")
-        print("来源：\(details.source.rawValue)")
-        print("有效窗口：\(reading.windows.count)，旧读数：\(reading.stale ? "是" : "否")")
-        print("成功获取：\(details.lastSuccessAt != nil ? "是" : "否")")
+        print("PWE AI Bar — " + String(format: L("probe.quotaCheck", "Claude quota check (%@)"),
+                                       readOnly ? L("probe.noRotate", "no renewal")
+                                                : L("probe.withRotate", "renewal as normal")))
+        print(L("probe.state", "State") + ": " + state.message)
+        print(L("probe.source", "Source") + ": " + details.source.rawValue)
+        print(String(format: L("probe.windows", "Windows: %d   stale: %@"), reading.windows.count,
+                     reading.stale ? L("probe.yes", "yes") : L("probe.no", "no")))
+        print(L("probe.everSucceeded", "Ever read successfully") + ": "
+              + (details.lastSuccessAt != nil ? L("probe.yes", "yes") : L("probe.no", "no")))
         // The one question the credential itself cannot answer. Claude Code writes the same
         // keychain item, and the rotation preserves every field it does not own, so after the
         // fact there is no telling from the record which of the two rewrote it.
         if let r = ClaudeProvider.refreshRecord() {
             let f = DateFormatter(); f.dateFormat = "MM-dd HH:mm:ss"
-            print("本 app 续期：\(f.string(from: r.at)) · \(r.outcome) · 累计成功 \(r.count) 次")
+            print(String(format: L("probe.renewal", "Renewed by this app: %@ · %@ · %d successful in total"),
+                         f.string(from: r.at), r.outcome, r.count))
         } else {
-            print("本 app 续期：还没有过（钥匙串的更新都不是我们做的）")
+            print(L("probe.renewal.never",
+                    "Renewed by this app: never — every keychain update so far was somebody else's"))
         }
     }
 

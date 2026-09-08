@@ -319,9 +319,32 @@ actor ClaudeProvider {
     /// Deciding "did it work" by matching it against the literal `"saved"` entangled the counter
     /// with the wording, so the first time anyone rephrased the success line the tally would
     /// have silently stopped — and the line was the only English word in a Chinese readout.
-    private func note(_ outcome: String, success: Bool = false) {
+    /// What the last rotation attempt did, stored as a **key** rather than as its own words.
+    ///
+    /// It used to store the Chinese sentence. That is a forensic record which outlives the run
+    /// that wrote it, so once the app became bilingual an English reader got their self-check
+    /// output in English with one Chinese phrase in the middle of it — and there is no way to
+    /// translate a sentence after the fact. A key can be rendered in whatever language is asked
+    /// for, including one chosen after the event was recorded.
+    enum Outcome: String {
+        case invalidated, refused, unreadable, savedFailed, changedUnderUs, renewed
+
+        var message: String {
+            switch self {
+            case .invalidated:    return L("outcome.invalidated", "credential no longer valid")
+            case .refused:        return L("outcome.refused", "exchange refused")
+            case .unreadable:     return L("outcome.unreadable", "reply not understood")
+            case .savedFailed:    return L("outcome.savedFailed", "renewed but could not write it back")
+            case .changedUnderUs: return L("outcome.changedUnderUs", "credential changed during write-back")
+            case .renewed:        return L("outcome.renewed", "renewed")
+            }
+        }
+    }
+
+    private func note(_ outcome: Outcome, detail: String? = nil, success: Bool = false) {
         defaults.set(now().timeIntervalSince1970, forKey: "claudeRefreshAt")
-        defaults.set(outcome, forKey: "claudeRefreshOutcome")
+        defaults.set(detail.map { outcome.rawValue + "|" + $0 } ?? outcome.rawValue,
+                     forKey: "claudeRefreshOutcome")
         if success {
             defaults.set(defaults.integer(forKey: "claudeRefreshCount") + 1, forKey: "claudeRefreshCount")
         }
@@ -331,9 +354,17 @@ actor ClaudeProvider {
         -> (at: Date, outcome: String, count: Int)? {
         let stamp = d.double(forKey: "claudeRefreshAt")
         guard stamp > 0 else { return nil }
-        return (Date(timeIntervalSince1970: stamp),
-                d.string(forKey: "claudeRefreshOutcome") ?? "未知",
-                d.integer(forKey: "claudeRefreshCount"))
+        // Records written before 1.0.7 hold the Chinese sentence itself; there is nothing to
+        // translate after the fact, so those pass through as they were written.
+        let raw = d.string(forKey: "claudeRefreshOutcome") ?? ""
+        let parts = raw.split(separator: "|", maxSplits: 1).map(String.init)
+        let text: String
+        if let o = Outcome(rawValue: parts.first ?? "") {
+            text = parts.count > 1 ? o.message + " (" + parts[1] + ")" : o.message
+        } else {
+            text = raw.isEmpty ? L("outcome.unknown", "unknown") : raw
+        }
+        return (Date(timeIntervalSince1970: stamp), text, d.integer(forKey: "claudeRefreshCount"))
     }
 
     /// Exchanges in flight, keyed by the credential each one started from.
@@ -413,10 +444,10 @@ actor ClaudeProvider {
         if http.statusCode == 400 || http.statusCode == 401 {
             let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             if body?["error"] as? String == "invalid_grant" || http.statusCode == 401 {
-                note("凭据已失效"); throw Blocker.expired(expiryToReport(token))
+                note(.invalidated); throw Blocker.expired(expiryToReport(token))
             }
             rejected[token.generation] = .invalidResponse
-            note("换发被拒 \(http.statusCode)")
+            note(.refused, detail: "\(http.statusCode)")
             throw Blocker.invalidResponse
         }
         try checkHTTP(http)
@@ -425,7 +456,7 @@ actor ClaudeProvider {
         do { rotated = try ClaudeCredentialStore.rotated(token, response: object, now: now()) }
         catch {
             rejected[token.generation] = .invalidResponse
-            note("回复看不懂"); throw Blocker.invalidResponse
+            note(.unreadable); throw Blocker.invalidResponse
         }
         // Nothing between the response and the write below re-reads the credential or checks
         // for cancellation. The re-read that used to sit here was redundant with the store's own
@@ -441,10 +472,10 @@ actor ClaudeProvider {
             // exchange has already happened, so if the server rotated the refresh token then
             // the copy Claude Code still holds may now be dead. Nothing here can undo that; the
             // least the app can do is leave a note saying it is what happened.
-            note("换到了但写不回去"); throw Blocker.storage
+            note(.savedFailed); throw Blocker.storage
         }
-        guard saved else { note("写回时凭据已被改动"); throw Blocker.credentialsChanged }
-        note("已续期", success: true)
+        guard saved else { note(.changedUnderUs); throw Blocker.credentialsChanged }
+        note(.renewed, success: true)
         return rotated
     }
 
