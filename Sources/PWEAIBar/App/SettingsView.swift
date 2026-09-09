@@ -392,7 +392,9 @@ struct SettingsView: View {
         var out: [Provider: Detected] = [:]
         for p in Provider.allCases where p.unavailableReason == nil {
             switch p {
-            case .claude: out[p] = Credentials.sharedItemExists() ? .signedIn : .signedOut
+            case .claude:
+                out[p] = Credentials.sharedItemExists() ? .signedIn
+                       : Credentials.claudeCodePresent() ? .signedOut : .absent
             case .codex:  out[p] = CodexAppServer.executable() != nil ? .present : .absent
             default:      out[p] = ExtraProviders.installed(p) ? .detected : .absent
             }

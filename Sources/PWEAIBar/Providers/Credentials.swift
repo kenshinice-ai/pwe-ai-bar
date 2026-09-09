@@ -196,6 +196,26 @@ enum Credentials {
 
     /// True when Claude Code has ever logged in on this machine. Asks the keychain only for
     /// attributes, never the data, so it answers the question without tripping any dialog.
+    /// Whether Claude Code exists on this Mac at all — as opposed to existing but signed out.
+    ///
+    /// Worth the distinction because the advice differs and one of them is unfollowable: a Mac
+    /// without it was told to "run claude auth login", and got `zsh: command not found`. Checked
+    /// by looking rather than by spawning `which`: this runs off the main thread during settings
+    /// detection, and a subprocess there is what the keychain lesson was about.
+    static func claudeCodePresent() -> Bool {
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser
+        if fm.fileExists(atPath: home.appendingPathComponent(".claude").path) { return true }
+        for cli in ["/opt/homebrew/bin/claude", "/usr/local/bin/claude",
+                    home.appendingPathComponent(".local/bin/claude").path,
+                    home.appendingPathComponent(".claude/local/claude").path]
+        where fm.fileExists(atPath: cli) { return true }
+        for app in ["/Applications/Claude.app",
+                    home.appendingPathComponent("Applications/Claude.app").path]
+        where fm.fileExists(atPath: app) { return true }
+        return false
+    }
+
     static func sharedItemExists() -> Bool {
         for service in sharedServiceCandidates() {
             let q: [String: Any] = [

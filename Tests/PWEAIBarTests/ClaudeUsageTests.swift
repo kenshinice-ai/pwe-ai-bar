@@ -737,3 +737,48 @@ final class KeychainButtonFeedbackTests: XCTestCase {
                        "the call-to-action row is where the only actionable sentence lives")
     }
 }
+
+/// A Mac with no Claude Code on it was told to "run claude auth login", and answered
+/// `zsh: command not found: claude`. Advice you cannot follow is worse than none.
+final class ClaudeCodePresenceTests: XCTestCase {
+    private func provider(_ space: TestSpace, present: Bool) -> ClaudeProvider {
+        ClaudeProvider(defaults: space.defaults,
+                       access: .init(own: { nil }, claudeCode: { nil }, sharedExists: { false },
+                                     shared: { nil }, save: { _ in .failed(-1) }, load: { [] },
+                                     claudeCodePresent: { present }),
+                       now: { Date(timeIntervalSince1970: 1_760_000_000) },
+                       request: { _ in throw ClaudeProvider.Blocker.network })
+    }
+
+    func testAMacWithoutClaudeCodeIsToldSoRatherThanToldToSignIn() async throws {
+        let space = try TestSpace()
+        let p = provider(space, present: false)
+        _ = await p.windows(force: true)
+        let blocker = await p.blocker
+        XCTAssertEqual(blocker, .notInstalled)
+        XCTAssertFalse(blocker.message.contains("claude auth login"),
+                       "that command does not exist on this Mac: \(blocker.message)")
+        XCTAssertTrue(blocker.message.contains("claude.ai/code"), blocker.message)
+    }
+
+    func testAMacWithClaudeCodeButNoLoginIsStillToldToSignIn() async throws {
+        let space = try TestSpace()
+        let p = provider(space, present: true)
+        _ = await p.windows(force: true)
+        let blocker = await p.blocker
+        XCTAssertEqual(blocker, .notLoggedIn)
+    }
+
+    /// The real detector, on the machine running the tests. Asserted only for not-crashing and
+    /// for agreeing with itself — what it returns depends on the machine, which is the point.
+    func testTheDetectorLooksRatherThanSpawning() throws {
+        let present = Credentials.claudeCodePresent()
+        XCTAssertEqual(present, Credentials.claudeCodePresent(), "must be a pure look at the disk")
+        let source = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/PWEAIBar/Providers/Credentials.swift"), encoding: .utf8)
+        let fn = try XCTUnwrap(source.range(of: "static func claudeCodePresent"))
+        let body = source[fn.lowerBound..<(source.index(fn.lowerBound, offsetBy: 800, limitedBy: source.endIndex) ?? source.endIndex)]
+        XCTAssertFalse(body.contains("Subprocess"), "runs off-main during detection; no subprocess there")
+    }
+}

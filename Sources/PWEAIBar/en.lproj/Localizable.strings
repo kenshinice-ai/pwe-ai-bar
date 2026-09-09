@@ -32,6 +32,7 @@
 "blocker.keychainRefused" = "Keychain access failed or timed out — reconnect in settings";
 "blocker.needsSetup" = "Could not read the login credential — reconnect in settings";
 "blocker.network" = "No new reading just now — retrying automatically";
+"blocker.notInstalled" = "Claude Code is not installed on this Mac — install it from claude.ai/code";
 "blocker.notLoggedIn" = "No credential found — sign in to Claude Code";
 "blocker.ok" = "Verified — the quota connection is working";
 "blocker.rateLimited" = "Rate limited — retrying on the server's schedule";
@@ -53,6 +54,7 @@
 "cta.localOnly" = "Local estimate only — cannot read the Claude Code credential";
 "cta.manageCredential" = "Manage credential";
 "cta.manageCredential.help" = "Open settings to replace or clear the token";
+"cta.notInstalled" = "Claude Code is not installed on this Mac — install it from claude.ai/code";
 "cta.notLoggedIn" = "Run claude auth login in a terminal first";
 "cta.rateLimited" = "Rate limited — retrying in %d min";
 "cta.useKeychain" = "Use keychain access";
@@ -75,6 +77,8 @@
 "empty.needsAttention" = "The quota connection needs attention";
 "empty.noCredential" = "Cannot read the Claude Code credential";
 "empty.noCredential.fix" = "Below is a local estimate; switch to keychain access in settings";
+"empty.notInstalled" = "Claude Code is not on this Mac";
+"empty.notInstalled.fix" = "Install it from claude.ai/code, then run claude auth login";
 "empty.notLoggedIn" = "Not signed in";
 "empty.notLoggedIn.fix" = "Run claude auth login in a terminal";
 "empty.rateLimited" = "Rate limited";

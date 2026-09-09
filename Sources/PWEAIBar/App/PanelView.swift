@@ -249,6 +249,10 @@ struct PanelView: View {
             case .notLoggedIn:
                 return (L("empty.notLoggedIn", "Not signed in"),
                         L("empty.notLoggedIn.fix", "Run claude auth login in a terminal"))
+            case .notInstalled:
+                return (L("empty.notInstalled", "Claude Code is not on this Mac"),
+                        L("empty.notInstalled.fix",
+                          "Install it from claude.ai/code, then run claude auth login"))
             case .keychainRefused:
                 // Re-logging in rewrites the keychain item through `security`, which is the one
                 // program allowed to read it back; editing an ACL by hand is four dialogs deep.
@@ -473,6 +477,9 @@ struct PanelView: View {
             return (L("cta.keychainRefused", "Keychain access was refused before"), .enableQuota)
         case .notLoggedIn:
             return (L("cta.notLoggedIn", "Run claude auth login in a terminal first"), nil)
+        case .notInstalled:
+            return (L("cta.notInstalled",
+                      "Claude Code is not installed on this Mac — install it from claude.ai/code"), nil)
         case .expired, .unauthorized, .forbidden, .network, .storage, .invalidResponse, .credentialsChanged:
             return (store.blocker.message, .settings)
         case .rateLimited(let until):

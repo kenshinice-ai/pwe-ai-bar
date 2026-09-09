@@ -18,6 +18,8 @@ actor ClaudeProvider {
         /// The single read allowed to put a dialog on screen, run only when a person presses the
         /// button that asks for it.
         var authorise: (() -> Bool)? = nil
+        /// Whether Claude Code is on this Mac at all. Injectable so a test can state it.
+        var claudeCodePresent: () -> Bool = Credentials.claudeCodePresent
         static let live = Access(own: Credentials.ownToken, claudeCode: { Credentials.claudeCodeCredential() },
                                  sharedExists: Credentials.sharedItemExists, shared: { Credentials.readShared() },
                                  save: { Credentials.storeOwnToken($0) },
@@ -27,7 +29,7 @@ actor ClaudeProvider {
                                  authorise: Credentials.authoriseShared)
     }
     enum Blocker: Error, Equatable {
-        case none, needsSetup, notLoggedIn, keychainRefused, unauthorized, forbidden, network
+        case none, needsSetup, notLoggedIn, notInstalled, keychainRefused, unauthorized, forbidden, network
         /// The login is beyond renewal. Carries when the refresh token died, when the record
         /// said so — the date is the difference between "何时" and a shrug.
         case expired(Date?)
@@ -38,6 +40,8 @@ actor ClaudeProvider {
             case .none: return L("blocker.ok", "Verified — the quota connection is working")
             case .needsSetup: return L("blocker.needsSetup", "Could not read the login credential — reconnect in settings")
             case .notLoggedIn: return L("blocker.notLoggedIn", "No credential found — sign in to Claude Code")
+            case .notInstalled: return L("blocker.notInstalled",
+                                         "Claude Code is not installed on this Mac — install it from claude.ai/code")
             case .keychainRefused: return L("blocker.keychainRefused", "Keychain access failed or timed out — reconnect in settings")
             case .expired(let at):
                 // Naming the date and the command is the whole improvement. "凭据已失效" is true
@@ -107,7 +111,8 @@ actor ClaudeProvider {
     var source: Credentials.Source { details.source }
     var loggedIn: Bool {
         switch blocker {
-        case .notLoggedIn, .needsSetup, .expired, .unauthorized, .keychainRefused, .credentialsChanged, .storage: return false
+        case .notLoggedIn, .notInstalled, .needsSetup, .expired, .unauthorized, .keychainRefused,
+             .credentialsChanged, .storage: return false
         default: return true
         }
     }
@@ -229,7 +234,12 @@ actor ClaudeProvider {
             try check(version)
             let expected = signature(tokens)
             adopt(expected, identity: tokens.first?.accountKey)
-            guard let first = tokens.first else { throw Blocker.notLoggedIn }
+            // "Not signed in" and "not here at all" need different advice, and one of them
+            // cannot be followed: a Mac without Claude Code was told to run a command that
+            // answers `command not found`.
+            guard let first = tokens.first else {
+                throw access.claudeCodePresent() ? Blocker.notLoggedIn : Blocker.notInstalled
+            }
             if let until = retryAfter { throw Blocker.rateLimited(until) }
             if !force, let retryNetworkAt, retryNetworkAt > now() { return staleReading() }
             if !force, blocker == .none, let success = details.lastSuccessAt,
@@ -262,7 +272,7 @@ actor ClaudeProvider {
             let failure = classify(error)
             blocker = failure
             switch failure {
-            case .unauthorized, .forbidden, .expired, .notLoggedIn, .storage, .credentialsChanged:
+            case .unauthorized, .forbidden, .expired, .notLoggedIn, .notInstalled, .storage, .credentialsChanged:
                 cache = []; details.spend = nil; details.plan = nil; details.tier = nil
             details.lastSuccessAt = nil
             case .network, .invalidResponse:
