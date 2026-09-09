@@ -107,7 +107,7 @@ enum ExtraProviders {
                 return value
             }
             guard appPresent(.cursor) else { return nil }
-            return ExtraSource.keychain(service: "cursor-access-token", run: run)
+            return ExtraSource.keychain(service: "cursor-access-token")
         }
 
         static func map(_ root: [String: Any], now: Date) -> ExtraSource.Reading? {
@@ -170,7 +170,7 @@ enum ExtraProviders {
             if let yaml = ExtraSource.text("~/.config/gh/hosts.yml"),
                let token = ExtraSource.flatValue(yaml, key: "oauth_token") { return token }
             guard appPresent(.copilot) else { return nil }
-            return ExtraSource.keychain(service: "gh:github.com", run: run).flatMap(ExtraSource.unwrap)
+            return ExtraSource.keychain(service: "gh:github.com").flatMap(ExtraSource.unwrap)
         }
 
         static func read(now: @escaping () -> Date, transport: @escaping Transport) async
@@ -338,9 +338,9 @@ enum ExtraProviders {
     /// the refresh token means writing a credential cache, and this app does not write anyone's
     /// login — so an expired session is reported as one, and Antigravity itself renews it.
     enum Antigravity {
-        static func stored(run: ProcessLine = Subprocess.line) -> [String: Any]? {
+        static func stored() -> [String: Any]? {
             guard appPresent(.antigravity),
-                  let raw = ExtraSource.keychain(service: "gemini", account: "antigravity", run: run),
+                  let raw = ExtraSource.keychain(service: "gemini", account: "antigravity"),
                   let root = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any]
             else { return nil }
             return root

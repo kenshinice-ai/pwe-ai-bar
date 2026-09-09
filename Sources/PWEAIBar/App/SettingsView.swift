@@ -41,6 +41,13 @@ struct SettingsView: View {
     /// Injectable so a test can assert against a stated screen height rather than whichever
     /// machine happens to run it.
     var usableHeight: () -> CGFloat? = { NSScreen.main?.visibleFrame.height }
+    /// The height this page wants, reported to whoever owns the window. Same contract as the
+    /// panel's: SwiftUI measures, the owner applies. 1.0.10 through 1.0.14 sized the window from
+    /// `NSHostingView.fittingSize` instead, which is 0 for a hosted ScrollView until it has been
+    /// laid out — so on the first Mac that ever ran this app past launch, the settings window
+    /// opened as a bare title bar.
+    var onHeight: (CGFloat) -> Void = { _ in }
+    @State private var contentHeight: CGFloat = 0
     @State private var hookState: HookState
     @State private var states: [Provider: Detected] = [:]
     @State private var token: String = ""
@@ -50,9 +57,10 @@ struct SettingsView: View {
          saveToken: @escaping (String) async -> ClaudeProvider.TokenUpdate,
          enableRealQuota: @escaping () -> Void, prefs: Prefs? = nil,
          tokenEditor: TokenEditor? = nil, hookInstalled: Bool? = nil,
-         usableHeight: @escaping () -> CGFloat? = { NSScreen.main?.visibleFrame.height }) {
+         usableHeight: @escaping () -> CGFloat? = { NSScreen.main?.visibleFrame.height },
+         onHeight: @escaping (CGFloat) -> Void = { _ in }) {
         self.installHooks = installHooks; self.saveToken = saveToken; self.enableRealQuota = enableRealQuota
-        self.usableHeight = usableHeight
+        self.usableHeight = usableHeight; self.onHeight = onHeight
         self.prefs = prefs ?? .shared
         // The flag, not the keychain. Reading the item itself here is a synchronous trip to
         // securityd inside a view initialiser — measured on this machine at up to 84 s, which
@@ -71,17 +79,27 @@ struct SettingsView: View {
         Theme.ceiling(usableHeight: usableHeight, inset: 88)
     }
 
+    /// Everything, or the ceiling, whichever is smaller — and nil until SwiftUI has measured,
+    /// because the number the window would otherwise take is 0.
+    private var desiredHeight: CGFloat? {
+        guard contentHeight > 0 else { return nil }
+        return min(contentHeight, Self.ceiling(usableHeight: usableHeight()))
+    }
+
     var body: some View {
         // Eight providers pushed this past 960 pt. Without a scroller the rows below the fold
         // are not merely awkward to reach, they are unreachable — and one of them is the only
         // switch that turns a provider on.
         ScrollView {
-            content
+            content.measuring(SettingsHeight.self)
         }
         .frame(width: 380)
         .frame(maxHeight: Self.ceiling(usableHeight: usableHeight()))
         .background(Theme.surface)
         .tint(Theme.accent)
+        .onPreferenceChange(SettingsHeight.self) { contentHeight = $0 }
+        .onChange(of: desiredHeight) { if let h = $0 { onHeight(h) } }
+        .onAppear { if let h = desiredHeight { onHeight(h) } }
         .task {
             let found = await Task.detached(priority: .userInitiated) { Self.detect() }.value
             states = found
@@ -456,4 +474,15 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.hairline).frame(height: 1) }
     }
+}
+
+/// The settings page's measured content height. Its own key rather than the panel's, so the two
+/// windows can never report into each other.
+///
+/// `max`, not "take the latest": a ScrollView's own internals also contribute this key, at its
+/// default of 0, and they can arrive after the measurement — which turned 678 into 0 and left the
+/// window at whatever it happened to be.
+enum SettingsHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }

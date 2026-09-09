@@ -835,7 +835,7 @@ enum ChromeHeight: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value += nextValue() }
 }
 
-private extension View {
+extension View {
     /// Reports this view's laid-out height through `key`, without affecting its layout.
     func measuring<K: PreferenceKey>(_ key: K.Type) -> some View where K.Value == CGFloat {
         background(GeometryReader { g in Color.clear.preference(key: key, value: g.size.height) })

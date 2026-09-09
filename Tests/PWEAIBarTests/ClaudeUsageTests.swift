@@ -664,10 +664,19 @@ final class KeychainPromptTests: XCTestCase {
     func testNoBackgroundKeychainReadForksTheSecurityTool() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let store = try String(contentsOf: root.appendingPathComponent("Sources/PWEAIBar/Providers/ClaudeCredentialStore.swift"),
-                               encoding: .utf8)
-        XCTAssertFalse(store.contains("/usr/bin/security"),
-                       "ClaudeCredentialStore runs on the poll timer; it must use Credentials.quietRead")
+        // Every source file, not one: the Claude read was cured in 1.0.10 and the same fork
+        // was still sitting in ExtraSource, raising its dialog each time settings opened on a
+        // machine with Cursor, gh or Antigravity signed in. The one exemption is the legacy
+        // `claudeCodeCredential(run:)` in Credentials.swift, which nothing on a timer reaches.
+        let sources = root.appendingPathComponent("Sources")
+        let files = try XCTUnwrap(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
+            .compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" && $0.lastPathComponent != "Credentials.swift" }
+        XCTAssertGreaterThan(files.count, 10)
+        for file in files {
+            let code = try String(contentsOf: file, encoding: .utf8)
+            XCTAssertFalse(code.contains("/usr/bin/security"),
+                           "\(file.lastPathComponent) forks the security tool — that is a dialog on every poll")
+        }
         let credentials = try String(contentsOf: root.appendingPathComponent("Sources/PWEAIBar/Providers/Credentials.swift"),
                                      encoding: .utf8)
         XCTAssertTrue(credentials.contains("SecKeychainSetUserInteractionAllowed"),

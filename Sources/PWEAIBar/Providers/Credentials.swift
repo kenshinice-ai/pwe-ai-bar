@@ -80,10 +80,26 @@ enum Credentials {
     /// covers the classic ACL on a `login.keychain` item. Missing the second one is what made
     /// this app ask a person for permission every twenty seconds.
     static func quietRead(_ service: String, _ account: String) -> String? {
+        quietRead(service: service, account: account)
+    }
+
+    /// The same read for the other tools' items, whose account names this app does not know.
+    /// `nil` matches whatever account the owner wrote — what `security find-generic-password -s`
+    /// did, minus the subprocess, and minus the dialog it raised on every poll.
+    static func quietRead(service: String, account: String?) -> String? {
         interactionLock.lock()
         SecKeychainSetUserInteractionAllowed(false)
         defer { SecKeychainSetUserInteractionAllowed(true); interactionLock.unlock() }
-        return read(service, account)
+        var q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                kSecAttrService as String: service,
+                                kSecReturnData as String: true,
+                                kSecMatchLimit as String: kSecMatchLimitOne,
+                                kSecUseAuthenticationContext as String: noninteractiveContext()]
+        if let account { q[kSecAttrAccount as String] = account }
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     private static func read(_ service: String, _ account: String) -> String? {

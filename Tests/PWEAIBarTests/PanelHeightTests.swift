@@ -210,3 +210,46 @@ final class SettingsGroupTests: XCTestCase {
                        "fully open on a small screen, the cap is the screen — and nothing else")
     }
 }
+
+/// A settings window that opens as a bare title bar is a window that does not open. This puts the
+/// real view in a real window, pumps the run loop the way the panel test does, and measures what a
+/// person would see. `NSHostingView.fittingSize` before layout — the number 1.0.10 through 1.0.14
+/// sized this window from — is 0 here, which is the whole bug.
+final class SettingsWindowTests: XCTestCase {
+    private final class Reports: @unchecked Sendable { var heights: [CGFloat] = [] }
+    private func pump(_ n: Int) { for _ in 0..<n { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) } }
+
+    @MainActor func testTheSettingsWindowOpensAtAUsableHeightAndShrinksWhenGroupsCollapse() throws {
+        _ = NSApplication.shared
+        Theme.registerFonts()
+        Loc.language = .en
+        let space = try TestSpace()
+        let prefs = Prefs(defaults: space.defaults)
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 560),
+                         styleMask: [.titled, .closable, .fullSizeContentView],
+                         backing: .buffered, defer: false)
+        let reports = Reports()
+        let view = SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
+                                enableRealQuota: {}, prefs: prefs,
+                                tokenEditor: TokenEditor(hasToken: false), hookInstalled: false,
+                                usableHeight: { 900 },
+                                onHeight: { [weak w] h in reports.heights.append(h); w?.setContentHeight(h, animate: false) })
+        w.contentView = NSHostingView(rootView: view)
+        w.orderBack(nil)
+        pump(30)
+        let overlap = w.titleBarOverlap
+        let shown = w.contentRect(forFrameRect: w.frame).height
+        print("  settings window: reported \(reports.heights.map { Int($0) }), title-bar overlap \(Int(overlap)), window \(Int(shown))")
+        XCTAssertFalse(reports.heights.isEmpty, "the page never stated a height — nothing is measuring it")
+        XCTAssertGreaterThan(shown - overlap, 400, "the room below the title bar is \(shown - overlap) pt")
+        XCTAssertEqual(shown - overlap, reports.heights.last ?? -1, accuracy: 1, "exactly what the page asked for")
+        XCTAssertLessThanOrEqual(reports.heights.last ?? .infinity, SettingsView.ceiling(usableHeight: 900), "never past the screen")
+
+        prefs.setOpen("display", false); prefs.setOpen("alerts", false)
+        pump(30)
+        let collapsed = w.contentRect(forFrameRect: w.frame).height
+        XCTAssertLessThan(collapsed, shown - 200, "collapsing both open groups must shrink the window: \(Int(shown)) → \(Int(collapsed))")
+        XCTAssertGreaterThan(collapsed - overlap, 150, "but four headers and a footer are still a window")
+        w.orderOut(nil)
+    }
+}

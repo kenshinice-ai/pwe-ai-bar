@@ -62,14 +62,15 @@ enum ExtraSource {
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
-    /// Reads a keychain item the same way its owner wrote it — see `Credentials` for why going
-    /// through `security` is what keeps the access dialog off the screen.
+    /// Reads another tool's keychain item without being able to ask for it. This used to fork
+    /// the `security` tool on the theory that a binary already on the item's access list would
+    /// read silently; it raised its own dialog instead, named for the tool, and — because
+    /// `installed(_:)` runs from the settings page — did so every time settings opened on a
+    /// machine with Cursor, `gh` or Antigravity signed in. Same disease as the Claude read, same
+    /// cure: an in-process read with both UI gates closed. `read` is injectable for tests.
     static func keychain(service: String, account: String? = nil,
-                         run: ProcessLine = Subprocess.line) -> String? {
-        var argv = ["/usr/bin/security", "find-generic-password"]
-        if let account { argv += ["-a", account] }
-        argv += ["-s", service, "-w"]
-        return run(argv)?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+                         read: (String, String?) -> String? = { Credentials.quietRead(service: $0, account: $1) }) -> String? {
+        read(service, account)?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
     }
 
     /// One value out of a VS Code-style `state.vscdb`. Uses the system `sqlite3` rather than

@@ -241,33 +241,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         present(w)
     }
 
+    /// Whether the settings window has taken its first measured height. The first report sizes
+    /// the window before anyone has looked at it and must not animate; the ones after are a
+    /// group opening or closing under the pointer, and those should.
+    private var settingsSizedOnce = false
+
     @objc private func showSettings() {
         closePopover()
+        let fresh = settingsWindow == nil
+        let w = settingsWindow ?? panelWindow(title: L("window.settings", "Settings"),
+                                              size: NSSize(width: 380, height: 560))
+        settingsWindow = w
+        settingsSizedOnce = false
+        // The window's height comes from the view, once SwiftUI has measured it — the same
+        // contract as the panel. Not from `NSHostingView.fittingSize`, which is 0 for a hosted
+        // ScrollView until layout and which sized this window to a bare title bar on the first
+        // Mac that ever ran the app past launch. 560 is only what shows for the frame before
+        // the first report lands.
         let view = SettingsView(
             installHooks: { [weak self] in self?.installHooks() ?? false },
             saveToken: { [weak self] t in
                 guard let self else { return .failed(-1) }
                 return await self.store.saveToken(t)
             },
-            enableRealQuota: { [weak self] in self?.store.enableRealQuota() })
-        // Sized to what the page needs, not to a number. The view clamps itself to the screen,
-        // so `fittingSize` is already the smaller of "everything" and "what fits" — a fixed
-        // 560 pt showed about half of this page and no amount of rearranging fixes that.
-        let host = NSHostingView(rootView: view)
-        // The groups collapse now, so the page's height changes while the window is open. With
-        // this the hosting view drives the window's size as its content changes — collapse a
-        // group and the window shrinks with it — and the view's own ceiling keeps it on screen.
-        host.sizingOptions = [.preferredContentSize]
-        if let w = settingsWindow {
-            w.contentView = host
-            w.setContentSize(NSSize(width: 380, height: host.fittingSize.height))
-            present(w); return
-        }
-        let w = panelWindow(title: L("window.settings", "Settings"), size: NSSize(width: 380, height: 560))
-        w.contentView = host
-        w.setContentSize(NSSize(width: 380, height: host.fittingSize.height))
-        w.center()
-        settingsWindow = w
+            enableRealQuota: { [weak self] in self?.store.enableRealQuota() },
+            onHeight: { [weak self, weak w] height in
+                guard let self, let w else { return }
+                w.setContentHeight(height, animate: self.settingsSizedOnce)
+                if !self.settingsSizedOnce, fresh { w.center() }
+                self.settingsSizedOnce = true
+            })
+        w.contentView = NSHostingView(rootView: view)
         present(w)
     }
 
