@@ -108,3 +108,41 @@ final class ResourceBundleTests: XCTestCase {
         }
     }
 }
+
+/// Nothing shown to a reader may hand them a command to type. The people who need a quota meter
+/// are not the people who have a terminal open, and this app spent its first releases ending every
+/// dead end in "run claude auth login in a terminal" — on one Mac that answered
+/// `zsh: command not found`. Every one of those is a button now.
+final class NoTerminalHomeworkTests: XCTestCase {
+    private var tables: [(String, String)] {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        return ["en", "zh-Hans"].compactMap { lang in
+            let url = root.appendingPathComponent("Sources/PWEAIBar/\(lang).lproj/Localizable.strings")
+            return (try? String(contentsOf: url, encoding: .utf8)).map { (lang, $0) }
+        }
+    }
+
+    func testNoUserFacingStringTellsAnyoneToTypeACommand() throws {
+        XCTAssertEqual(tables.count, 2, "both tables have to be readable for this to mean anything")
+        for (lang, text) in tables {
+            for line in text.split(separator: "\n") where line.hasPrefix("\"") {
+                XCTAssertFalse(line.contains("claude auth login"),
+                               "\(lang): \(line) — that is homework, not an instruction; give a button")
+            }
+        }
+    }
+
+    /// English is generated from the `L("key", "English")` defaults by `Tools/loccheck`, so editing
+    /// `en.lproj` by hand is a write that the next build silently reverts. It cost two rounds of
+    /// "fixed" that was not fixed, so it is asserted rather than remembered.
+    func testEnglishIsGeneratedFromTheCallSites() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let tool = try String(contentsOf: root.appendingPathComponent("Tools/loccheck/main.swift"),
+                              encoding: .utf8)
+        XCTAssertTrue(tool.contains("en.lproj") && tool.contains("write(toFile:"),
+                      "if loccheck stops generating en.lproj, this test's premise is gone and the "
+                      + "handoff needs correcting with it")
+    }
+}

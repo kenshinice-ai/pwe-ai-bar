@@ -486,8 +486,11 @@ final class ClaudeUsageTests: XCTestCase {
         XCTAssertEqual(memory.writes, 0, "a refused exchange must not write over the credential")
         let blocker = await provider.blocker
         XCTAssertTrue(blocker.isExpired)
-        XCTAssertTrue(blocker.message.contains("claude auth login"),
-                      "the message has to end in something the reader can paste: \(blocker.message)")
+        // Used to demand the message end in a pasteable command. It must still name a remedy —
+        // but the remedy is the Sign in button, because a command is homework.
+        XCTAssertTrue(blocker.message.lowercased().contains("sign in"),
+                      "the message has to name the way out: \(blocker.message)")
+        XCTAssertFalse(blocker.message.contains("claude auth login"), blocker.message)
         // Compared against the two shapes the case can produce rather than against a substring,
         // so rewording either one cannot quietly turn this assertion into a tautology.
         XCTAssertEqual(blocker.message, ClaudeProvider.Blocker.expired(Date(timeIntervalSince1970: died)).message,
@@ -518,7 +521,7 @@ final class ClaudeUsageTests: XCTestCase {
         XCTAssertTrue(blocker.isExpired)
         XCTAssertEqual(blocker.message, ClaudeProvider.Blocker.expired(nil).message,
                        "no date may be named once we cannot vouch for it: \(blocker.message)")
-        XCTAssertTrue(blocker.message.contains("claude auth login"), "the remedy is still stated")
+        XCTAssertTrue(blocker.message.lowercased().contains("sign in"), "the remedy is still stated")
     }
 }
 
@@ -720,8 +723,8 @@ final class KeychainButtonFeedbackTests: XCTestCase {
         let blocker = await p.blocker
         XCTAssertTrue(blocker.isExpired,
                       "and the thing still wrong is the login, which this button cannot fix")
-        XCTAssertTrue(blocker.message.contains("claude auth login"),
-                      "so the message has to carry the command that can: \(blocker.message)")
+        XCTAssertTrue(blocker.message.lowercased().contains("sign in"),
+                      "so the message has to name what can: \(blocker.message)")
     }
 
     /// The panel row that carries that command must not truncate it. It did, at two lines:

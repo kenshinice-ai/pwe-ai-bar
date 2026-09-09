@@ -28,6 +28,8 @@ struct PanelView: View {
     var usableHeight: () -> CGFloat? = { nil }
     /// Reports the height this panel wants, so whoever owns the popover can set it outright.
     var onHeight: (CGFloat) -> Void = { _ in }
+    /// Defaulted so no call site has to know about it; injectable so a test can.
+    var onSignIn: () -> Void = { ClaudeLogin.begin() }
 
     @State private var middleHeight: CGFloat = 0
     @State private var chromeHeight: CGFloat = 0
@@ -248,17 +250,18 @@ struct PanelView: View {
                           "Below is a local estimate; switch to keychain access in settings"))
             case .notLoggedIn:
                 return (L("empty.notLoggedIn", "Not signed in"),
-                        L("empty.notLoggedIn.fix", "Run claude auth login in a terminal"))
+                        L("empty.notLoggedIn.fix", "Use the Sign in button below"))
             case .notInstalled:
                 return (L("empty.notInstalled", "Claude Code is not on this Mac"),
                         L("empty.notInstalled.fix",
-                          "Install it from claude.ai/code, then run claude auth login"))
+                          "Use the button below to get it, then sign in"))
             case .keychainRefused:
-                // Re-logging in rewrites the keychain item through `security`, which is the one
-                // program allowed to read it back; editing an ACL by hand is four dialogs deep.
-                return (L("empty.keychainRefused", "The keychain refused access"),
+                // Not "refused" — the item's access list simply does not carry this app, which
+                // is the state a fresh `claude auth login` leaves it in, every time.
+                return (L("empty.keychainRefused", "The keychain has not authorised this app"),
                         L("empty.keychainRefused.fix",
-                          "Running claude auth login again rebuilds the authorisation"))
+                          "Press Use keychain access and choose Always Allow. Signing in again "
+                          + "recreates the item, which clears it"))
             case .unauthorized, .forbidden, .network, .storage, .invalidResponse, .credentialsChanged:
                 return (L("empty.needsAttention", "The quota connection needs attention"), store.blocker.message)
             case .expired:
@@ -382,13 +385,17 @@ struct PanelView: View {
     /// behaviour. That works right up until the text is translated, at which point every button
     /// silently takes the other branch. Localising this file without fixing it first would have
     /// shipped a settings button that reconnects the keychain instead.
+    /// Every one of these is a button because the alternative was a sentence telling the reader
+    /// to open Terminal — which is not something most people who need a quota meter have done.
     enum CTAAction {
-        case settings, enableQuota
+        case settings, enableQuota, installClaude, signIn
 
         var title: String {
             switch self {
-            case .settings:    return L("cta.manageCredential", "Manage credential")
-            case .enableQuota: return L("cta.useKeychain", "Use keychain access")
+            case .settings:      return L("cta.manageCredential", "Manage credential")
+            case .enableQuota:   return L("cta.useKeychain", "Use keychain access")
+            case .installClaude: return L("cta.installClaude", "Get Claude Code")
+            case .signIn:        return L("cta.signIn", "Sign in")
             }
         }
         var help: String {
@@ -398,6 +405,10 @@ struct PanelView: View {
             case .enableQuota:
                 return L("cta.useKeychain.help",
                          "Reconnect the saved Claude Code login; macOS may ask for keychain access")
+            case .installClaude:
+                return L("cta.installClaude.help", "Opens the Claude Code download page")
+            case .signIn:
+                return L("cta.signIn.help", "Opens Terminal and signs in for you")
             }
         }
     }
@@ -412,8 +423,10 @@ struct PanelView: View {
             if let action = cta.action {
                 Button(action.title) {
                     switch action {
-                    case .settings:    onSettings()
-                    case .enableQuota: onEnableQuota()
+                    case .settings:      onSettings()
+                    case .enableQuota:   onEnableQuota()
+                    case .installClaude: onOpen(.claude)
+                    case .signIn:        onSignIn()
                     }
                 }
                 .font(Theme.sans(11))
@@ -460,7 +473,9 @@ struct PanelView: View {
     /// Nil once real quota is flowing.
     private var claudeCallToAction: (text: String, action: CTAAction?)? {
         switch store.blocker {
-        case .unauthorized, .forbidden, .expired, .storage, .credentialsChanged:
+        case .expired:
+            return (store.blocker.message, .signIn)
+        case .unauthorized, .forbidden, .storage, .credentialsChanged:
             return (store.blocker.message, .settings)
         case .network, .invalidResponse: return (store.blocker.message, nil)
         case .rateLimited(let until):
@@ -474,13 +489,14 @@ struct PanelView: View {
             return (L("cta.localOnly", "Local estimate only — cannot read the Claude Code credential"),
                     .enableQuota)
         case .keychainRefused:
-            return (L("cta.keychainRefused", "Keychain access was refused before"), .enableQuota)
+            return (L("cta.keychainRefused", "The keychain has not authorised this app"), .enableQuota)
         case .notLoggedIn:
-            return (L("cta.notLoggedIn", "Run claude auth login in a terminal first"), nil)
+            return (L("cta.notLoggedIn", "Not signed in to Claude Code"), .signIn)
         case .notInstalled:
-            return (L("cta.notInstalled",
-                      "Claude Code is not installed on this Mac — install it from claude.ai/code"), nil)
-        case .expired, .unauthorized, .forbidden, .network, .storage, .invalidResponse, .credentialsChanged:
+            return (L("cta.notInstalled", "Claude Code is not on this Mac"), .installClaude)
+        case .expired:
+            return (store.blocker.message, .signIn)
+        case .unauthorized, .forbidden, .network, .storage, .invalidResponse, .credentialsChanged:
             return (store.blocker.message, .settings)
         case .rateLimited(let until):
             return (String(format: L("cta.rateLimited", "Rate limited — retrying in %d min"),

@@ -278,6 +278,18 @@ struct SettingsView: View {
             // nothing, so it is not offered. On its own line, not squeezed against the
             // paragraph above: a button beside wrapping text collides with it at every width
             // the text happens to reflow at.
+            // The same button the panel offers, here too: this section is where someone goes
+            // looking when the panel told them something is wrong with the login.
+            HStack(spacing: Theme.s2) {
+                Button(L("cta.signIn", "Sign in")) { ClaudeLogin.begin() }
+                    .font(Theme.sans(11))
+                    .help(L("cta.signIn.help", "Opens Terminal and signs in for you"))
+                Button(L("cta.installClaude", "Get Claude Code")) {
+                    if let u = Provider.claude.fallbackURL { NSWorkspace.shared.open(u) }
+                }
+                .font(Theme.sans(11))
+                .help(L("cta.installClaude.help", "Opens the Claude Code download page"))
+            }
             if !tokenEditor.hasToken {
                 Button(keychainBusy ? L("keychain.asking", "Asking macOS…")
                                     : L("cta.useKeychain", "Use keychain access")) {
@@ -353,7 +365,7 @@ struct SettingsView: View {
                      "Keychain access is selected; the result is shown in the quota panel.")
         }
         return L("settings.source.none",
-                 "No usable Claude Code login was found — run claude auth login first.")
+                 "No usable Claude Code login was found. Use Sign in below.")
     }
 
     /// One line per provider, whether or not it is here. A tool that is installed but signed

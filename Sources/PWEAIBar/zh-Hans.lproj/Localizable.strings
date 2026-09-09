@@ -31,7 +31,7 @@
 "cta.rateLimited" = "接口限流中，%d 分钟后重试";
 "cta.localOnly" = "只有本地估算，读不到 Claude Code 凭据";
 "cta.keychainRefused" = "钥匙串尚未授权本应用";
-"cta.notLoggedIn" = "先在终端运行 claude auth login";
+"cta.notLoggedIn" = "还没有登录 Claude Code";
 "panel.stale.help" = "显示的是上一次成功读到的数字";
 "panel.stale.a11y" = "数据可能已过时";
 "panel.settings.a11y" = "设置";
@@ -46,9 +46,9 @@
 "empty.noCredential" = "读不到 Claude Code 的凭据";
 "empty.noCredential.fix" = "下面是本地估算；可在设置里改用钥匙串授权";
 "empty.notLoggedIn" = "还没登录";
-"empty.notLoggedIn.fix" = "在终端运行 claude auth login";
+"empty.notLoggedIn.fix" = "点下面的「登录」按钮";
 "empty.keychainRefused" = "钥匙串尚未授权本应用";
-"empty.keychainRefused.fix" = "点「改用钥匙串授权」并允许一次即可。注意 claude auth login 会重建条目，授权随之清空";
+"empty.keychainRefused.fix" = "点「改用钥匙串授权」，并选「始终允许」。重新登录会重建条目，授权随之清空";
 "empty.needsAttention" = "额度连接需要处理";
 "empty.expired" = "Claude 凭据已过期";
 "empty.rateLimited" = "接口限流中";
@@ -140,7 +140,7 @@
 "settings.source.found" = "已发现 Claude Code 登录条目；实际连接与系统访问结果请查看额度面板。";
 "settings.source.manualToken" = "已保存高级手动令牌；其权限和有效性由额度接口验证。";
 "settings.source.keychain" = "已选择钥匙串授权，连接结果请查看额度面板。";
-"settings.source.none" = "未发现可用的 Claude Code 登录信息；请先运行 claude auth login。";
+"settings.source.none" = "未发现可用的 Claude Code 登录信息。点下面的「登录」。";
 "settings.provider.a11y" = "%@，%@";
 "settings.detecting" = "检测中";
 "readout.used" = "已用";
@@ -203,8 +203,8 @@
 "blocker.needsSetup" = "未能读取登录凭据，可在设置中重新连接";
 "blocker.notLoggedIn" = "未找到凭据，请登录 Claude Code";
 "blocker.keychainRefused" = "钥匙串尚未授权本应用读取该登录";
-"blocker.expired.noDate" = "登录已过期且无法续期 · 在终端运行 claude auth login";
-"blocker.expired.dated" = "Claude Code 的登录已在 %@ 过期 · 在终端运行 claude auth login";
+"blocker.expired.noDate" = "登录已过期且无法续期 —— 重新登录一次";
+"blocker.expired.dated" = "Claude Code 的登录已在 %@ 过期 —— 重新登录一次";
 "blocker.unauthorized" = "凭据已失效，请重新登录 Claude Code 或更换手动令牌";
 "blocker.forbidden" = "凭据无权读取额度，请检查账户权限或重新登录";
 "blocker.network" = "暂时无法获取新读数，稍后自动重试";
@@ -287,5 +287,10 @@
 "keychain.notGranted" = "macOS 没有授权。请再按一次,并选「始终允许」——只点「允许」仅对那一次读取有效。";
 "blocker.notInstalled" = "这台 Mac 上没有装 Claude Code —— 到 claude.ai/code 安装";
 "empty.notInstalled" = "这台 Mac 上没有 Claude Code";
-"empty.notInstalled.fix" = "先到 claude.ai/code 安装,再运行 claude auth login";
-"cta.notInstalled" = "这台 Mac 上没有装 Claude Code —— 到 claude.ai/code 安装";
+"empty.notInstalled.fix" = "点下面的按钮去下载，装好后再登录";
+"cta.notInstalled" = "这台 Mac 上没有 Claude Code";
+
+"cta.installClaude" = "获取 Claude Code";
+"cta.installClaude.help" = "打开 Claude Code 的下载页";
+"cta.signIn" = "登录";
+"cta.signIn.help" = "自动打开终端并完成登录";

@@ -42,17 +42,19 @@ actor ClaudeProvider {
             case .notLoggedIn: return L("blocker.notLoggedIn", "No credential found — sign in to Claude Code")
             case .notInstalled: return L("blocker.notInstalled",
                                          "Claude Code is not installed on this Mac — install it from claude.ai/code")
-            case .keychainRefused: return L("blocker.keychainRefused", "Keychain access failed or timed out — reconnect in settings")
+            case .keychainRefused: return L("blocker.keychainRefused", "The keychain has not authorised this app to read the login")
             case .expired(let at):
                 // Naming the date and the command is the whole improvement. "凭据已失效" is true
                 // and leaves the reader with nothing to do; this sentence ends in something they
-                // can paste. `claude auth login` is what rewrites the record the app reads.
+                // can paste. Signing in again is what rewrites the record the app reads — and
+                // that is a button now, because "open a terminal and type this" is not an
+                // instruction most people who need a quota meter can follow.
                 guard let at else {
                     return L("blocker.expired.noDate",
-                             "The login has expired and cannot be renewed · run claude auth login in a terminal")
+                             "The login has expired and cannot be renewed — sign in again")
                 }
                 return String(format: L("blocker.expired.dated",
-                                        "The Claude Code login expired on %@ · run claude auth login in a terminal"),
+                                        "The Claude Code login expired on %@ — sign in again"),
                               Blocker.stamp(at))
             case .unauthorized: return L("blocker.unauthorized", "The credential is no longer valid — sign in to Claude Code again or replace the manual token")
             case .forbidden: return L("blocker.forbidden", "This credential may not read quota — check the account's permissions or sign in again")
