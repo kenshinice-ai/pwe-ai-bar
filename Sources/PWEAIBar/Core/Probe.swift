@@ -473,7 +473,7 @@ enum Probe {
             case .needsSetup: why = "未授权（面板点「启用真实额度」，或用 --token 设长期令牌）"
             case .notLoggedIn: why = "未登录（运行 claude auth login）"
             case .notInstalled: why = "这台 Mac 上没有 Claude Code（从 claude.ai/code 安装）"
-            case .keychainRefused: why = "钥匙串拒绝（重新运行 claude auth login 即可重建授权）"
+            case .keychainRefused: why = "钥匙串未授权本应用（面板点「改用钥匙串授权」，弹框选「始终允许」；claude auth login 会重建条目并清空授权）"
             case .unauthorized, .forbidden, .network, .storage, .invalidResponse,
                  .credentialsChanged, .expired: why = blocker.message
             case .rateLimited(let d): why = "限流至 \(f(d))"
