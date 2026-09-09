@@ -286,7 +286,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Actions
 
     private static var bundledHook: URL? {
-        Bundle.module.url(forResource: "pwe-ai-bar-hook", withExtension: "sh")
+        Bundle.resources.url(forResource: "pwe-ai-bar-hook", withExtension: "sh")
     }
 
     private func installHooks() -> Bool {

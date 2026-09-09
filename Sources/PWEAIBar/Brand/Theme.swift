@@ -82,7 +82,7 @@ enum Theme {
     static func registerFonts() {
         guard !registered else { return }
         for name in ["Inter", "PlayfairDisplay"] {
-            if let url = Bundle.module.url(forResource: name, withExtension: "ttf") {
+            if let url = Bundle.resources.url(forResource: name, withExtension: "ttf") {
                 CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
             }
         }

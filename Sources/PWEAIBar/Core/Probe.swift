@@ -624,3 +624,32 @@ extension Probe {
         }
     }
 }
+
+
+extension Probe {
+    /// The question a copy on someone else's Mac used to answer by crashing before the status
+    /// item existed: did every resource come from inside this .app? `build-app.sh` runs this on
+    /// the assembled bundle and refuses to ship a "no". Twelve releases said no, and only the
+    /// build machine — the one with the fallback path on it — never noticed.
+    static func selfcheck() -> Bool {
+        let bundle = Bundle.resources
+        let inside = Bundle.resourcesAreInsideApp
+        print("resources : \(bundle.bundlePath)")
+        print("inside app: \(inside ? "yes" : "NO")")
+        var ok = inside
+        func check(_ label: String, _ found: Bool) {
+            print("  " + label.padding(toLength: 24, withPad: " ", startingAt: 0) + (found ? "ok" : "MISSING"))
+            ok = ok && found
+        }
+        for face in ["Inter", "PlayfairDisplay"] {
+            check("font \(face)", bundle.url(forResource: face, withExtension: "ttf") != nil)
+        }
+        check("pricing.json", bundle.url(forResource: "pricing", withExtension: "json") != nil)
+        check("hook script", bundle.url(forResource: "pwe-ai-bar-hook", withExtension: "sh") != nil)
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: bundle.resourceURL?.path ?? "")) ?? []
+        for lang in ["en", "zh-hans"] {   // SwiftPM lowercases the directory; Loc matches the same way
+            check("\(lang).lproj", names.contains { $0.lowercased() == lang + ".lproj" })
+        }
+        return ok
+    }
+}

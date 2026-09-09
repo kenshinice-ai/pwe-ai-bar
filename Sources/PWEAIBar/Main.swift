@@ -14,6 +14,9 @@ enum PWEAIBarMain {
             print(SettingsView.version)
             return
         }
+        if CommandLine.arguments.contains("--selfcheck") {
+            exit(Probe.selfcheck() ? 0 : 1)
+        }
         if CommandLine.arguments.contains("--credprobe") {
             Probe.credentials()
             return

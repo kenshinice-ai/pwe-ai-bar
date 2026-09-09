@@ -106,7 +106,7 @@ final class RenderingTests: XCTestCase {
     /// two things that are easy to get wrong by hand and expensive to get wrong in the figure
     /// on the trophy page.
     func testShippedPricesCarryTheirSourceAndTheCacheReadException() throws {
-        let url = try XCTUnwrap(Bundle.module.url(forResource: "pricing", withExtension: "json"))
+        let url = try XCTUnwrap(Bundle.resources.url(forResource: "pricing", withExtension: "json"))
         let table = try JSONDecoder().decode(Pricing.self, from: Data(contentsOf: url))
         XCTAssertEqual(table._source, "https://platform.claude.com/docs/en/about-claude/pricing")
         XCTAssertNotNil(table._checked, "a price table with no date cannot be known to be stale")

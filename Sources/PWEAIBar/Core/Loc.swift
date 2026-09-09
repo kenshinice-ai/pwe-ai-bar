@@ -52,8 +52,9 @@ enum Loc {
     /// the brand standard's §7.2 — so this is read by the typography layer, not just by lookup.
     static var isCJK: Bool { effective.hasPrefix("zh") }
 
-    /// `Bundle.module`, not `Bundle.main`: this is a Swift package, and the `.lproj` directories
-    /// are target resources. `Bundle.main` here is the app wrapper, which carries none of them.
+    /// `Bundle.resources`, not `Bundle.main`: this is a Swift package, and the `.lproj` directories
+    /// live in the target's resource bundle. `Bundle.main` is the app wrapper, which carries none
+    /// of them — and SwiftPM's generated accessor is the one that only ever worked on the build machine.
     ///
     /// Matched case-insensitively by hand rather than through `path(forResource:ofType:)`, because
     /// SwiftPM writes `zh-Hans.lproj` into the bundle as `zh-hans.lproj` and the lookup missed it.
@@ -62,7 +63,7 @@ enum Loc {
     /// `LocalisationTests` asserts the bundle resolves, because nothing else would notice.
     private static func resolve() -> Bundle? {
         let wanted = effective.lowercased() + ".lproj"
-        guard let dir = Bundle.module.resourceURL,
+        guard let dir = Bundle.resources.resourceURL,
               let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path),
               let match = names.first(where: { $0.lowercased() == wanted })
         else { return nil }

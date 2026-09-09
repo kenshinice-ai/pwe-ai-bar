@@ -61,7 +61,7 @@ struct SettingsView: View {
             ?? TokenEditor(hasToken: Credentials.hasStoredOwnToken))
         let installed = hookInstalled ?? HookProvider.isInstalled
         let current = HookProvider.installedScriptIsCurrent(
-            source: Bundle.module.url(forResource: "pwe-ai-bar-hook", withExtension: "sh"))
+            source: Bundle.resources.url(forResource: "pwe-ai-bar-hook", withExtension: "sh"))
         _hookState = State(initialValue: !installed ? .absent : current ? .installed : .stale)
     }
 

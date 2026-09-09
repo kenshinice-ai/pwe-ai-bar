@@ -66,3 +66,45 @@ final class TrophyFormattingTests: XCTestCase {
         XCTAssertEqual(v.shortModelName("gpt-5-6-sol"), "gpt 5.6 sol")
     }
 }
+
+
+/// 1.0.0 through 1.0.12 crashed on every Mac but the build machine, because SwiftPM's generated
+/// `Bundle.module` looks for the resource bundle at the .app root and then at an absolute build
+/// path. `Bundle.resources` is the one accessor now, and these keep it that way.
+final class ResourceBundleTests: XCTestCase {
+    private var root: URL {
+        URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    }
+
+    /// Structural, because the failure only reproduces on a machine without the checkout: no
+    /// source file may reach for the generated accessor except the one that wraps it.
+    func testOnlyTheWrapperUsesTheGeneratedAccessor() throws {
+        let sources = root.appendingPathComponent("Sources")
+        let files = try XCTUnwrap(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
+            .compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" }
+        XCTAssertGreaterThan(files.count, 10)
+        for file in files where file.lastPathComponent != "Resources.swift" {
+            let code = try String(contentsOf: file, encoding: .utf8)
+                .split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+                .joined(separator: "\n")
+            XCTAssertFalse(code.contains("Bundle.module"),
+                           "\(file.lastPathComponent) reaches past Bundle.resources — that path only exists on the build machine")
+        }
+    }
+
+    /// Every resource the app touches at launch, through the accessor the app uses. In a test
+    /// host this resolves via the build path, which is the point: it proves the files exist, and
+    /// `build-app.sh --selfcheck` proves they travel.
+    func testEveryLaunchResourceResolvesThroughTheOneAccessor() throws {
+        let b = Bundle.resources
+        for face in ["Inter", "PlayfairDisplay"] {
+            XCTAssertNotNil(b.url(forResource: face, withExtension: "ttf"), face)
+        }
+        XCTAssertNotNil(b.url(forResource: "pricing", withExtension: "json"))
+        XCTAssertNotNil(b.url(forResource: "pwe-ai-bar-hook", withExtension: "sh"))
+        let names = try FileManager.default.contentsOfDirectory(atPath: XCTUnwrap(b.resourceURL).path)
+        for lang in ["en.lproj", "zh-hans.lproj"] {
+            XCTAssertTrue(names.contains { $0.lowercased() == lang }, lang)
+        }
+    }
+}

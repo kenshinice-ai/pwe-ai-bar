@@ -103,7 +103,7 @@ struct Pricing: Codable {
         let override = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent("PWE AI Bar/pricing.json")
-        for url in [override, Bundle.module.url(forResource: "pricing", withExtension: "json")] {
+        for url in [override, Bundle.resources.url(forResource: "pricing", withExtension: "json")] {
             guard let url, let data = try? Data(contentsOf: url),
                   let p = try? JSONDecoder().decode(Pricing.self, from: data) else { continue }
             return p

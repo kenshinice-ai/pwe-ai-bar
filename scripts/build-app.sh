@@ -98,4 +98,13 @@ fi
 codesign --force --deep --sign "$IDENTITY" "$APP" 2>/dev/null || \
   codesign --force --deep --sign - "$APP" 2>/dev/null || true
 echo "▸ Signed with: $IDENTITY"
+
+# The gate this app went twelve releases without. SwiftPM's Bundle.module looks for resources at
+# the .app root, then at an absolute build path; neither is where an .app keeps them, so every
+# machine except this one crashed before the status item existed. The assembled app now has to
+# prove, from inside itself, that every resource came from inside itself.
+echo "▸ Self-check…"
+if ! "$APP/Contents/MacOS/PWEAIBar" --selfcheck; then
+  echo "✗ the assembled app cannot find its own resources — refusing to ship it"; exit 1
+fi
 echo "▸ Done: $APP"
