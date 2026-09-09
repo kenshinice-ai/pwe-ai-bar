@@ -40,7 +40,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.onSnapshot = { [weak self] snap in self?.redraw(snap) }
         store.start()
 
-        appearanceObserver = statusItem.button?.observe(\.effectiveAppearance) { [weak self] _, _ in
+        // `.old`/`.new`, and only when the name actually changed. Without that this is a loop:
+        // `redraw` assigns `button.image`, assigning it makes AppKit re-resolve the button's
+        // effective appearance, re-resolving fires this observer, and the observer redraws.
+        // Measured at about 3,050 redraws a second — half a core on an app that is doing
+        // nothing, and the reason the CPU climbed rather than settled.
+        appearanceObserver = statusItem.button?.observe(\.effectiveAppearance,
+                                                       options: [.old, .new]) { [weak self] _, change in
+            guard change.oldValue?.name != change.newValue?.name else { return }
             Task { @MainActor in self?.redraw(self?.store.snapshot ?? Snapshot()) }
         }
 
@@ -70,6 +77,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Redrawn only when a snapshot lands — every 20 s while you work, every 5 min when nothing
     /// is moving. No timer of its own, no animation: a menu bar that moves all day is an anxiety
     /// source, not an information source.
+    /// The guard in `redraw` is not an optimisation — see `PaintedState`.
+    private var painted = PaintedState()
+
     private func redraw(_ snap: Snapshot) {
         guard let button = statusItem?.button else { return }
         // The button's own appearance, never the app's. macOS darkens the menu bar to suit the
@@ -77,10 +87,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // onto a dark bar and the icon simply vanishes.
         let dark = button.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         let image = StatusIcon.render(snap, mode: Prefs.shared.menuBarMode, dark: dark)
+        let sentence = snap.spoken(remaining: Prefs.shared.showRemaining)
+        // Compared on what was actually drawn, not on a key naming the inputs. The glyph carries
+        // a countdown, so a key would have to know about time — and a key that falls out of step
+        // with the renderer freezes the menu bar, which is a worse bug than the one it fixes.
+        guard painted.adopt(image.tiffRepresentation, sentence) else { return }
         button.image = image
         // A zero-size image would leave an invisible, unclickable item — say something instead.
         button.title = image.size.width > 1 ? "" : "AI"
-        let sentence = snap.spoken(remaining: Prefs.shared.showRemaining)
         button.toolTip = sentence
         button.setAccessibilityLabel("PWE AI Bar")
         button.setAccessibilityValue(sentence)

@@ -168,3 +168,29 @@ enum StatusIcon {
         return String(format: L("compact.day", "%dd"), s / 86400)
     }
 }
+
+/// What the menu bar is currently showing.
+///
+/// Assigning `NSStatusItem.button.image` is not free: it commits a Core Animation transaction
+/// and makes AppKit re-resolve the button's effective appearance. So any caller that fires more
+/// often than the readout changes becomes a redraw storm — and one did, at about 3,050 a second,
+/// because re-resolving the appearance fired the observer that called back into the redraw.
+///
+/// Compared on the bytes that were drawn rather than on a key naming the inputs: the glyph
+/// carries a countdown, so a key would have to know about time, and a key that falls out of step
+/// with the renderer freezes the menu bar — a worse bug than the one it fixes.
+struct PaintedState {
+    private var bytes: Data?
+    private var sentence: String?
+    private var painted = false
+
+    /// True when this drawing differs from what is on screen, and records it as the new state.
+    /// The first call is always true, including for an empty drawing: nothing is on screen yet.
+    mutating func adopt(_ bytes: Data?, _ sentence: String) -> Bool {
+        guard painted, bytes == self.bytes, sentence == self.sentence else {
+            self.bytes = bytes; self.sentence = sentence; painted = true
+            return true
+        }
+        return false
+    }
+}

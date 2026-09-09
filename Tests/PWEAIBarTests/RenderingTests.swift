@@ -136,3 +136,41 @@ final class RenderingTests: XCTestCase {
     }
 
 }
+
+/// The menu bar redrew about 3,050 times a second while the app sat idle, costing half a core:
+/// `redraw` assigned `button.image`, the assignment made AppKit re-resolve the button's effective
+/// appearance, and the `effectiveAppearance` observer redrew. Two things hold it shut now.
+final class MenuBarRepaintTests: XCTestCase {
+    func testAnIdenticalDrawingIsNotPaintedAgain() {
+        var state = PaintedState()
+        let glyph = Data([1, 2, 3])
+        XCTAssertTrue(state.adopt(glyph, "72% left"), "nothing is on screen yet")
+        XCTAssertFalse(state.adopt(glyph, "72% left"), "same bytes, same sentence — nothing to say")
+        XCTAssertFalse(state.adopt(glyph, "72% left"))
+        XCTAssertTrue(state.adopt(glyph, "71% left"), "the tooltip changed even though the glyph did not")
+        XCTAssertTrue(state.adopt(Data([9]), "71% left"), "and the glyph can change under a fixed sentence")
+    }
+
+    /// An empty first drawing still has to reach the button: a status item that has never been
+    /// painted shows nothing at all, and skipping it would leave an invisible, unclickable item.
+    func testTheFirstDrawingAlwaysReachesTheButton() {
+        var state = PaintedState()
+        XCTAssertTrue(state.adopt(nil, ""))
+        XCTAssertFalse(state.adopt(nil, ""))
+    }
+
+    /// Structural, because the loop lives in AppKit's KVO and cannot be reproduced in a unit
+    /// test: the observer must compare the old and new appearance instead of redrawing on every
+    /// notification. Dropping `options:` here is what cost half a core.
+    func testTheAppearanceObserverOnlyActsOnARealChange() throws {
+        let shell = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/PWEAIBar/AppShell.swift")
+        let code = try String(contentsOf: shell, encoding: .utf8)
+        let observer = try XCTUnwrap(code.range(of: "observe(\\.effectiveAppearance"))
+        let window = code[observer.lowerBound..<(code.index(observer.lowerBound, offsetBy: 400, limitedBy: code.endIndex) ?? code.endIndex)]
+        XCTAssertTrue(window.contains("options: [.old, .new]"), "the observer must ask for both values")
+        XCTAssertTrue(window.contains("change.oldValue?.name != change.newValue?.name"),
+                      "and must return early unless the appearance actually changed")
+    }
+}
