@@ -6,8 +6,8 @@
 # this file should not be edited by hand for a release.
 
 cask "pwe-ai-bar" do
-  version "1.0.13"
-  sha256 "7fe90e72762e1c0b8b0acad8cf9e9fe08210cfa0de1e90b824f3ce6118d4522f"
+  version "1.0.14"
+  sha256 "c89be2c2d3a5c0738b24ff3153478b29292ba4f0d0a7ee04b7d5e72d7b39772d"
 
   url "https://github.com/kenshinice-ai/pwe-ai-bar/releases/download/v#{version}/PWE-AI-Bar-#{version}.dmg"
   name "PWE AI Bar"
