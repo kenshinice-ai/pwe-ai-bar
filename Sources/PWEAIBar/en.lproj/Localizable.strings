@@ -198,8 +198,10 @@
 "settings.alertPlacement" = "Where alerts land";
 "settings.detecting" = "detecting";
 "settings.group.alerts" = "Alerts";
+"settings.group.closed" = "collapsed";
 "settings.group.display" = "Display";
 "settings.group.general" = "General";
+"settings.group.open" = "expanded";
 "settings.group.sources" = "Sources";
 "settings.hooks.install" = "Install";
 "settings.hooks.reinstall" = "Reinstall";

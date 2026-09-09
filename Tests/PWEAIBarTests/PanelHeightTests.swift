@@ -167,3 +167,46 @@ final class SurfaceCeilingTests: XCTestCase {
         XCTAssertEqual(Theme.ceiling(usableHeight: 200, inset: 88), 420)
     }
 }
+
+
+/// The settings groups collapse, and which ones start open is a decision, not an accident.
+final class SettingsGroupTests: XCTestCase {
+    @MainActor func testDisplayAndAlertsOpenByDefaultAndTheChoiceIsRemembered() throws {
+        let space = try TestSpace()
+        let prefs = Prefs(defaults: space.defaults)
+        XCTAssertTrue(prefs.isOpen("display"), "what an existing user came to change")
+        XCTAssertTrue(prefs.isOpen("alerts"))
+        XCTAssertFalse(prefs.isOpen("sources"), "set once, then left alone")
+        XCTAssertFalse(prefs.isOpen("general"))
+        prefs.setOpen("sources", true); prefs.setOpen("display", false)
+        let again = Prefs(defaults: space.defaults)
+        XCTAssertTrue(again.isOpen("sources"), "remembered per group, across launches")
+        XCTAssertFalse(again.isOpen("display"))
+    }
+
+    /// The point of collapsing: as the window opens it must fit a laptop screen with no scroller,
+    /// and fully expanded it must still be capped by the screen rather than by taste.
+    @MainActor func testTheDefaultStateFitsWithoutScrollingAndExpandedIsCappedByTheScreen() throws {
+        _ = NSApplication.shared
+        Theme.registerFonts()
+        Loc.language = .en
+        let space = try TestSpace()
+        let prefs = Prefs(defaults: space.defaults)
+        func height(usable: CGFloat) -> CGFloat {
+            let v = SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
+                                 enableRealQuota: {}, prefs: prefs,
+                                 tokenEditor: TokenEditor(hasToken: false), hookInstalled: false,
+                                 usableHeight: { usable })
+            return NSHostingView(rootView: v).fittingSize.height
+        }
+        let laptop: CGFloat = 900            // a 13" MacBook's usable height, roughly
+        let opening = height(usable: laptop)
+        XCTAssertLessThan(opening, SettingsView.ceiling(usableHeight: laptop),
+                          "as it opens, the page must fit a laptop screen with no scroller: \(opening) pt")
+        for g in ["display", "alerts", "sources", "general"] { prefs.setOpen(g, true) }
+        let everything = height(usable: 4000)
+        XCTAssertGreaterThan(everything, opening * 1.5, "expanding must actually reveal something")
+        XCTAssertEqual(height(usable: laptop), SettingsView.ceiling(usableHeight: laptop), accuracy: 0.5,
+                       "fully open on a small screen, the cap is the screen — and nothing else")
+    }
+}

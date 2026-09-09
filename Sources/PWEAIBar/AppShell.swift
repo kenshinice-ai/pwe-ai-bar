@@ -254,6 +254,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // so `fittingSize` is already the smaller of "everything" and "what fits" — a fixed
         // 560 pt showed about half of this page and no amount of rearranging fixes that.
         let host = NSHostingView(rootView: view)
+        // The groups collapse now, so the page's height changes while the window is open. With
+        // this the hosting view drives the window's size as its content changes — collapse a
+        // group and the window shrinks with it — and the view's own ceiling keeps it on screen.
+        host.sizingOptions = [.preferredContentSize]
         if let w = settingsWindow {
             w.contentView = host
             w.setContentSize(NSSize(width: 380, height: host.fittingSize.height))

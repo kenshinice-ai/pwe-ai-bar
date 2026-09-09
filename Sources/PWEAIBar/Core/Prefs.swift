@@ -38,6 +38,19 @@ final class Prefs: ObservableObject {
     private let d: UserDefaults
     var sharedKeychainOptIn: Bool { d.bool(forKey: "sharedKeychainOptIn") }
 
+    /// Which settings groups are open. Display and Alerts by default — the two an existing user
+    /// opens this window to change — so the window opens at roughly half its full height and the
+    /// rest is a click away instead of a scroll away. Remembered per group, because a person who
+    /// opens Sources once is likely to want it open next time too.
+    private static let openByDefault: Set<String> = ["display", "alerts"]
+    func isOpen(_ group: String) -> Bool {
+        (d.object(forKey: "settings.open." + group) as? Bool) ?? Self.openByDefault.contains(group)
+    }
+    func setOpen(_ group: String, _ open: Bool) {
+        objectWillChange.send()
+        d.set(open, forKey: "settings.open." + group)
+    }
+
     @Published var menuBarMode: MenuBarMode { didSet { d.set(menuBarMode.rawValue, forKey: "menuBarMode") } }
     @Published var panelMode: PanelMode      { didSet { d.set(panelMode.rawValue, forKey: "panelMode") } }
     @Published var placement: AlertPlacement { didSet { d.set(placement.rawValue, forKey: "placement") } }

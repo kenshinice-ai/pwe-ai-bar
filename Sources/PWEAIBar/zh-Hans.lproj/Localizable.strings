@@ -280,3 +280,5 @@
 "settings.group.display" = "显示";
 "settings.group.alerts" = "提醒";
 "settings.group.general" = "通用";
+"settings.group.open" = "已展开";
+"settings.group.closed" = "已折叠";

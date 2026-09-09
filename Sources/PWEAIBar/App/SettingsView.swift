@@ -97,7 +97,7 @@ struct SettingsView: View {
     /// general preferences.
     private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
-            group(L("settings.group.display", "Display")) {
+            group("display", L("settings.group.display", "Display")) {
                 row(L("settings.menuBar", "Menu bar")) {
                     Picker("", selection: $prefs.menuBarMode) {
                         ForEach(MenuBarMode.allCases) { Text($0.label).tag($0) }
@@ -122,7 +122,7 @@ struct SettingsView: View {
                 }
             }
 
-            group(L("settings.group.alerts", "Alerts")) {
+            group("alerts", L("settings.group.alerts", "Alerts")) {
                 row(L("settings.alertPlacement", "Where alerts land")) {
                     VStack(alignment: .leading, spacing: Theme.s1) {
                         // The notch choice is removed, not greyed. A segmented control cannot show
@@ -151,7 +151,7 @@ struct SettingsView: View {
                 switchRow(L("settings.sound", "Sound"), $prefs.sound)
             }
 
-            group(L("settings.group.sources", "Sources")) {
+            group("sources", L("settings.group.sources", "Sources")) {
                 row(L("settings.tracking", "Tracking")) {
                     VStack(alignment: .leading, spacing: Theme.s1 + 2) {
                         ForEach(Provider.allCases, id: \.rawValue) { p in providerRow(p) }
@@ -175,7 +175,7 @@ struct SettingsView: View {
                 }
             }
 
-            group(L("settings.group.general", "General")) {
+            group("general", L("settings.group.general", "General")) {
                 row(L("settings.language", "Language")) {
                     VStack(alignment: .leading, spacing: Theme.s1) {
                         Picker("", selection: $prefs.language) {
@@ -385,12 +385,39 @@ struct SettingsView: View {
     /// The heading a group of rows hangs from. Same small-caps device as a row title, one step
     /// up in size and at full strength — the hierarchy is built out of the brand's own label
     /// rather than a second typeface invented for this window.
-    private func group<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title.uppercased()).brandLabel(10).foregroundStyle(Theme.text)
+    ///
+    /// Collapsible, and two of the four start collapsed. Four groups fully open still ran to about
+    /// 1,450 pt — past any laptop screen — and a page you have to scroll to see the shape of is a
+    /// page that feels disordered whatever its order. The chevron is the same SF Symbol family the
+    /// panel already uses for its gear and its outbound arrow, so it reads as this product and not
+    /// as a stock disclosure triangle.
+    private func group<C: View>(_ id: String, _ title: String, @ViewBuilder content: () -> C) -> some View {
+        let open = prefs.isOpen(id)
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) { prefs.setOpen(id, !open) }
+            } label: {
+                HStack(spacing: Theme.s2) {
+                    Text(title.uppercased()).brandLabel(10).foregroundStyle(Theme.text)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Theme.text2)
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                }
+                .contentShape(Rectangle())
                 .padding(.horizontal, Theme.s3)
-                .padding(.top, Theme.s4).padding(.bottom, Theme.s2)
-            content()
+                .padding(.top, Theme.s4).padding(.bottom, open ? Theme.s2 : Theme.s3)
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityValue(open ? L("settings.group.open", "expanded")
+                                     : L("settings.group.closed", "collapsed"))
+            // A closed group still needs a rule under it; open, its last row draws one.
+            .overlay(alignment: .bottom) {
+                if !open { Rectangle().fill(Theme.hairline).frame(height: 1) }
+            }
+            if open { content() }
         }
     }
 

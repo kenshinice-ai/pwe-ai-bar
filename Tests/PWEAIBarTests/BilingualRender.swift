@@ -48,11 +48,17 @@ final class BilingualRenderTests: XCTestCase {
                 try shoot(AnyView(panel), width: Theme.panelWidth, dark: dark,
                           to: out.appendingPathComponent("panel-\(lang.rawValue)-\(dark ? "dark" : "light").png"))
             }
-            let settings = SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
-                                        enableRealQuota: {}, prefs: prefs,
-                                        tokenEditor: TokenEditor(hasToken: false), hookInstalled: false,
-                                        usableHeight: { 1334 })
-            try shoot(AnyView(settings), width: 380, to: out.appendingPathComponent("settings-\(lang.rawValue).png"))
+            // Two states: as the window opens (Display and Alerts open, the rest collapsed), and
+            // everything open. The first is what a reader sees; the second is the height check.
+            for (state, open) in [("default", nil), ("expanded", true)] as [(String, Bool?)] {
+                if let open { for g in ["display", "alerts", "sources", "general"] { prefs.setOpen(g, open) } }
+                let settings = SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
+                                            enableRealQuota: {}, prefs: prefs,
+                                            tokenEditor: TokenEditor(hasToken: false), hookInstalled: false,
+                                            usableHeight: { 1334 })
+                try shoot(AnyView(settings), width: 380,
+                          to: out.appendingPathComponent("settings-\(lang.rawValue)-\(state).png"))
+            }
             // The trophy page with the shape real data actually has: five-figure turn counts and
             // a model the price table does not carry.
             var t = Trophy()
