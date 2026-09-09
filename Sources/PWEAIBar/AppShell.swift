@@ -141,7 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   onTrophy: { [weak self] in self?.showTrophy() },
                   onSettings: { [weak self] in self?.showSettings() },
                   onOpen: { [weak self] p in self?.activate(p) },
-                  onEnableQuota: { [weak self] in self?.store.enableRealQuota() },
+                  onEnableQuota: { [weak self] in Task { _ = await self?.store.enableRealQuota() } },
                   // The screen the status item is actually on. `NSScreen.main` is the screen
                   // holding the key window, which for a menu-bar app is whatever other app is
                   // frontmost — with a laptop plus an external display that is routinely the
@@ -278,7 +278,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return .failed(-1) }
                 return await self.store.saveToken(t)
             },
-            enableRealQuota: { [weak self] in self?.store.enableRealQuota() },
+            enableRealQuota: { [weak self] in
+                guard let self else { return "" }
+                return await self.store.enableRealQuota()
+            },
             onHeight: { [weak self, weak w] height in
                 guard let self, let w else { return }
                 w.setContentHeight(height, animate: self.settingsSizedOnce)

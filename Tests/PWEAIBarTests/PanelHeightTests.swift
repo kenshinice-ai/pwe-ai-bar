@@ -194,7 +194,7 @@ final class SettingsGroupTests: XCTestCase {
         let prefs = Prefs(defaults: space.defaults)
         func height(usable: CGFloat) -> CGFloat {
             let v = SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
-                                 enableRealQuota: {}, prefs: prefs,
+                                 enableRealQuota: { "" }, prefs: prefs,
                                  tokenEditor: TokenEditor(hasToken: false), hookInstalled: false,
                                  usableHeight: { usable })
             return NSHostingView(rootView: v).fittingSize.height
@@ -230,7 +230,7 @@ final class SettingsWindowTests: XCTestCase {
                          backing: .buffered, defer: false)
         let reports = Reports()
         let view = SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
-                                enableRealQuota: {}, prefs: prefs,
+                                enableRealQuota: { "" }, prefs: prefs,
                                 tokenEditor: TokenEditor(hasToken: false), hookInstalled: false,
                                 usableHeight: { 900 },
                                 onHeight: { [weak w] h in reports.heights.append(h); w?.setContentHeight(h, animate: false) })

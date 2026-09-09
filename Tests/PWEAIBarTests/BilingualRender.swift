@@ -53,7 +53,7 @@ final class BilingualRenderTests: XCTestCase {
             for (state, open) in [("default", nil), ("expanded", true)] as [(String, Bool?)] {
                 if let open { for g in ["display", "alerts", "sources", "general"] { prefs.setOpen(g, open) } }
                 let settings = SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
-                                            enableRealQuota: {}, prefs: prefs,
+                                            enableRealQuota: { "" }, prefs: prefs,
                                             tokenEditor: TokenEditor(hasToken: false), hookInstalled: false,
                                             usableHeight: { 1334 })
                 try shoot(AnyView(settings), width: 380,

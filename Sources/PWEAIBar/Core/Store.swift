@@ -324,8 +324,23 @@ final class Store: ObservableObject {
         return result
     }
 
-    func enableRealQuota() {
+    /// Returns the sentence to show the reader. A button whose whole job is to fix something
+    /// must say whether it did: the keychain can refuse, and it can also grant while the login
+    /// behind it stays expired — which is not the same outcome and must not look like one.
+    func enableRealQuota() async -> String {
         claudeUpdateVersion += 1
-        Task { await claude.enableSharedKeychain(); await updateClaude(force: true) }
+        let granted = await claude.enableSharedKeychain()
+        await updateClaude(force: true)
+        guard granted else {
+            return L("keychain.notGranted",
+                     "macOS did not grant access. Press again and choose Always Allow — plain "
+                     + "Allow covers that one read and nothing after it.")
+        }
+        if blocker == .none {
+            return L("keychain.granted", "Connected. The quota is being read now.")
+        }
+        // Granted, and still blocked: say what by. For an expired login that sentence carries
+        // the only command that helps, and it is not this button.
+        return blocker.message
     }
 }

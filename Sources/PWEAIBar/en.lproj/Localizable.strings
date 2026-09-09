@@ -104,6 +104,9 @@
 "hooks.failed" = "failed";
 "hooks.installed" = "installed";
 "hooks.stale" = "script needs updating";
+"keychain.asking" = "Asking macOS…";
+"keychain.granted" = "Connected. The quota is being read now.";
+"keychain.notGranted" = "macOS did not grant access. Press again and choose Always Allow — plain Allow covers that one read and nothing after it.";
 "lang.system" = "Follow System";
 "menu.quit" = "Quit";
 "menu.quitNamed" = "Quit PWE AI Bar";

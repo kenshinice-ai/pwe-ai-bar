@@ -10,18 +10,46 @@ macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。
 
 ---
 
-## 三件不显然的机制
+## 不显然的机制
 
-读代码之前先读这三段，否则会把它们当成过度设计删掉。
+读代码之前先读这几段，否则会把它们当成过度设计删掉。后三条是 1.0.13–1.1.1 补的，
+每一条都是「只在构建机以外才看得见」的那类问题。
 
-### 一、不用输密码
+### 一、不用输密码，但需要授权一次（这一节 1.1.0 整节重写过）
 
-钥匙串的授权是按「条目 × 程序」给的。Claude Code 写自己的凭据时是 shell 出去调 `/usr/bin/security`，
-所以那个二进制在这条记录的 ACL 上。**我们用同样的方式读，就是静默的**；换成 `SecItemCopyMatching`
-从别的 app 直接读，就会弹授权框。代价是一次约 20ms 的子进程，换来的是不弹框、不需要「始终允许」、
-重新签名后也不会再弹。
+**上一版这里写的是错的，而且那个错误论证造成了 1.0.8–1.0.12 的全部麻烦。** 原文说：Claude Code
+写凭据时 shell 出去调 `/usr/bin/security`，所以那个二进制在记录的 ACL 上，「我们用同样的方式读就是
+静默的、不需要始终允许」。真实情况是：**那个子进程会弹它自己的授权框**，标题写的是工具的名字
+（`security` 想要访问……）而不是应用的名字，而且**每轮轮询都弹**。
 
-`Providers/Credentials.swift`、`Providers/ClaudeCredentialStore.swift`。
+真正的规则是**一个条目有两道互不相干的 UI 闸**：
+
+| 闸 | 管什么 | 用什么关 |
+|---|---|---|
+| LocalAuthentication | 带 `SecAccessControl` 的条目（Touch ID、密码） | `kSecUseAuthenticationContext` + `LAContext.interactionNotAllowed` |
+| 经典 ACL | `login.keychain` 上的普通条目 | **只有** `SecKeychainSetUserInteractionAllowed(false)` |
+
+这个 app 曾经处处装了第一把锁，**一个都没装第二把**。现在的形状：
+
+- **跑在定时器上的读取一律不具备弹窗能力** —— `Credentials.quietRead(service:account:)` 同时关两道闸，
+  该弹窗的地方返回 `nil`。`ClaudeCredentialStore` 和 `ExtraSource`（Cursor / gh / Antigravity）都走它，
+  **没有任何后台路径 fork `security` 工具**，有一条结构测试扫全部源码盯着这件事。
+- **唯一允许弹窗的是 `Credentials.authoriseShared()`**，只由用户按下「改用钥匙串授权」触发，
+  不设看门狗——它等的是人在读授权框，掐断它正是最初那个 bug。
+- 弹框出现时必须选**「始终允许」**：只点「允许」仅对那一次读取有效，下一轮又被挡回去。
+- **`claude auth login` 会重建这个钥匙串条目**，新条目的访问列表不含本应用，授权随之清空 ——
+  登录之后需要再按一次那个按钮。这不是缺陷，是 macOS 的模型。
+
+**那个按钮必须说出结果**（1.1.2）。它一度可以什么都不做：授权被拒 → `Task.detached` 里静默 return；
+授权成功但登录本身还是过期的 → 刷新后 blocker 没变，界面照旧。**两种结局对读者长得一模一样**，
+而其中一种根本不该按这个按钮 —— 过期的登录只有 `claude auth login` 能治。现在
+`enableSharedKeychain()` 返回是否拿到凭据，`Store.enableRealQuota()` 把它翻成一句人话：
+被拒就教「选始终允许」，拿到了但仍被挡就**把 blocker 的原话说出来**（里面带着那条命令）。
+面板的 CTA 行也去掉了 `lineLimit` —— 它曾把唯一可执行的那句截成「…run cla…」。
+
+`Providers/Credentials.swift`、`Providers/ClaudeCredentialStore.swift`、`Providers/ExtraSource.swift`。
+诊断用 `--credprobe`：它在**真签名 bundle 内部**报告每种读法的 `OSStatus`（未签名的测试程序不在 ACL 上，
+结论不能外推）。
 
 ### 二、令牌自己续期（改这里之前请读完整节）
 
@@ -39,7 +67,8 @@ Claude Code 会把这条钥匙串记录**晾着**——本机实测过一次，�
 3. **写回失败不要重试轮换**。交换已经发生了，如果服务端轮换了 refresh token，Claude Code 手里那份
    可能已经作废。
 
-**下面四条是不变量，不是风格偏好。破坏其中任何一条，代价是把用户从他自己的 Claude Code 里登出。**
+**下面五条是不变量，不是风格偏好。破坏其中任何一条，代价是把用户从他自己的 Claude Code 里登出。
+第 8 条是 2026-09-08 用一次真实的登出换来的。**
 
 4. **换发返回之后，到写回之前，不许有任何取消检查、也不许重读凭据。** 一旦 POST 返回，服务端
    可能已经作废了 CLI 手里那份，而替代品的唯一一份就在内存里。写回不是「为调用方生产结果」的
@@ -51,11 +80,18 @@ Claude Code 会把这条钥匙串记录**晾着**——本机实测过一次，�
    已停下的任务，下一次 `windows()` 会从磁盘读到那份还没写回的旧凭据，拿同一个 refresh token
    再换一次；第二次的 `invalid_grant` 到达时，第一次换来的替代品可能已经是唯一能用的凭据。
 7. **写回之后再 `check(version)`。** 那时候丢弃结果是免费的。
+8. **先证明存得下，再花掉令牌。**（1.1.0）交换会让服务端作废旧 refresh token，而替代品的唯一一份
+   在响应里；所以 `rotate` 先做一次**只读**的 compare-and-swap 回读（`Access.storable`），通不过
+   就根本不交换。写回坏掉只损失一次轮询 + 30 分钟退避（`claudeRotationBlockedUntil`，**跨重启**
+   记住，因为进程内的 `rejected` 表随进程死掉，而这个 app 被反复强杀重开过）。
+   刻意保持只读：空写回去能证明更多，但那等于每次换发都往活凭据上写一次。
 
-这四条各有一个会失败的回归测试，都在 `ClaudeUsageTests`：
+这五条各有一个会失败的回归测试，都在 `ClaudeUsageTests`：
 `testARotationIsWrittenBackEvenIfTheAppStopsCaringMidFlight`、
 `testCancellingTheReadingDoesNotCancelTheExchange`、
-`testTwoFetchesNeverSpendTheSameRefreshTokenTwice`。改动这一段之后它们必须仍然通过，
+`testTwoFetchesNeverSpendTheSameRefreshTokenTwice`、
+`testARecordThatCannotBeWrittenBackIsNeverExchangedFor`、`testAFailedWriteBackSurvivesARelaunch`。
+改动这一段之后它们必须仍然通过，
 而且**撤掉你的改动它们必须失败**——我验过每一个。
 
 `Providers/ClaudeUsageClient.swift`、`ClaudeCredentialStore.swift`、`ClaudeProvider.rotate`。
@@ -135,6 +171,59 @@ rate.high = (Δp + 1) / S
 `loccheck` 是构建闸门（`build-app.sh` 里，编译之前），不是提醒。汉字排印按品牌标准
 §7.2 例外：`Theme.labelSize` / `labelTracking`，汉字 +1pt、0.4× 字距。
 
+### 七、资源只在构建机上找得到（1.0.13 修）
+
+**1.0.0 到 1.0.12 在构建它的那台 Mac 以外一律打不开** —— 能装、能启动，然后什么都不出现：
+没有菜单栏图标、没有窗口，因为它死在创建状态栏项之前。
+
+SwiftPM 给**可执行**目标生成的 `Bundle.module` 按两条路径找资源包：先找
+`Bundle.main.bundleURL`（.app 的**根目录**），再退回**编译时写死的绝对路径**
+`…/.build/arm64-apple-macosx/release/PWEAIBar_PWEAIBar.bundle`。而 `build-app.sh` 把资源包放在
+`Contents/Resources`（.app 该放的地方），所以第一条在任何机器上都失败，第二条只在有源码检出的
+那台机器上成立。首次触碰是 `Theme.registerFonts()` → `fatalError`。**构建机永远发现不了。**
+
+- `Bundle.resources`（`Core/Resources.swift`）是唯一的访问器：`Contents/Resources` → .app 根 →
+  `.module` 兜底（保留只为 `swift run` / `swift test`）。一条结构测试禁止其他源码碰生成的访问器。
+- `--selfcheck` 让**组装好的 app 从自身内部**证明每项资源都在自身内部（两种字体、价格表、hook 脚本、
+  两个语言包），`build-app.sh` 拿它当出包闸门，不过就拒绝出包。
+- **复现任何回归的方法**：把 `.build/arm64-apple-macosx/release/PWEAIBar_PWEAIBar.bundle` 改名，再启动。
+
+### 八、窗口高度由视图申报，不是问出来的（1.1.0 修）
+
+面板早就是这个契约（见「已知风险」里 1.0.1–1.0.4 那条记录），**设置窗口 1.0.10–1.0.14 却不是**：
+它用 `NSHostingView.fittingSize` 定高，而那个数**在页面完成布局之前恒为 0**（两种 `sizingOptions`
+都实测过）。于是设置窗口在别的机器上**只开出一根标题栏** —— 而 Claude 的全部可改项都在那扇窗里，
+「claude 那里改不了」就是这件事。
+
+现在设置页和面板同一套：内容量进 `SettingsHeight` 这个 `PreferenceKey`，取 `min(内容, 天花板)`，
+经 `onHeight` 报给窗口；`NSWindow.setContentHeight`（`App/WindowSizing.swift`）负责应用。两个细节
+各坑过一轮：
+
+- **`reduce` 必须用 `max`**。ScrollView 的内部也会以默认值 0 参与同一个键，而且可能**后到** ——
+  用「取最新值」会把量到的 678 覆写成 0，回调只响一次且带着 0。
+- **`.fullSizeContentView` 的窗口把内容藏在标题栏底下**，窗口内容高度必须是页面高度**加上**
+  `contentRect.height − contentLayoutRect.height`（这里 32 pt），否则页面会静静地滚掉那一截。
+
+测它要把 run loop **分成小片泵**（`30 × run(until: +0.02)`）；一次长的 `run(until:)` 会在 SwiftUI
+把偏好传播完之前就返回，测试什么都看不到。
+
+### 九、菜单栏重绘会自我触发（1.1.1 修）
+
+空转时烧掉 49–66% 的一个核，而且在往上爬。这是自己追自己的尾巴：`redraw` 赋值
+`statusItem.button.image` → AppKit **重新解析按钮的 effective appearance** →
+`observe(\.effectiveAppearance)` 的观察者触发 → 再 redraw。**每秒约 3,050 次**，只被 run loop 限速。
+
+两道闸，缺一不可：
+
+- 观察者取 `options: [.old, .new]`，外观名没变就返回。**这是环本身。**
+- `PaintedState`（`App/StatusIcon.swift`）比对**画出来的字节**（TIFF）加提示语，一样就不碰图层，
+  这样将来任何调用方都打不开这个环。**刻意比对绘制结果而不是「输入键」**：图标里有倒计时，
+  键就得懂时间，而键一旦和渲染器脱节，菜单栏会**冻住** —— 比原 bug 更糟。
+
+**定位它靠的不是 profiler。** `sample` 是墙钟采样，显示主线程「在 Core Animation 里」，
+但大半其实**阻塞在 `mach_msg` 等渲染服务器**；`ps -M` 每线程只报 0.4%。一击定案的是应用自己的
+计数器：`PWEBAR_DEBUG=1`，12 秒 36,601 次。**判断「是不是跑得太频繁」，廉价计数器胜过 profiler。**
+
 ## 轮询节奏
 
 这里有过一个反向逻辑：任何窗口一变红就把 TTL 压到 60 秒。一天 1440 次请求，换来一小时的
@@ -156,8 +245,8 @@ rate.high = (Δp + 1) / S
 ## 怎么跑
 
 ```bash
-swift test                      # 108 个
-./scripts/build-app.sh          # 组装并 ad-hoc 签名到 build/PWE AI Bar.app
+swift test                      # 147 个
+./scripts/build-app.sh          # 组装、签名，并跑 --selfcheck 闸门
 ```
 
 自检子命令（都不打印令牌、账号或服务器正文）：
@@ -169,6 +258,10 @@ swift test                      # 108 个
 | `--endurance <dir>` | 续航仪 14 个敌意状态 × 明暗两套，渲染成 PNG |
 | `--panel <dir>` | 三种密度 × 明暗，真实数据 |
 | `--probe` | 全链路 |
+| `--version` | 打印版本号，和设置页页脚读同一处 |
+| `--selfcheck` | 从 .app 内部证明每项资源都在 .app 内部；`build-app.sh` 拿它当出包闸门（机制七） |
+| `--credprobe` | 在真签名 bundle 里报告各种钥匙串读法的 `OSStatus`（机制一） |
+| `PWEBAR_DEBUG=1` | 每次菜单栏重绘打一行。判断「是不是画得太频繁」，这个计数器比 profiler 快得多（机制九） |
 
 **注意**：`--panel`、`--stress`、`--probe` 会各起一个完整的 `Store`，也就是**一次真实的网络请求**，
 并且会覆写共享的 `~/Library/Caches/PWE AI Bar/history.json`。两个写者会互相覆盖，别在 app 运行时
@@ -184,8 +277,9 @@ scripts/release.sh 1.0.1          # 全流程，见下
 scripts/package.sh --notarize     # 只要一个签好名公证过的本地 dmg
 ```
 
-`release.sh` 的顺序是：预检（身份、公证凭据、干净的树、`gh`、标签没被占）· `swift test` ·
-写 VERSION · 构建 · Developer ID 签名 · 公证 · staple · Gatekeeper 判决（dmg 和里面的 app 各一次）·
+`release.sh` 的顺序是：预检（身份、公证凭据、干净的树、**没有 iCloud 冲突副本**、`gh`、标签没被占）·
+`swift test` · 写 VERSION · 构建 · Developer ID 签名 · **`--selfcheck` 出包闸门（机制七）** ·
+公证 · staple · Gatekeeper 判决（dmg 和里面的 app 各一次）·
 提交打标签推送 · GitHub Release · **把已发布的那份下回来核对校验和与 Gatekeeper** · 更新
 Homebrew cask 并推 tap。中途失败会把 VERSION 和 cask 还原。**版本号只写在 `VERSION` 里**，
 `Info.plist` 由 `build-app.sh` 从它生成，所以不存在两处对不上。
@@ -200,11 +294,18 @@ Team ID `2SQV3H5MH9`，产物在 `dist/`。签名和打包都在 `$TMPDIR` 里�
 
 ## 已验证 / 未验证
 
-**已验证**：真实只读查询成功；面板读到 Claude 周窗口、五小时、上下文三行实况；113 个测试通过；
+**已验证**：真实只读查询成功；面板读到 Claude 周窗口、五小时、上下文三行实况；147 个测试通过；
+**在构建机以外的 Mac 上装好、打开、进入设置**（1.0.13 起，见机制七）；
 钥匙串条目在多轮读写后 accessToken / refreshToken / scopes 完整；续航仪 14 个状态明暗两套渲染无溢出；
 两轮云端审阅的十二条全部修复，其中六条配了先失败后通过的回归测试。
 
 **未验证，且要说清楚**：
+
+0. **~~写回失败那条路径没被真实触发过~~ —— 2026-09-08 触发了三次，而且代价是真的。**
+   三次交换都成功（服务器当场作废旧 refresh token 并发新的），三次写回都失败（当时的 CAS 回读还在
+   fork `security`，弹框在超时内没人答得上），三个替代品全丢。第三次之后钥匙串里那个 refresh token
+   已被服务器拒绝（`invalid_grant`），**那台机器上 Claude Code CLI 共享的登录只能用
+   `claude auth login` 重建**。这正是机制二一直在防的事，防错了顺序而已 —— 修法见机制二。
 
 1. **~~续期路径从没成功过~~ —— 2026-09-08 07:37:49 成功了一次，`累计成功 1 次`。**
    这条从「安全网，没人验过」变成了「真的跑过，真的写回去了，真的没把人登出」。
@@ -252,9 +353,12 @@ Team ID `2SQV3H5MH9`，产物在 `dist/`。签名和打包都在 `$TMPDIR` 里�
   **`PWEAIBar --popover`**：在真实状态栏项上开真实弹出框，打印窗口 frame 与屏幕 frame 的关系。
   `PWEBAR_PROBE_NO_RESIZE=1` 可以复现 1.0.3 的行为。**改这一段之后跑一次。**
 
-- **写回失败的窗口**（机制二第 3 条）。窗口已经被收到最窄——换发与写回之间不再有任何可取消点，
-  也不会有第二次换发——但如果磁盘/钥匙串写入本身失败，交换已经发生这件事无法撤销。只能记录：
-  失败会写进 `claudeRefreshOutcome`，`--credentials-read-only` 会打印出来。
+- **~~写回失败的窗口~~ —— 2026-09-08 发生了，代价是一次真实的登出（1.1.0、1.1.1 收口）**。
+  当时的 CAS 回读还在 fork `security`，弹框在超时内没人答得上，三次交换的替代品全丢，
+  第三次之后钥匙串里的 refresh token 被服务端拒绝。现在两头都堵上了：读取不再具备弹窗能力
+  （机制一），交换之前先证明写得回（机制二第 8 条）。**残余风险**：证明和写回之间仍有一道缝，
+  磁盘在那一瞬坏掉依然无法撤销 —— 只能记录，失败写进 `claudeRefreshOutcome`，
+  `--credentials-read-only` 会打印。
 - **`offActor` 的 15 秒超时会把一次慢成功报成失败**。超时后继续跑的那次写入仍可能成功，而我们
   已经记了「换到了但写不回去」并把这份凭据标成 `.storage` 拒绝。下一次凭据变化会自愈（`adopt`
   清空 `rejected`），所以留着没修，但报出来的话不准。
@@ -271,10 +375,12 @@ Team ID `2SQV3H5MH9`，产物在 `dist/`。签名和打包都在 `$TMPDIR` 里�
 Sources/PWEAIBar/
   Core/        Forecast(预报引擎) History(采样环) Store(节奏) RuleEngine(提醒)
                Model Prefs Pricing Readout Probe(自检) Channel Notifier TokenEditor
+               Resources(唯一的资源访问器,机制七)
   Providers/   Claude{Provider,CredentialStore,UsageClient,UsageMapper} Credentials
                Codex{Provider,AppServer} Extra{Source,Providers} Hook Transcript LineScanner
-  App/         PanelView EnduranceView SettingsView StatusIcon UsageChart TrophyView
-               ProviderMark{,View} NotchWindow
+  App/         PanelView EnduranceView SettingsView StatusIcon(含 PaintedState,机制九)
+               UsageChart TrophyView ProviderMark{,View} NotchWindow
+               WindowSizing(NSWindow.setContentHeight,机制八)
   Brand/       Theme WingGauge BrandMark        Resources/  字体、图标、pricing.json
 docs/
   HANDOFF.md                    这份

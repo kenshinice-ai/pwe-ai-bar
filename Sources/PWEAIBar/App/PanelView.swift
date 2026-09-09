@@ -400,8 +400,10 @@ struct PanelView: View {
 
     private func ctaRow(_ cta: (text: String, action: CTAAction?)) -> some View {
         HStack(spacing: Theme.s2) {
+            // No line limit. This row carries the only sentence that says what to do, and at
+            // two lines it read "…cannot be renewed · run cla…" — the command truncated away.
             Text(cta.text).font(Theme.sans(11)).foregroundStyle(Theme.text2)
-                .fixedSize(horizontal: false, vertical: true).lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: Theme.s1)
             if let action = cta.action {
                 Button(action.title) {

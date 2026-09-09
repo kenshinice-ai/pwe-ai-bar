@@ -126,7 +126,7 @@ enum Probe {
             shoot(AnyView(TrophyView(trophy: store.snapshot.trophy)),
                   width: 460, dark: dark, to: dir + "/trophy-\(suffix).png")
             shoot(AnyView(SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
-                                       enableRealQuota: {})),
+                                       enableRealQuota: { "" })),
                   width: 380, dark: dark, to: dir + "/settings-\(suffix).png")
         }
 
@@ -411,7 +411,7 @@ enum Probe {
             // Settings is two clicks deep, which is exactly why it rots — and it is now the
             // one surface every provider has to fit on.
             shoot(AnyView(SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
-                                       enableRealQuota: {})),
+                                       enableRealQuota: { "" })),
                   width: 380, dark: dark, to: dir + "/stress-settings-\(tag).png")
 
             // One snapshot has one protagonist, and the two hero states worth checking are

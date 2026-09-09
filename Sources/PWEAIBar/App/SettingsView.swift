@@ -37,7 +37,7 @@ struct SettingsView: View {
     @ObservedObject var prefs = Prefs.shared
     var installHooks: () -> Bool
     var saveToken: (String) async -> ClaudeProvider.TokenUpdate
-    var enableRealQuota: () -> Void
+    var enableRealQuota: () async -> String
     /// Injectable so a test can assert against a stated screen height rather than whichever
     /// machine happens to run it.
     var usableHeight: () -> CGFloat? = { NSScreen.main?.visibleFrame.height }
@@ -51,11 +51,13 @@ struct SettingsView: View {
     @State private var hookState: HookState
     @State private var states: [Provider: Detected] = [:]
     @State private var token: String = ""
+    @State private var keychainNote: String = ""
+    @State private var keychainBusy = false
     @StateObject private var tokenEditor: TokenEditor
 
     init(installHooks: @escaping () -> Bool,
          saveToken: @escaping (String) async -> ClaudeProvider.TokenUpdate,
-         enableRealQuota: @escaping () -> Void, prefs: Prefs? = nil,
+         enableRealQuota: @escaping () async -> String, prefs: Prefs? = nil,
          tokenEditor: TokenEditor? = nil, hookInstalled: Bool? = nil,
          usableHeight: @escaping () -> CGFloat? = { NSScreen.main?.visibleFrame.height },
          onHeight: @escaping (CGFloat) -> Void = { _ in }) {
@@ -277,11 +279,22 @@ struct SettingsView: View {
             // paragraph above: a button beside wrapping text collides with it at every width
             // the text happens to reflow at.
             if !tokenEditor.hasToken {
-                Button(L("cta.useKeychain", "Use keychain access")) { enableRealQuota() }
+                Button(keychainBusy ? L("keychain.asking", "Asking macOS…")
+                                    : L("cta.useKeychain", "Use keychain access")) {
+                    Task { @MainActor in
+                        keychainBusy = true
+                        keychainNote = await enableRealQuota()
+                        keychainBusy = false
+                    }
+                }
+                .disabled(keychainBusy)
                     .font(Theme.sans(11))
                     .help(L("settings.keychain.help",
                             "The fallback when the Claude Code credential cannot be read; "
                             + "macOS will ask for authorisation once"))
+            }
+            if !keychainNote.isEmpty {
+                note(keychainNote).foregroundStyle(Theme.accent)
             }
             if !tokenEditor.message.isEmpty {
                 Text(tokenEditor.message).font(Theme.sans(10.5)).foregroundStyle(Theme.accent)

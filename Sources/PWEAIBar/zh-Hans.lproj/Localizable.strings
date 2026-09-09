@@ -282,3 +282,6 @@
 "settings.group.general" = "通用";
 "settings.group.open" = "已展开";
 "settings.group.closed" = "已折叠";
+"keychain.asking" = "正在询问 macOS…";
+"keychain.granted" = "已连接,正在读取额度。";
+"keychain.notGranted" = "macOS 没有授权。请再按一次,并选「始终允许」——只点「允许」仅对那一次读取有效。";

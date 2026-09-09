@@ -60,7 +60,7 @@ final class RenderingTests: XCTestCase {
         let editor = TokenEditor(hasToken: true)
         _ = await editor.submit("synthetic") { _ in .saved(.unauthorized) }
         let settings = SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
-                                    enableRealQuota: {}, prefs: prefs, tokenEditor: editor, hookInstalled: true)
+                                    enableRealQuota: { "" }, prefs: prefs, tokenEditor: editor, hookInstalled: true)
         let output = ProcessInfo.processInfo.environment["PWEBAR_TEST_ARTIFACTS"].map { URL(fileURLWithPath: $0) } ?? space.root
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         _ = NSApplication.shared

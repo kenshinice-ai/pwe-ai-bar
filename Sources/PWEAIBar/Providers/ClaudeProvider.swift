@@ -582,22 +582,24 @@ actor ClaudeProvider {
         return a.value == b.value
     }
 
-    func enableSharedKeychain() {
+    /// True when the authorised read came back with a credential. The caller has to say so:
+    /// this used to fire and forget, so a refusal returned silently and a success that changed
+    /// no blocker looked identical to it — the button did nothing anyone could see, twice over.
+    @discardableResult
+    func enableSharedKeychain() async -> Bool {
         defaults.set(true, forKey: "sharedKeychainOptIn")
         defaults.set(false, forKey: "keychainRefused")
         defaults.set(0, forKey: "claudeRotationBlockedUntil")
         defaults.set(false, forKey: "claudeManualTokenSelected")
         invalidate()
-        guard let authorise = access.authorise else { return }
-        // Clearing the flags was never enough on its own: every read this app performs is
-        // incapable of drawing, so on an item whose access list does not carry us they all
-        // answer errSecAuthFailed and the button did nothing anyone could see. This is the one
-        // read allowed to ask, and there is no watchdog on it — what it waits for is a person
-        // reading a permission prompt, and cutting that short is the whole original bug.
-        Task.detached(priority: .userInitiated) { [weak self] in
-            guard authorise() else { return }
-            await self?.invalidate()
+        guard let authorise = access.authorise else { return true }
+        // The one read allowed to ask, and deliberately without a watchdog — what it waits for
+        // is a person reading a permission prompt, and cutting that short is the original bug.
+        let granted = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async { cont.resume(returning: authorise()) }
         }
+        if granted { invalidate() }
+        return granted
     }
 
     func useOwnToken(_ raw: String) async -> TokenUpdate {

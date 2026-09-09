@@ -683,3 +683,57 @@ final class KeychainPromptTests: XCTestCase {
                       "the classic-ACL dialog has exactly one switch; an LAContext does not close it")
     }
 }
+
+/// The keychain button appeared to do nothing on a second Mac. It could do nothing: a refusal
+/// returned silently, and a grant that left the login still expired changed no visible state, so
+/// both outcomes looked identical to the one that matters — the reader pressing it again.
+final class KeychainButtonFeedbackTests: XCTestCase {
+    private var at: Date { Date(timeIntervalSince1970: 1_760_000_000) }
+
+    private func provider(_ space: TestSpace, authorise: @escaping () -> Bool,
+                          token: Credentials.Token?) -> ClaudeProvider {
+        ClaudeProvider(defaults: space.defaults,
+                       access: .init(own: { nil }, claudeCode: { nil }, sharedExists: { true },
+                                     shared: { token }, save: { _ in .failed(-1) },
+                                     load: { token.map { [$0] } ?? [] },
+                                     authorise: authorise),
+                       now: { self.at }, request: { _ in throw ClaudeProvider.Blocker.network })
+    }
+
+    func testARefusalIsReportedRatherThanSwallowed() async throws {
+        let space = try TestSpace()
+        let p = provider(space, authorise: { false }, token: nil)
+        let granted = await p.enableSharedKeychain()
+        XCTAssertFalse(granted, "macOS said no, and the caller has to be able to say so")
+    }
+
+    func testAGrantIsReportedEvenWhenTheLoginBehindItIsStillBroken() async throws {
+        let space = try TestSpace()
+        let expired = try XCTUnwrap(ClaudeCredentialStore.decode(
+            #"{"claudeAiOauth":{"accessToken":"a","expiresAt":1000,"scopes":["user:profile"]}}"#,
+            source: .sharedKeychain,
+            origin: .keychain(service: "Claude Code-credentials", account: "tester")))
+        let p = provider(space, authorise: { true }, token: expired)
+        let granted = await p.enableSharedKeychain()
+        XCTAssertTrue(granted, "the keychain opened — that is a different outcome from a refusal")
+        _ = await p.windows(force: true)
+        let blocker = await p.blocker
+        XCTAssertTrue(blocker.isExpired,
+                      "and the thing still wrong is the login, which this button cannot fix")
+        XCTAssertTrue(blocker.message.contains("claude auth login"),
+                      "so the message has to carry the command that can: \(blocker.message)")
+    }
+
+    /// The panel row that carries that command must not truncate it. It did, at two lines:
+    /// "…cannot be renewed · run cla…".
+    func testTheCallToActionRowDoesNotTruncateTheInstruction() throws {
+        let panel = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/PWEAIBar/App/PanelView.swift")
+        let code = try String(contentsOf: panel, encoding: .utf8)
+        let row = try XCTUnwrap(code.range(of: "private func ctaRow"))
+        let window = code[row.lowerBound..<(code.index(row.lowerBound, offsetBy: 600, limitedBy: code.endIndex) ?? code.endIndex)]
+        XCTAssertFalse(window.contains("lineLimit("),
+                       "the call-to-action row is where the only actionable sentence lives")
+    }
+}
