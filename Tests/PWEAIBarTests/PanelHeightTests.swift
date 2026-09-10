@@ -253,3 +253,54 @@ final class SettingsWindowTests: XCTestCase {
         w.orderOut(nil)
     }
 }
+
+/// Querying a provider and giving it a place in the menu bar are two questions. They used to be
+/// one switch — and in the menu bar even that switch was ignored for five of the eight.
+final class MenuBarVisibilityTests: XCTestCase {
+    @MainActor func testAnUpgradeDoesNotEmptyAnyonesMenuBar() throws {
+        let space = try TestSpace()
+        let prefs = Prefs(defaults: space.defaults)
+        XCTAssertTrue(prefs.menuBarProviders.isEmpty, "nothing stored yet")
+        XCTAssertTrue(prefs.showsInMenuBar(.claude), "empty means all, not none")
+        XCTAssertTrue(prefs.showsInMenuBar(.codex))
+    }
+
+    @MainActor func testTakingOneOutLeavesTheRestIn() throws {
+        let space = try TestSpace()
+        let prefs = Prefs(defaults: space.defaults)
+        prefs.setMenuBar(.codex, false)
+        XCTAssertFalse(prefs.showsInMenuBar(.codex), "the one taken out")
+        XCTAssertTrue(prefs.showsInMenuBar(.claude), "and only that one")
+        XCTAssertFalse(prefs.menuBarProviders.isEmpty, "the set is materialised on first removal")
+    }
+
+    @MainActor func testAnUntrackedProviderIsNeverInTheMenuBar() throws {
+        let space = try TestSpace()
+        let prefs = Prefs(defaults: space.defaults)
+        prefs.setTracking(.codex, false)
+        XCTAssertFalse(prefs.showsInMenuBar(.codex),
+                       "not queried cannot mean shown; the bar had its own opinion about this")
+    }
+
+    /// Structural: the menu-bar gate used to end in `|| (p != .claude && p != .codex)`, which let
+    /// the other five in whether or not they were switched on.
+    func testTheMenuBarGateHasNoEscapeHatch() throws {
+        let icon = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/PWEAIBar/App/StatusIcon.swift"), encoding: .utf8)
+        XCTAssertTrue(icon.contains("Prefs.shared.showsInMenuBar(p)"), "one gate")
+        XCTAssertFalse(icon.contains("p != .claude && p != .codex"), "and no way round it")
+    }
+
+    func testTheRefreshChoicesMeanWhatTheySay() {
+        XCTAssertNil(RefreshInterval.automatic.seconds, "automatic is the app deciding, not a number")
+        XCTAssertEqual(RefreshInterval.oneMinute.seconds, 60)
+        XCTAssertEqual(RefreshInterval.fiveMinutes.seconds, 300)
+        XCTAssertEqual(RefreshInterval.fifteenMinutes.seconds, 900)
+        let store = try? String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/PWEAIBar/Core/Store.swift"), encoding: .utf8)
+        XCTAssertTrue(store?.contains("if let fixed = Prefs.shared.refreshInterval.seconds { return fixed }") == true,
+                      "a stated preference has to be consulted before the app's own judgement")
+    }
+}

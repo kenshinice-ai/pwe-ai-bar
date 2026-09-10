@@ -172,12 +172,20 @@ struct SettingsView: View {
             }
 
             group("sources", L("settings.group.sources", "Sources")) {
-                row(L("settings.tracking", "Tracking")) {
+                row(L("settings.refresh", "Refresh")) {
+                    Picker("", selection: $prefs.refreshInterval) {
+                        ForEach(RefreshInterval.allCases) { Text($0.label).tag($0) }
+                    }
+                    .labelsHidden().pickerStyle(.menu).frame(maxWidth: 200, alignment: .leading)
+                }
+                row(L("settings.tools", "Tools")) {
                     VStack(alignment: .leading, spacing: Theme.s1 + 2) {
+                        providerHeader
                         ForEach(Provider.allCases, id: \.rawValue) { p in providerRow(p) }
                         note(L("settings.tracking.note",
-                               "Anything switched off is never queried. \"Not installed\" means no login "
-                               + "for that tool was found on this Mac.")).padding(.top, 2)
+                               "Switched off is never queried. Menu bar decides which of the ones you "
+                               + "do query get a place up there — with eight of them the bar runs out "
+                               + "of room long before you run out of interest.")).padding(.top, 2)
                     }
                 }
                 row(L("settings.source", "Quota source")) { quotaSource }
@@ -223,9 +231,20 @@ struct SettingsView: View {
             Text(verbatim: "PWE AI Bar").font(Theme.sans(11)).foregroundStyle(Theme.text2)
             Text(verbatim: Self.version).font(Theme.figures(11)).foregroundStyle(Theme.text)
             Spacer()
+            Button { NSWorkspace.shared.open(Self.repository) } label: {
+                Text(verbatim: "GitHub").font(Theme.sans(11))
+            }
+            .buttonStyle(.link)
+            // Quitting lived only in the right-click menu on the status icon. Right-clicking a
+            // menu-bar glyph is a thing you know or you do not, and an app with no Dock icon
+            // gives you nothing else to try — so the way out is on screen, where the way in was.
+            Button(L("settings.quit", "Quit")) { NSApplication.shared.terminate(nil) }
+                .font(Theme.sans(11))
         }
         .padding(.horizontal, Theme.s3).padding(.top, Theme.s3).padding(.bottom, Theme.s4)
     }
+
+    private static let repository = URL(string: "https://github.com/kenshinice-ai/pwe-ai-bar")!
 
     /// Falls back to a dash rather than to "1.0.0" or an empty string: a wrong version on screen
     /// is worse than an admitted unknown, because it is the thing being trusted to settle a
@@ -371,23 +390,58 @@ struct SettingsView: View {
     /// One line per provider, whether or not it is here. A tool that is installed but signed
     /// out and a tool that was never installed look identical when both are simply absent from
     /// the panel — so both are listed, and each says which it is.
+    /// Two columns, because they answer two questions. Querying a provider and giving it a place
+    /// in the menu bar used to be the same switch, which meant the only way to unclutter the bar
+    /// was to stop reading a tool you actually use.
+    private static let column: CGFloat = 40
+
+    private var providerHeader: some View {
+        HStack(spacing: 7) {
+            // No word here: the row above it is already the column's name, and having both
+            // read "Tracking" over "Provider / Track" was two labels arguing about one thing.
+            Spacer(minLength: Theme.s1)
+            Text(L("settings.col.track", "Track").uppercased())
+                .brandLabel().foregroundStyle(Theme.text2)
+                .frame(width: Self.column, alignment: .center)
+            Text(L("settings.col.menuBar", "Bar").uppercased())
+                .brandLabel().foregroundStyle(Theme.text2)
+                .frame(width: Self.column, alignment: .center)
+        }
+        .padding(.bottom, 1)
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.hairline).frame(height: 1) }
+        .accessibilityHidden(true)
+    }
+
     private func providerRow(_ p: Provider) -> some View {
         let reason = p.unavailableReason
         let detected = states[p]?.label
+        let live = reason == nil && states[p] != nil && states[p] != .absent
         return HStack(spacing: 7) {
             ProviderMarkView(provider: p, tint: reason == nil ? Theme.text : Theme.text2)
                 .frame(width: 13, height: 13)
-            Text(p.name).font(Theme.sans(12)).foregroundStyle(reason == nil ? Theme.text : Theme.text2)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(p.name).font(Theme.sans(12))
+                    .foregroundStyle(reason == nil ? Theme.text : Theme.text2).lineLimit(1)
+                // Empty until detection comes back off the main thread — a dash that turns into
+                // "已登录" is honest; a guess that turns out wrong is not.
+                HStack(spacing: 3) {
+                    Circle().fill(live ? Theme.accent : Theme.text2.opacity(0.45))
+                        .frame(width: 4, height: 4)
+                    Text(reason ?? detected ?? "…").font(Theme.sans(10))
+                        .foregroundStyle(Theme.text2).lineLimit(1)
+                }
+            }
             Spacer(minLength: Theme.s1)
-            // Empty until detection comes back off the main thread — a dash that turns into
-            // "已登录" is honest; a guess that turns out wrong is not.
-            Text(reason ?? detected ?? "…").font(Theme.sans(10)).foregroundStyle(Theme.text2)
-                .lineLimit(1)
             Toggle("", isOn: Binding(get: { prefs.tracks(p) },
                                      set: { prefs.setTracking(p, $0) }))
                 .labelsHidden().toggleStyle(.switch).controlSize(.mini)
                 .disabled(reason != nil)
+                .frame(width: Self.column, alignment: .center)
+            Toggle("", isOn: Binding(get: { prefs.showsInMenuBar(p) },
+                                     set: { prefs.setMenuBar(p, $0) }))
+                .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                .disabled(reason != nil || !prefs.tracks(p))
+                .frame(width: Self.column, alignment: .center)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(String(format: L("settings.provider.a11y", "%@, %@"), p.name,

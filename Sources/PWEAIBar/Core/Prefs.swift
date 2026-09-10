@@ -30,6 +30,33 @@ enum AlertPlacement: String, CaseIterable, Identifiable {
     private var index: Int { ["menubar": 0, "notch": 1, "center": 2][rawValue]! }
 }
 
+/// How often to ask. `automatic` is the app's own cadence — 20 s while you are working, 5 min
+/// when nothing has moved, 15 min once you have been away an hour — and it stays the default
+/// because it is the one that is cheap when nothing is happening and quick when it is. The fixed
+/// options exist because that reasoning is ours, not the reader's: on a metered connection or a
+/// laptop on battery, "every fifteen minutes, always" is a legitimate thing to want.
+enum RefreshInterval: String, CaseIterable, Identifiable {
+    case automatic, oneMinute, fiveMinutes, fifteenMinutes
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .automatic:      return L("refresh.automatic", "Automatic")
+        case .oneMinute:      return L("refresh.1m", "Every minute")
+        case .fiveMinutes:    return L("refresh.5m", "Every 5 minutes")
+        case .fifteenMinutes: return L("refresh.15m", "Every 15 minutes")
+        }
+    }
+    /// Nil means "let the app decide", which is what `Store.interval` does on its own.
+    var seconds: TimeInterval? {
+        switch self {
+        case .automatic:      return nil
+        case .oneMinute:      return 60
+        case .fiveMinutes:    return 300
+        case .fifteenMinutes: return 900
+        }
+    }
+}
+
 /// User-facing settings. Density is a preference, not a house opinion: some people want every
 /// reading in the bar, some want one glyph, and the design's job is to be legible either way.
 @MainActor
@@ -66,6 +93,31 @@ final class Prefs: ObservableObject {
     /// Whether percentages read as "how much is left" rather than "how much is spent".
     /// Defaults to remaining — see `Readout` for why.
     @Published var showRemaining: Bool { didSet { d.set(showRemaining, forKey: "showRemaining") } }
+
+    @Published var refreshInterval: RefreshInterval {
+        didSet { d.set(refreshInterval.rawValue, forKey: "refreshInterval") }
+    }
+
+    /// Which providers get a place in the menu bar, as opposed to merely being queried. Two
+    /// different questions: with eight providers the bar runs out of room long before the reader
+    /// runs out of interest, and until now the only control was a density switch that applied to
+    /// all of them at once.
+    ///
+    /// **Empty means all.** An upgrade must not silently empty someone's menu bar, and the set is
+    /// only materialised when they first take something out of it.
+    @Published var menuBarProviders: Set<String> {
+        didSet { d.set(Array(menuBarProviders), forKey: "menuBarProviders") }
+    }
+    func showsInMenuBar(_ p: Provider) -> Bool {
+        tracks(p) && (menuBarProviders.isEmpty || menuBarProviders.contains(p.rawValue))
+    }
+    func setMenuBar(_ p: Provider, _ on: Bool) {
+        var set = menuBarProviders.isEmpty
+            ? Set(Provider.allCases.filter { $0.unavailableReason == nil }.map(\.rawValue))
+            : menuBarProviders
+        if on { set.insert(p.rawValue) } else { set.remove(p.rawValue) }
+        menuBarProviders = set
+    }
 
     /// Interface language.
     ///
@@ -124,6 +176,8 @@ final class Prefs: ObservableObject {
             tracked = initial
         }
         showRemaining = d.object(forKey: "showRemaining") as? Bool ?? true
+        refreshInterval = RefreshInterval(rawValue: d.string(forKey: "refreshInterval") ?? "") ?? .automatic
+        menuBarProviders = Set(d.array(forKey: "menuBarProviders") as? [String] ?? [])
         language = Language(rawValue: d.string(forKey: "language") ?? "") ?? .system
         trophyRange = TrophyRange(rawValue: d.string(forKey: "trophyRange") ?? "") ?? .all
         subscriptionCurrency = d.string(forKey: "subscriptionCurrency") ?? "USD"

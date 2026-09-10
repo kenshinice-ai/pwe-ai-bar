@@ -94,6 +94,8 @@ final class Store: ObservableObject {
     /// 5 min is plenty when nothing has moved; a sleeping Mac gets nothing at all and one fresh
     /// read on wake rather than a backlog of missed ticks.
     private var interval: TimeInterval {
+        // A stated preference outranks the app's judgement about the reader's connection.
+        if let fixed = Prefs.shared.refreshInterval.seconds { return fixed }
         let quiet = Date().timeIntervalSince(lastActivity)
         if quiet > 60 * 60 { return 900 }      // nothing for an hour: check quarter-hourly
         if quiet > 15 * 60 { return 300 }

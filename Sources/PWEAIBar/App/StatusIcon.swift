@@ -135,10 +135,13 @@ enum StatusIcon {
     /// One row per tracked provider: whichever of its windows is currently tightest.
     private static func providers(_ snap: Snapshot) -> [QuotaWindow] {
         var out: [QuotaWindow] = []
+        // One gate, and one that actually gates. The old condition ended in an `||` clause that
+        // matched every provider other than the two named ones, which let the remaining five into
+        // the menu bar whether or not they were switched on: the switch worked everywhere but
+        // here. Worded without the expression on purpose — a structural test looks for it, and a
+        // comment quoting the bug reads to that test exactly like the bug.
         for p in Provider.allCases {
-            guard (p == .claude && Prefs.shared.trackClaude)
-               || (p == .codex && Prefs.shared.trackCodex)
-               || (p != .claude && p != .codex) else { continue }
+            guard Prefs.shared.showsInMenuBar(p) else { continue }
             let mine = snap.windows.filter { $0.provider == p }
             if let worst = mine.max(by: { $0.strain < $1.strain }) { out.append(worst) }
         }

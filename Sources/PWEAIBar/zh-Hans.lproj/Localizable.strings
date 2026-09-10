@@ -120,8 +120,7 @@
 "settings.token.stored" = "令牌保存在本 app 的钥匙串中，仍可能失效或被撤销。可直接粘贴新令牌更换，或清空输入后点「清除」。";
 "settings.token.none" = "通常无需填写。自动复用 Claude Code 登录；可续期时更新原凭据。手动令牌必须通过额度接口验证，长期有效不代表具备用量权限。";
 "settings.keychain.help" = "读不到 Claude Code 凭据时的退路，会弹一次系统授权框";
-"settings.tracking" = "追踪";
-"settings.tracking.note" = "关掉的不会被查询。「未安装」指本机找不到该工具存下的登录信息。";
+"settings.tracking.note" = "关掉的不会被查询。「菜单栏」决定查询到的哪几家能在上面占个位置 —— 八家一起挤，栏位先用完的永远不是你的兴趣。";
 "settings.sessionEvents" = "会话事件";
 "settings.hooks.install" = "安装";
 "settings.hooks.reinstall" = "重新安装";
@@ -294,3 +293,12 @@
 "cta.installClaude.help" = "打开 Claude Code 的下载页";
 "cta.signIn" = "登录";
 "cta.signIn.help" = "自动打开终端并完成登录";
+"refresh.automatic" = "自动";
+"refresh.1m" = "每分钟";
+"refresh.5m" = "每 5 分钟";
+"refresh.15m" = "每 15 分钟";
+"settings.refresh" = "刷新";
+"settings.col.track" = "追踪";
+"settings.col.menuBar" = "菜单栏";
+"settings.quit" = "退出";
+"settings.tools" = "工具";

@@ -192,6 +192,10 @@
 "range.all" = "All";
 "readout.remaining" = "left";
 "readout.used" = "used";
+"refresh.15m" = "Every 15 minutes";
+"refresh.1m" = "Every minute";
+"refresh.5m" = "Every 5 minutes";
+"refresh.automatic" = "Automatic";
 "reset.at" = "%@ reset";
 "reset.inDays" = "resets in %@d";
 "reset.inDaysToGo" = "%d d to go";
@@ -207,6 +211,8 @@
 "score.equivalent" = "Equivalent";
 "score.multiple" = "Return";
 "settings.alertPlacement" = "Where alerts land";
+"settings.col.menuBar" = "Bar";
+"settings.col.track" = "Track";
 "settings.detecting" = "detecting";
 "settings.group.alerts" = "Alerts";
 "settings.group.closed" = "collapsed";
@@ -230,8 +236,10 @@
 "settings.push.field" = "ntfy / Bark URL — leave empty for no push";
 "settings.push.note" = "Only used once you have been away from the keyboard for five minutes.";
 "settings.pushAway" = "Push when you are away";
+"settings.quit" = "Quit";
 "settings.readout" = "Percentage basis";
 "settings.readout.note" = "Codex shows what is left; Claude's endpoint gives what is used. One convention, so the same window does not read as two things.";
+"settings.refresh" = "Refresh";
 "settings.sessionEvents" = "Session events";
 "settings.sound" = "Sound";
 "settings.source" = "Quota source";
@@ -247,8 +255,8 @@
 "settings.token.save" = "Save";
 "settings.token.stored" = "The token is kept in this app's keychain and can still expire or be revoked. Paste a new one to replace it, or clear the field and press Clear.";
 "settings.token.verifying" = "Verifying…";
-"settings.tracking" = "Tracking";
-"settings.tracking.note" = "Anything switched off is never queried. \"Not installed\" means no login for that tool was found on this Mac.";
+"settings.tools" = "Tools";
+"settings.tracking.note" = "Switched off is never queried. Menu bar decides which of the ones you do query get a place up there — with eight of them the bar runs out of room long before you run out of interest.";
 "span.ages" = "a long time";
 "span.day" = "d";
 "span.dayPlus" = "d+";
