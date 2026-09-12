@@ -16,6 +16,20 @@ import Foundation
 /// The check is off until the reader says yes, asked once, and changeable in Settings after
 /// that. Failure is silent: someone on a plane or behind a corporate proxy must never see an
 /// error from a convenience.
+/// **This file is duplicated in three apps, deliberately, and the duplication is checked.**
+/// PWE AI Bar, PWE Monitor and PWE Lumen Bar each carry a copy differing only in `product`, in
+/// `downloadPage`, and in which function answers "is the interface in Chinese".
+///
+/// A shared package was designed and then measured against what it would buy. Three repositories
+/// and three build systems -- SwiftPM, a raw `swiftc` line, and an Xcode project -- mean a package
+/// costs a fourth repository, a build-system migration for one app, and "edit, tag, bump three
+/// dependents" on every change: the same work moved somewhere else, plus a mechanism to learn.
+/// What the duplication actually costs is one thing, and only one: nobody being told when a fix
+/// reaches one copy and not the others.
+///
+/// `07 TOOLS/check-shared-sources.py` is that one thing. It compares the five functions carrying
+/// the behaviour, ignores the configuration that is supposed to differ, and all three release
+/// scripts run it. **Change all three -- and the release will tell you if you did not.**
 @MainActor
 final class UpdateCheck: ObservableObject {
 
@@ -57,6 +71,9 @@ final class UpdateCheck: ObservableObject {
     /// the very most, so anything more frequent spends someone else's bandwidth to learn nothing.
     nonisolated static let interval: TimeInterval = 24 * 60 * 60
 
+    /// Which product is asking. The endpoint serves every PWE app, so the answer depends on it.
+    nonisolated static let product = "aibar"
+
     nonisolated static var currentVersion: String {
         (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0"
     }
@@ -65,9 +82,6 @@ final class UpdateCheck: ObservableObject {
         let v = ProcessInfo.processInfo.operatingSystemVersion
         return "\(v.majorVersion).\(v.minorVersion)"
     }
-
-    /// Which product is asking. The endpoint serves every PWE app, so the answer depends on it.
-    nonisolated static let product = "aibar"
 
     init(defaults: UserDefaults = .standard,
          now: @escaping () -> Date = Date.init,
@@ -91,18 +105,21 @@ final class UpdateCheck: ObservableObject {
 
     /// The check itself, with no "is it due" gate — what the Settings button calls, because
     /// someone who presses a button meaning "check now" means now.
-    func check(version: String = UpdateCheck.currentVersion) async {
-        let payload = Self.payload(version: version)
-
+    ///
+    /// Returns whether the site answered at all, so a caller can tell "you are up to date" from
+    /// "could not reach it". This app ignores it today; the signature matches its siblings so
+    /// that the three copies differ only where they have to.
+    @discardableResult
+    func check(version: String = UpdateCheck.currentVersion) async -> Bool {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 10
-        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: Self.payload(version: version))
 
         guard let (data, response) = try? await fetch(request),
               (response as? HTTPURLResponse)?.statusCode == 200,
-              let release = try? JSONDecoder().decode(Release.self, from: data) else { return }
+              let release = try? JSONDecoder().decode(Release.self, from: data) else { return false }
 
         // Only a round trip that answered counts as "checked today". A failure should be retried
         // on the next launch rather than parked for twenty-four hours.
@@ -111,9 +128,10 @@ final class UpdateCheck: ObservableObject {
         guard Self.isNewer(release.version, than: version),
               defaults.string(forKey: dismissedKey) != release.version else {
             available = nil
-            return
+            return true
         }
         available = release
+        return true
     }
 
     /// Everything that leaves the machine, in one place so that reading this function is the
@@ -125,9 +143,7 @@ final class UpdateCheck: ObservableObject {
 
     /// Hides the banner for this version only. A later release says so again.
     func dismiss() {
-        if let version = available?.version {
-            defaults.set(version, forKey: dismissedKey)
-        }
+        if let version = available?.version { defaults.set(version, forKey: dismissedKey) }
         available = nil
     }
 

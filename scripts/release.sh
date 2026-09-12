@@ -123,6 +123,15 @@ git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null && {
 echo "✓ v$VERSION is unused"
 
 echo
+# The other apps carry a copy of UpdateCheck — three repositories, three build systems, nowhere
+# shared to put it. This is the one thing that duplication actually costs: nobody being told when
+# a fix reaches one copy and not the others. Skipped quietly when the file is not beside this app,
+# so a lone clone can still cut a release.
+if [[ -x ../check-shared-sources.py ]]; then
+  echo "== shared sources =========================================="
+  ../check-shared-sources.py || exit 1
+fi
+
 echo "── tests ─────────────────────────────────────────────────"
 # Never a release off an unproven tree. The forecast engine and the credential rotation both
 # have regression tests that fail if their invariants are broken; that is the whole point.
