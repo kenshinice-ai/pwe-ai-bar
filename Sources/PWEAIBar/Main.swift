@@ -10,6 +10,18 @@ enum PWEAIBarMain {
         // The same read the settings footer uses, so "which build is this" can be answered
         // without opening a window — and so the footer's claim is checkable from outside the
         // app, which a number that exists to settle that question needs to be.
+        // Every rendering flag below draws text, so the language has to be settled before any of
+        // them runs. The app itself does this in `applicationDidFinishLaunching`, which these
+        // paths return before ever reaching — so until 1.3.0 `--panel` and `--endurance` drew in
+        // whatever the Mac was set to, and the Chinese images on the website could only be made
+        // by hand. Which is why they were still showing a typeface the app had stopped using.
+        //
+        // `-language zh-Hans` is the same spelling every other app in the family takes.
+        if let i = CommandLine.arguments.firstIndex(of: "-language"),
+           i + 1 < CommandLine.arguments.count,
+           let chosen = Language(rawValue: CommandLine.arguments[i + 1]) {
+            Loc.language = chosen
+        }
         if CommandLine.arguments.contains("--version") {
             print(SettingsView.version)
             return
