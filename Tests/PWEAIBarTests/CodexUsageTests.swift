@@ -110,13 +110,76 @@ final class CodexUsageTests: XCTestCase {
         XCTAssertNil(d.latest, "a Codex turn must not become the newest turn the context reading uses")
     }
 
-    /// Unpriced is not free, and the interface says so — but it must not be invented either.
-    func testCodexModelsCarryNoInventedPrice() throws {
+    /// The rates the app charges Codex turns at, against the figures published for them.
+    ///
+    /// Written out here rather than read from the same file the code reads, so that this fails
+    /// if the table is edited to something else. It is the one number the whole trophy page is
+    /// built around, and the source it came from is recorded beside each rate in the file.
+    func testCodexModelsArePricedAtTheirPublishedRates() throws {
         let p = try pricing()
-        for model in ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna", "codex-auto-review"] {
-            XCTAssertEqual(p.cost(model: model, input: 1_000_000, output: 1_000_000,
-                                  cacheWrite: 0, cacheRead: 0), 0,
-                           "\(model) has no published rate in the table; a made-up one would poison the headline figure")
+        for (model, input, output) in [("gpt-6-astra", 10.0, 50.0),
+                                       ("gpt-5.6-sol", 4.0, 20.0),
+                                       ("gpt-5.6-luna", 0.2, 1.2),
+                                       ("gpt-5.3-codex", 1.75, 14.0)] {
+            let r = try XCTUnwrap(p.models[model], model)
+            XCTAssertEqual(r.input, input, accuracy: 0.0001, "\(model) input")
+            XCTAssertEqual(r.output, output, accuracy: 0.0001, "\(model) output")
+            // Cached input is a tenth of the input rate on every one of them, and a cache write
+            // is 1.25× from GPT-5.6 on — the same shape as Anthropic's, which is why the
+            // defaults carry it and the file does not restate it.
+            XCTAssertEqual(r.cacheReadMultiple, 0.10, accuracy: 0.0001, "\(model) cached input")
+            XCTAssertEqual(r.cacheWriteMultiple, 1.25, accuracy: 0.0001, "\(model) cache write")
+            XCTAssertNotNil(r.source, "\(model) must say where its rate came from")
         }
+    }
+
+    /// `codex-auto-review` stays unpriced on purpose.
+    ///
+    /// It is not a model OpenAI publishes a rate for — openai/codex#20981 is the open question
+    /// about exactly that — and the third-party catalogues that do quote one disagree with each
+    /// other by a factor of thirty. Counting it as nothing is visible in the interface and
+    /// admits what is not known; a guessed rate would quietly move the headline figure.
+    func testTheUnpublishedCodexAliasIsNotGivenAPrice() throws {
+        let p = try pricing()
+        XCTAssertNil(p.models["codex-auto-review"],
+                     "no published rate exists for this identifier, so the table must not carry one")
+        XCTAssertEqual(p.cost(model: "codex-auto-review", input: 1_000_000, output: 1_000_000,
+                              cacheWrite: 0, cacheRead: 0), 0)
+    }
+
+    /// Every rate in the shipped table can say where it came from — either its own source or the
+    /// file's. A table that mixes two vendors under one source line states something false.
+    func testEveryRateHasAProvenance() throws {
+        let p = try pricing()
+        let fileSource = try XCTUnwrap(p._source)
+        XCTAssertFalse(fileSource.isEmpty)
+        for (model, rate) in p.models where model.hasPrefix("gpt") {
+            XCTAssertNotEqual(rate.source, fileSource,
+                              "\(model) is not priced by the file's own source")
+            XCTAssertTrue(rate.source?.contains("openai") == true, "\(model) source")
+        }
+    }
+
+    /// The shipped table decodes at all.
+    ///
+    /// Not a formality. `load()` catches a decoding error and returns the six-model fallback, so
+    /// a single missing key in `pricing.json` does not lose one price — it loses every Anthropic
+    /// price too, silently, and the trophy's headline figure changes with nobody told. That is
+    /// what a row added without `cacheWriteMultiple` did, before the decoder learned to default.
+    func testTheShippedTableDecodesRatherThanFallingBack() throws {
+        let url = try XCTUnwrap(Bundle.resources.url(forResource: "pricing", withExtension: "json"))
+        let table = try JSONDecoder().decode(Pricing.self, from: Data(contentsOf: url))
+        XCTAssertEqual(Pricing.load().models.count, table.models.count,
+                       "load() fell back to the built-in table instead of reading the file")
+        XCTAssertGreaterThan(table.models.count, Pricing.fallback.models.count)
+    }
+
+    /// A row that states only the two prices gets the usual multiples rather than failing.
+    func testARowMayOmitTheUsualMultiples() throws {
+        let json = Data(#"{"models":{"x":{"input":3,"output":9}},"subscriptionMonthlyUSD":20}"#.utf8)
+        let table = try JSONDecoder().decode(Pricing.self, from: json)
+        let r = try XCTUnwrap(table.models["x"])
+        XCTAssertEqual(r.cacheWriteMultiple, 1.25)
+        XCTAssertEqual(r.cacheReadMultiple, 0.10)
     }
 }

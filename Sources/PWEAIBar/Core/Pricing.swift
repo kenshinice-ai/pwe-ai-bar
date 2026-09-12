@@ -16,6 +16,36 @@ struct Pricing: Codable {
         var output: Double
         var cacheWriteMultiple: Double = 1.25
         var cacheReadMultiple: Double = 0.10
+        /// Where this particular rate came from, when it is not the file's own `_source`.
+        ///
+        /// The table was Anthropic-only and one source line at the top covered it. It now also
+        /// carries OpenAI rates, and a single `_source` would have made the file state something
+        /// false about half its rows. Provenance belongs next to the number it describes — the
+        /// same rule the interface follows for every figure it shows.
+        var source: String?
+
+        /// Written out because Swift's synthesised decoder ignores property defaults: a missing
+        /// key is an error, not a default. Every row in the shipped file happened to spell both
+        /// multiples out, so nothing revealed that until a row was added without them — and the
+        /// failure is silent and total. `load()` catches the throw and returns `.fallback`, a
+        /// six-model table, so one absent key does not cost one price, it costs **all** of them
+        /// and quietly rewrites the figure the whole trophy page is built around.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            input = try c.decode(Double.self, forKey: .input)
+            output = try c.decode(Double.self, forKey: .output)
+            cacheWriteMultiple = try c.decodeIfPresent(Double.self, forKey: .cacheWriteMultiple) ?? 1.25
+            cacheReadMultiple = try c.decodeIfPresent(Double.self, forKey: .cacheReadMultiple) ?? 0.10
+            source = try c.decodeIfPresent(String.self, forKey: .source)
+        }
+
+        init(input: Double, output: Double, cacheWriteMultiple: Double = 1.25,
+             cacheReadMultiple: Double = 0.10, source: String? = nil) {
+            self.input = input; self.output = output
+            self.cacheWriteMultiple = cacheWriteMultiple
+            self.cacheReadMultiple = cacheReadMultiple
+            self.source = source
+        }
     }
 
     struct Plan: Codable {
