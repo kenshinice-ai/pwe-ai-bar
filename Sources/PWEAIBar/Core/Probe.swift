@@ -53,7 +53,7 @@ enum Probe {
 
         for dark in [true, false] {
             for mode in MenuBarMode.allCases {
-                let image = StatusIcon.render(snap, mode: mode, dark: dark)
+                let image = StatusIcon.render(snap, mode: mode, dark: dark, prefs: .shared)
                 let name = "icon-\(mode.rawValue)-\(dark ? "dark" : "light").png"
                 write(image, to: dir + "/" + name)
                 print("  \(name)  \(Int(image.size.width))×\(Int(image.size.height))")
@@ -426,7 +426,7 @@ enum Probe {
                   width: Theme.panelWidth, dark: dark, to: dir + "/stress-pace-\(tag).png")
         }
         for mode in MenuBarMode.allCases {
-            let image = StatusIcon.render(snap, mode: mode, dark: true)
+            let image = StatusIcon.render(snap, mode: mode, dark: true, prefs: .shared)
             write(image, to: dir + "/stress-icon-\(mode.rawValue)-dark.png")
             print("  stress-icon-\(mode.rawValue)-dark.png  \(Int(image.size.width))×\(Int(image.size.height))")
         }

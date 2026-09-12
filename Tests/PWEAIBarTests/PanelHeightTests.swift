@@ -279,13 +279,20 @@ final class MenuBarVisibilityTests: XCTestCase {
                        "not queried cannot mean shown; the bar had its own opinion about this")
     }
 
-    /// Structural: the menu-bar gate used to end in `|| (p != .claude && p != .codex)`, which let
-    /// the other five in whether or not they were switched on.
+    /// Structural: the menu-bar gate used to end in a clause matching every provider other than
+    /// the two named ones, which let the other five in whether or not they were switched on.
+    ///
+    /// The assertion used to name `Prefs.shared`, which pinned the wrong half of the sentence:
+    /// what matters is that the gate is `showsInMenuBar` and that nothing walks around it. Where
+    /// the settings come from is a separate question, and reading them from the global was its
+    /// own defect — it made the glyph render differently depending on whose Mac drew it.
     func testTheMenuBarGateHasNoEscapeHatch() throws {
         let icon = try String(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/PWEAIBar/App/StatusIcon.swift"), encoding: .utf8)
-        XCTAssertTrue(icon.contains("Prefs.shared.showsInMenuBar(p)"), "one gate")
+        XCTAssertTrue(icon.contains("showsInMenuBar(p)"), "one gate")
+        XCTAssertFalse(icon.contains("Prefs.shared.showsInMenuBar"),
+                       "the glyph takes its settings; reaching for the global makes it unrenderable twice")
         XCTAssertFalse(icon.contains("p != .claude && p != .codex"), "and no way round it")
     }
 

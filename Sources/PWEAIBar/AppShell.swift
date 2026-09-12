@@ -90,7 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // wallpaper independently of Light/Dark mode, so an app-level check paints black glyphs
         // onto a dark bar and the icon simply vanishes.
         let dark = button.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        let image = StatusIcon.render(snap, mode: Prefs.shared.menuBarMode, dark: dark)
+        let image = StatusIcon.render(snap, mode: Prefs.shared.menuBarMode, dark: dark, prefs: .shared)
         let sentence = snap.spoken(remaining: Prefs.shared.showRemaining)
         // Compared on what was actually drawn, not on a key naming the inputs. The glyph carries
         // a countdown, so a key would have to know about time — and a key that falls out of step

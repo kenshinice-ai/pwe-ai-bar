@@ -25,8 +25,28 @@ enum StatusIcon {
         var mark: Provider?
     }
 
-    static func render(_ snap: Snapshot, mode: MenuBarMode, dark: Bool) -> NSImage {
-        let remaining = Prefs.shared.showRemaining
+    /// The longest prefix of `text` that fits, with an ellipsis when anything was dropped.
+    /// Measured rather than counted: 「在等你」 and "waiting" are three characters and seven, and
+    /// occupy about the same width.
+    private static func fit(_ text: String, into room: CGFloat, font: NSFont) -> String {
+        guard room > 0 else { return "" }
+        func w(_ s: String) -> CGFloat { (s as NSString).size(withAttributes: [.font: font]).width }
+        if w(text) <= room { return text }
+        var cut = text
+        while !cut.isEmpty, w(cut + "…") > room { cut.removeLast() }
+        return cut.isEmpty ? "…" : cut + "…"
+    }
+
+    /// `prefs` is a parameter rather than a global read because this glyph is the one surface
+    /// nobody has to open to see, and until 1.3.0 it could not be rendered the same way twice: it
+    /// reached for `Prefs.shared`, so what a test drew depended on the settings of whichever Mac
+    /// ran it. The bug fixed alongside this — the attention line clipped to five characters —
+    /// lived here for that reason.
+    /// No default for `prefs`: a default argument is evaluated outside the actor, and more to
+    /// the point, the whole reason it is a parameter is that reaching for the global was the
+    /// problem. Every caller says which settings it is drawing.
+    static func render(_ snap: Snapshot, mode: MenuBarMode, dark: Bool, prefs: Prefs) -> NSImage {
+        let remaining = prefs.showRemaining
         let label: NSColor = dark ? .white : .black
         let font = Theme.nsNumber(11.5, 500)
 
@@ -44,12 +64,12 @@ enum StatusIcon {
             case .icon:
                 break
             case .compact:
-                for p in providers(snap) {
+                for p in providers(snap, prefs) {
                     segments.append(Segment(text: "", colour: tint(p.band, dark), mark: p.provider))
                     segments.append(Segment(text: Readout.text(p, remaining: remaining), colour: tint(p.band, dark)))
                 }
             case .full:
-                for p in providers(snap) {
+                for p in providers(snap, prefs) {
                     segments.append(Segment(text: "", colour: tint(p.band, dark), mark: p.provider))
                     // One countdown for the whole bar could only ever belong to one provider and
                     // the reader had no way to tell which. Per provider it is answerable — but
@@ -79,22 +99,28 @@ enum StatusIcon {
             s.mark != nil ? markW : (s.text as NSString)
                 .size(withAttributes: [.font: font]).width
         }
-        // A provider's `note` is free text from someone else's API. Unclipped, one long one
-        // pushes every other reading off the far end of the bar — and on a full menu bar macOS
-        // hides the whole item rather than shortening it, so an over-long label does not look
-        // untidy, it looks like the app has crashed.
-        segments = segments.map { seg in
-            guard seg.mark == nil, seg.text.count > 6 else { return seg }
-            return Segment(text: String(seg.text.prefix(5)) + "…", colour: seg.colour)
-        }
         var widths = segments.map(width)
         // Whole segments come off the tail before anything gets squeezed: half a reading is
         // worse than one fewer reading. The wing and the first provider always survive.
         let ceiling: CGFloat = 260
-        while segments.count > 2,
-              widths.reduce(0, +) + CGFloat(segments.count - 1) * 5 > ceiling {
+        func run(_ w: [CGFloat]) -> CGFloat { w.reduce(0, +) + CGFloat(max(w.count - 1, 0)) * gap }
+        while segments.count > 2, run(widths) > ceiling {
             segments.removeLast()
             widths.removeLast()
+        }
+        // Only if two segments still will not fit does anything get shortened, and then only the
+        // last of them, to the width that is actually left.
+        //
+        // What stood here was a flat rule: every text segment longer than six characters became
+        // five characters and an ellipsis. It was written for a provider `note` — free text from
+        // someone else's API — and that field no longer exists, so the only segment it could
+        // still reach was the attention line. The most important thing this app ever says was
+        // rendering as "Claud…", permanently, on the one surface nobody has to open.
+        if run(widths) > ceiling, let last = segments.last, last.mark == nil {
+            let room = ceiling - run(Array(widths.dropLast())) - gap
+            segments[segments.count - 1] = Segment(text: fit(last.text, into: room, font: font),
+                                                   colour: last.colour)
+            widths[widths.count - 1] = width(segments[segments.count - 1])
         }
         let run = widths.reduce(0, +) + CGFloat(max(segments.count - 1, 0)) * gap
         let total = lead + wingWidth + (segments.isEmpty ? 0 : gap + run) + trail
@@ -133,7 +159,7 @@ enum StatusIcon {
     }
 
     /// One row per tracked provider: whichever of its windows is currently tightest.
-    private static func providers(_ snap: Snapshot) -> [QuotaWindow] {
+    private static func providers(_ snap: Snapshot, _ prefs: Prefs) -> [QuotaWindow] {
         var out: [QuotaWindow] = []
         // One gate, and one that actually gates. The old condition ended in an `||` clause that
         // matched every provider other than the two named ones, which let the remaining five into
@@ -141,7 +167,7 @@ enum StatusIcon {
         // here. Worded without the expression on purpose — a structural test looks for it, and a
         // comment quoting the bug reads to that test exactly like the bug.
         for p in Provider.allCases {
-            guard Prefs.shared.showsInMenuBar(p) else { continue }
+            guard prefs.showsInMenuBar(p) else { continue }
             let mine = snap.windows.filter { $0.provider == p }
             if let worst = mine.max(by: { $0.strain < $1.strain }) { out.append(worst) }
         }
