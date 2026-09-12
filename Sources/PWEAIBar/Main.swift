@@ -23,13 +23,11 @@ enum PWEAIBarMain {
         }
         if let i = CommandLine.arguments.firstIndex(of: "--icon"),
            i + 1 < CommandLine.arguments.count {
-            Theme.registerFonts()
             Probe.icons(into: CommandLine.arguments[i + 1])
             return
         }
         if let i = CommandLine.arguments.firstIndex(of: "--panel"),
            i + 1 < CommandLine.arguments.count {
-            Theme.registerFonts()
             let dir = CommandLine.arguments[i + 1]
             let sem = DispatchSemaphore(value: 0)
             Task { @MainActor in await Probe.panels(into: dir); sem.signal() }
@@ -78,13 +76,11 @@ enum PWEAIBarMain {
         }
         if let i = CommandLine.arguments.firstIndex(of: "--endurance"),
            i + 1 < CommandLine.arguments.count {
-            Theme.registerFonts()
             Probe.endurance(into: CommandLine.arguments[i + 1])
             return
         }
         if let i = CommandLine.arguments.firstIndex(of: "--stress"),
            i + 1 < CommandLine.arguments.count {
-            Theme.registerFonts()
             Probe.stress(into: CommandLine.arguments[i + 1])
             return
         }

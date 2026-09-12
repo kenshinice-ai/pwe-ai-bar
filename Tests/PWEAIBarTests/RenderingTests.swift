@@ -25,7 +25,7 @@ final class RenderingTests: XCTestCase {
                           tracks: { (true, false) }, tracksExtra: { _ in false }, observe: { $0 })
         let output = ProcessInfo.processInfo.environment["PWEBAR_TEST_ARTIFACTS"].map { URL(fileURLWithPath: $0) } ?? space.root
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-        _ = NSApplication.shared; Theme.registerFonts()
+        _ = NSApplication.shared
         for stale in [false, true] {
             store.refresh(forceClaude: true)
             for _ in 0..<80 {
@@ -64,7 +64,6 @@ final class RenderingTests: XCTestCase {
         let output = ProcessInfo.processInfo.environment["PWEBAR_TEST_ARTIFACTS"].map { URL(fileURLWithPath: $0) } ?? space.root
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         _ = NSApplication.shared
-        Theme.registerFonts()
         for dark in [false, true] {
             try render(AnyView(settings), width: 380, dark: dark,
                        output: output.appendingPathComponent("settings-\(dark ? "dark" : "light").png"))

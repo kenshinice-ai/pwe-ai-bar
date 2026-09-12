@@ -75,28 +75,34 @@ enum Theme {
     /// Always the variant legal on the ground it lands on — the brand's AA rule, carried by type.
     static var accent:   Color { dyn(light: amberDeep, dark: amber) }
 
-    // MARK: Faces — Playfair Display for the brand voice, Inter for the interface.
-    // Both ship in the bundle as variable fonts, so the app never depends on installed fonts.
-    private static var registered = false
+    // MARK: Faces — the platform's own, at the platform's own sizes.
+    //
+    // Until 1.2.0 this bundled Inter and Playfair Display and drew the whole interface in them.
+    // Three things were wrong with that, and the third settles it:
+    //
+    //   · SF Pro changes shape with size — Text below 20 pt, Display above — and carries Apple's
+    //     own tracking tables. One static face is wrong at both ends of that range.
+    //   · A bundled face does not follow the reader's text-size setting.
+    //   · **Inter has no CJK glyphs.** Every Chinese string in this bilingual app was already
+    //     being drawn by the system's per-glyph fallback, so the "brand face" only ever reached
+    //     half the readers — and in a mixed line like 「Claude Code · 周窗口」 the Latin came from
+    //     Inter and the Han from PingFang, two families with no weight relationship — the weight
+    //     axis the old code set applied to Inter, never to whatever substituted for it. Asking for
+    //     the system font gets PingFang matched to SF Pro's weights, which is the behaviour the
+    //     brand standard §7.2 described at length and could not implement.
+    //
+    // Planning doc 17 §4.2 and doc 22 C5. Playfair survives in one place, and it is not this app:
+    // the Paradise Production seal on the film line.
 
-    static func registerFonts() {
-        guard !registered else { return }
-        for name in ["Inter", "PlayfairDisplay"] {
-            if let url = Bundle.resources.url(forResource: name, withExtension: "ttf") {
-                CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
-            }
+    /// The 100–900 numbers the call sites use, mapped onto the platform's named weights.
+    private static func nsWeight(_ weight: CGFloat) -> NSFont.Weight {
+        switch weight {
+        case ..<350:  return .light
+        case ..<450:  return .regular
+        case ..<550:  return .medium
+        case ..<650:  return .semibold
+        default:      return .bold
         }
-        registered = true
-    }
-
-    private static func variable(_ family: String, size: CGFloat, weight: CGFloat,
-                                 fallback: NSFont) -> NSFont {
-        let wght = 0x77676874 as CFNumber   // 'wght'
-        guard let base = NSFont(name: family, size: size) else { return fallback }
-        let desc = base.fontDescriptor.addingAttributes([
-            NSFontDescriptor.AttributeName(kCTFontVariationAttribute as String): [wght: weight]
-        ])
-        return NSFont(descriptor: desc, size: size) ?? fallback
     }
 
     /// §7.2: a Han label runs one point larger than its Latin counterpart.
@@ -104,34 +110,85 @@ enum Theme {
     /// §7.2: and at 0.4× the tracking. Spacing out 汉字 separates a word rather than opening a line.
     static func labelTracking(_ t: CGFloat) -> CGFloat { Loc.isCJK ? t * 0.4 : t }
 
+    /// All interface text.
     static func sans(_ size: CGFloat, _ weight: CGFloat = 400) -> Font {
-        Font(variable("Inter", size: size, weight: weight,
-                      fallback: .systemFont(ofSize: size)))
+        Font(NSFont.systemFont(ofSize: size, weight: nsWeight(weight)))
     }
 
-    static func serif(_ size: CGFloat, _ weight: CGFloat = 500) -> Font {
-        Font(variable("Playfair Display", size: size, weight: weight,
-                      fallback: .systemFont(ofSize: size)))
+    /// The wordmark, and anything speaking as the product rather than as a readout.
+    ///
+    /// Named for its job, not its face. It was `serif` while it loaded Playfair Display; a helper
+    /// named after the file it opens starts lying the moment the file changes.
+    static func wordmark(_ size: CGFloat, _ weight: CGFloat = 600) -> Font {
+        Font(NSFont.systemFont(ofSize: size, weight: nsWeight(weight)))
     }
 
     /// Figures that change while you watch. Tabular by construction, so nothing jitters.
     static func figures(_ size: CGFloat, _ weight: CGFloat = 600) -> Font {
-        sans(size, weight).monospacedDigit()
+        Font(NSFont.monospacedDigitSystemFont(ofSize: size, weight: nsWeight(weight)))
     }
 
+    /// The menu-bar glyph's figures. Drawn with AppKit, so it needs the `NSFont` itself.
     static func nsNumber(_ size: CGFloat, _ weight: CGFloat = 500) -> NSFont {
-        let base = variable("Inter", size: size, weight: weight,
-                            fallback: .monospacedDigitSystemFont(ofSize: size, weight: .medium))
-        let desc = base.fontDescriptor.addingAttributes([
-            .featureSettings: [[NSFontDescriptor.FeatureKey.typeIdentifier: kNumberSpacingType,
-                                NSFontDescriptor.FeatureKey.selectorIdentifier: kMonospacedNumbersSelector]]
-        ])
-        return NSFont(descriptor: desc, size: size) ?? base
+        .monospacedDigitSystemFont(ofSize: size, weight: nsWeight(weight))
+    }
+}
+
+/// Press feedback.
+///
+/// Ten pressable things in this app had none: you clicked, and nothing acknowledged the click
+/// until the effect arrived — which for a refresh is a second later and for a pin is never,
+/// because the change is a one-pixel underline somewhere else. The moment that gap appears, a
+/// surface stops feeling direct, so the acknowledgement belongs on the press itself.
+/// `configuration.isPressed` is true from pointer-down, which is exactly the moment wanted.
+///
+/// Two shapes, because a control and a row want different things. A small control scales, which
+/// is the platform's own idiom for a button being pushed. A full-width row scales badly — the
+/// whole band shrinks away from its own edges and the eye reads it as the panel moving — so it
+/// washes instead, which is what a selected table row does.
+///
+/// Under reduced motion both wash: that setting asks for less movement, not less feedback.
+struct PressStyle: ButtonStyle {
+    enum Shape { case control, row }
+    var shape: Shape = .control
+
+    func makeBody(configuration: Configuration) -> some View {
+        Body(shape: shape, pressed: configuration.isPressed, label: configuration.label)
+    }
+
+    /// Which of the two acknowledgements applies. A function rather than an expression inside the
+    /// view, because the interesting case is the one a screenshot cannot show: with reduced
+    /// motion on, `scales` is false for both shapes and the wash has to take over. If it did not,
+    /// asking for less movement would silently buy you no feedback at all.
+    static func scales(shape: Shape, reduceMotion: Bool) -> Bool {
+        shape == .control && !reduceMotion
+    }
+
+    /// A real view, so that `@Environment` is actually observed — `makeBody` is not a `body`,
+    /// and an environment value read directly there does not update when it changes.
+    private struct Body<Label: View>: View {
+        let shape: Shape
+        let pressed: Bool
+        let label: Label
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        private var scales: Bool { PressStyle.scales(shape: shape, reduceMotion: reduceMotion) }
+
+        var body: some View {
+            label
+                .scaleEffect(pressed && scales ? 0.97 : 1)
+                .background(
+                    RoundedRectangle(cornerRadius: shape == .row ? 0 : 4, style: .continuous)
+                        .fill(Theme.text.opacity(pressed && !scales ? 0.07 : 0))
+                )
+                // 120 ms: long enough to be seen, short enough that the release never waits for it.
+                .animation(.easeOut(duration: 0.12), value: pressed)
+        }
     }
 }
 
 extension View {
-    /// The brand's small caps label: Inter Semibold, +0.18em tracking, upper case.
+    /// The brand's small caps label: Semibold, +0.18em tracking, upper case.
     ///
     /// The tracking is a **Latin** rule — §6 of the brand standard — and §7.2 carves out the
     /// exception: Han runs one point larger and at 0.4× the tracking, because letter-spacing

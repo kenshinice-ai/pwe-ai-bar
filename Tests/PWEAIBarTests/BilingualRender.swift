@@ -7,7 +7,6 @@ final class BilingualRenderTests: XCTestCase {
     @MainActor func testRenderBothLanguages() throws {
         let out = URL(fileURLWithPath: ProcessInfo.processInfo.environment["OUT"] ?? NSTemporaryDirectory())
         _ = NSApplication.shared
-        Theme.registerFonts()
         for lang in [Language.en, .zhHans] {
             Loc.language = lang
             let space = try TestSpace()

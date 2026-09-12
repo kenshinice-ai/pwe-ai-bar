@@ -222,8 +222,6 @@ and the slogan. Fork it, change it, redistribute it — but a redistributed buil
 wing or use the PWE or Paradise Production names in a way that suggests it is the official release.
 Replace `Sources/PWEAIBar/Brand/` and the application name with your own.
 
-The bundled Inter and Playfair Display fonts are not ours to license; both are SIL OFL 1.1.
-
 The fourth in PWE Studio's menu-bar family, after Loan Bar, Lumen Bar and MAC MONITOR — all at
 [pwestudio.site](https://pwestudio.site).
 

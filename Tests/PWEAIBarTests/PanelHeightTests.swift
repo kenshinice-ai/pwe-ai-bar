@@ -62,7 +62,6 @@ final class PanelHeightTests: XCTestCase {
         store.injectForTesting(snap)
 
         _ = NSApplication.shared
-        Theme.registerFonts()
         // Read the height through the channel the app actually uses. `view.desiredHeight` on a
         // local copy of the struct is always nil: the measurement lives in SwiftUI's storage,
         // not in the value handed to the hosting controller.
@@ -188,7 +187,6 @@ final class SettingsGroupTests: XCTestCase {
     /// and fully expanded it must still be capped by the screen rather than by taste.
     @MainActor func testTheDefaultStateFitsWithoutScrollingAndExpandedIsCappedByTheScreen() throws {
         _ = NSApplication.shared
-        Theme.registerFonts()
         Loc.language = .en
         let space = try TestSpace()
         let prefs = Prefs(defaults: space.defaults)
@@ -221,7 +219,6 @@ final class SettingsWindowTests: XCTestCase {
 
     @MainActor func testTheSettingsWindowOpensAtAUsableHeightAndShrinksWhenGroupsCollapse() throws {
         _ = NSApplication.shared
-        Theme.registerFonts()
         Loc.language = .en
         let space = try TestSpace()
         let prefs = Prefs(defaults: space.defaults)

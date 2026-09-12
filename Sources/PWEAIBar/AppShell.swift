@@ -23,11 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var escapeMonitor: Any?
 
     func applicationDidFinishLaunching(_ n: Notification) {
-        // The faces have to be in the process font list before the first view is laid out, or
-        // the whole first frame renders in the system fallback.
         // Before the first view is built, or the first frame renders in the wrong language.
         Loc.language = Prefs.shared.language
-        Theme.registerFonts()
         NSApp.setActivationPolicy(.accessory)   // menu bar only, no Dock icon
 
         buildStatusItem()

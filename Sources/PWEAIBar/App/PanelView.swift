@@ -159,7 +159,7 @@ struct PanelView: View {
         HStack(spacing: Theme.s2) {
             WingView(solid: true, tint: Theme.accent)
                 .frame(width: 15, height: 15 / BrandMark.aspect)
-            Text("PWE AI Bar").font(Theme.serif(15)).foregroundStyle(Theme.text)
+            Text("PWE AI Bar").font(Theme.wordmark(15)).foregroundStyle(Theme.text)
             Spacer()
             // The dot means "these numbers are older than they look". With no numbers at all
             // it means nothing, and the section's own line already says what is wrong.
@@ -171,7 +171,7 @@ struct PanelView: View {
             Button(action: onSettings) {
                 Image(systemName: "gearshape").font(.system(size: 11))
             }
-            .buttonStyle(.plain).foregroundStyle(Theme.text2).accessibilityLabel(L("panel.settings.a11y", "Settings"))
+            .buttonStyle(PressStyle()).foregroundStyle(Theme.text2).accessibilityLabel(L("panel.settings.a11y", "Settings"))
         }
         .padding(.horizontal, Theme.s3).padding(.vertical, 11)
     }
@@ -271,7 +271,7 @@ struct PanelView: View {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle(shape: .row))
         .accessibilityLabel(snap.waiting > 1
             ? String(format: L("panel.waiting.many", "%d sessions are waiting on you"), snap.waiting)
             : String(format: L("panel.waiting.provider", "%@ is waiting on your reply"), e.provider.name))
@@ -380,7 +380,7 @@ struct PanelView: View {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle(shape: .row))
 
             ForEach(rows(for: p)) { w in
                 windowRow(w)
@@ -608,13 +608,23 @@ struct PanelView: View {
             .padding(.horizontal, Theme.s3).padding(.vertical, 11)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle(shape: .row))
     }
 
+    /// One of the three summary figures along the bottom: days active, equivalent spend, return.
+    ///
+    /// Ink, not amber. These three were amber whatever they said — 0 days and $0.00 arrived in
+    /// the same colour as a quota about to run out, two rows above. Amber in this app means one
+    /// thing, and it is the thing at the top of this file: **there is something here you need to
+    /// look at.** A figure that is simply true is set in ink like every other figure.
+    ///
+    /// The label goes through `brandLabel`, which is where the Latin/Han tracking split already
+    /// lives. Hand-written `.tracking(1.7)` spaced 「活 跃」 and 「回 本」 apart — a Latin small-caps
+    /// value applied to Han, which pulls a word into pieces rather than opening a line.
     private func score(_ k: String, _ v: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(k).font(Theme.sans(9.5, 600)).tracking(1.7).foregroundStyle(Theme.text2)
-            Text(v).font(Theme.figures(16)).foregroundStyle(Theme.accent)
+            Text(k).brandLabel(9.5).foregroundStyle(Theme.text2)
+            Text(v).font(Theme.figures(16)).foregroundStyle(Theme.text)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -626,7 +636,7 @@ struct PanelView: View {
                             snap.trophy.days, money(snap.trophy.equivalentUSD)))
                     .font(Theme.sans(10)).foregroundStyle(Theme.text2)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle(shape: .row))
             Spacer()
             Text(String(format: L("panel.updated", "updated %@"), ago(snap.updatedAt))).font(Theme.sans(10)).foregroundStyle(Theme.text2)
         }
@@ -683,7 +693,7 @@ struct PanelView: View {
                         .padding(.bottom, 3)
                         .overlay(alignment: .bottom) { underline(pinned == p) }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressStyle())
                 .help(p.name)
                 .accessibilityLabel(pinned == p ? String(format: L("panel.selected", "%@, selected"), p.name) : p.name)
             }
@@ -699,7 +709,7 @@ struct PanelView: View {
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .overlay(Capsule().stroke(Theme.hairline, lineWidth: 1))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             .help(L("panel.readout.help", "Switch how the percentage is read: remaining / used"))
             .accessibilityLabel(String(format: L("panel.readout.a11y", "Percentage basis, currently %@"),
                                        prefs.showRemaining ? Readout.label.remaining : Readout.label.used))
@@ -714,7 +724,7 @@ struct PanelView: View {
                 .padding(.bottom, 3)
                 .overlay(alignment: .bottom) { underline(selected) }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
         .accessibilityLabel(selected ? String(format: L("panel.selected", "%@, selected"), L("panel.auto", "Auto"))
                                      : L("panel.auto", "Auto"))
     }

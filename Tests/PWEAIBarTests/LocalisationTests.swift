@@ -97,9 +97,6 @@ final class ResourceBundleTests: XCTestCase {
     /// `build-app.sh --selfcheck` proves they travel.
     func testEveryLaunchResourceResolvesThroughTheOneAccessor() throws {
         let b = Bundle.resources
-        for face in ["Inter", "PlayfairDisplay"] {
-            XCTAssertNotNil(b.url(forResource: face, withExtension: "ttf"), face)
-        }
         XCTAssertNotNil(b.url(forResource: "pricing", withExtension: "json"))
         XCTAssertNotNil(b.url(forResource: "pwe-ai-bar-hook", withExtension: "sh"))
         let names = try FileManager.default.contentsOfDirectory(atPath: XCTUnwrap(b.resourceURL).path)
@@ -144,5 +141,31 @@ final class NoTerminalHomeworkTests: XCTestCase {
         XCTAssertTrue(tool.contains("en.lproj") && tool.contains("write(toFile:"),
                       "if loccheck stops generating en.lproj, this test's premise is gone and the "
                       + "handoff needs correcting with it")
+    }
+
+    /// What the settings footer actually shows when `Bundle.main` is not this app.
+    ///
+    /// The accessor's comment claimed a test host returns nil, so the dash would show. It does
+    /// not: xctest has a `CFBundleShortVersionString` of its own, and the footer printed that —
+    /// a number with nothing to do with this app, in the one place on screen whose whole job is
+    /// to answer "which build am I running".
+    func testTheVersionIsThisAppsOrAnAdmittedUnknown() {
+        let host = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        XCTAssertNotNil(host, "the premise of this test: the host does have a version of its own")
+        XCTAssertNotEqual(SettingsView.version, host,
+                          "the footer is showing the test host's version as if it were ours")
+        XCTAssertEqual(SettingsView.version, "—", "not this app, so it must admit it does not know")
+    }
+
+    /// The identifier the accessor above compares against is written in two places — here in
+    /// Swift and in `build-app.sh`, which is what actually stamps the bundle. If they drift, the
+    /// version silently becomes a dash in the shipped app and nobody finds out until a
+    /// screenshot.
+    func testTheBundleIdentifierMatchesTheOneTheBuildStamps() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let script = try String(contentsOf: root.appendingPathComponent("scripts/build-app.sh"), encoding: .utf8)
+        XCTAssertTrue(script.contains("BUNDLE_ID=\"" + SettingsView.bundleID + "\""),
+                      "build-app.sh stamps a different identifier than SettingsView expects")
     }
 }

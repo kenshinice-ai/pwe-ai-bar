@@ -244,7 +244,7 @@ struct SettingsView: View {
                     Text(verbatim: "→ " + release.version)
                         .font(Theme.figures(11)).foregroundStyle(Theme.accent)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressStyle())
                 .help(L("settings.updates.download", "Download"))
             }
             Spacer()
@@ -317,11 +317,25 @@ struct SettingsView: View {
     private static let repository = URL(string: "https://github.com/kenshinice-ai/pwe-ai-bar")!
 
     /// Falls back to a dash rather than to "1.0.0" or an empty string: a wrong version on screen
-    /// is worse than an admitted unknown, because it is the thing being trusted to settle a
-    /// question. Nil is what a test host returns, never the shipped app.
+    /// is worse than an admitted unknown, because this line is the thing being trusted to settle
+    /// the question "is the fix in the copy I am looking at".
+    ///
+    /// It asks whether `Bundle.main` **is this app**, not merely whether it has a version. The
+    /// old test was presence, on the stated premise that a test host returns nil — it does not.
+    /// xctest has a version of its own, and the footer printed it: the render harness that
+    /// produces the screenshots for the website was drawing "PWE AI Bar 16.0", which is the
+    /// Xcode version and has nothing to do with this app. A published screenshot is exactly how
+    /// a wrong number reaches somebody.
     static var version: String {
-        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "—"
+        guard Bundle.main.bundleIdentifier == bundleID,
+              let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        else { return "—" }
+        return v
     }
+
+    /// Kept next to the accessor that needs it rather than derived from `Bundle.main`, which is
+    /// the thing being checked.
+    static let bundleID = "com.paradiseproduction.pweaibar"
 
     /// Broken out of `content` for the same reason it is the messiest section on the page: a
     /// status line, a field, two buttons and two paragraphs, none of which are the same shape.
@@ -578,7 +592,7 @@ struct SettingsView: View {
                 .padding(.horizontal, Theme.s3)
                 .padding(.top, Theme.s4).padding(.bottom, open ? Theme.s2 : Theme.s3)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle(shape: .row))
             .accessibilityAddTraits(.isHeader)
             .accessibilityValue(open ? L("settings.group.open", "expanded")
                                      : L("settings.group.closed", "collapsed"))

@@ -194,8 +194,6 @@ open "build/PWE AI Bar.app"
 Paradise Production 的名字让人以为那是官方版本 —— 把 `Sources/PWEAIBar/Brand/`
 和应用名换成你自己的。
 
-内置的 Inter 与 Playfair Display 两个字体不归我们授权，它们是 SIL OFL 1.1。
-
 PWE Studio 菜单栏家族的第四位，接在 Loan Bar、Lumen Bar、MAC MONITOR 之后 ——
 全部在 [pwestudio.site](https://pwestudio.site)。
 

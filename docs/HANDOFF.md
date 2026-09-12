@@ -185,7 +185,8 @@ SwiftPM 给**可执行**目标生成的 `Bundle.module` 按两条路径找资源
 `Bundle.main.bundleURL`（.app 的**根目录**），再退回**编译时写死的绝对路径**
 `…/.build/arm64-apple-macosx/release/PWEAIBar_PWEAIBar.bundle`。而 `build-app.sh` 把资源包放在
 `Contents/Resources`（.app 该放的地方），所以第一条在任何机器上都失败，第二条只在有源码检出的
-那台机器上成立。首次触碰是 `Theme.registerFonts()` → `fatalError`。**构建机永远发现不了。**
+那台机器上成立。首次触碰是当时的 `Theme.registerFonts()` → `fatalError`。**构建机永远发现不了。**
+（1.2.0 换成系统字体后已经没有这个函数了;留着这段是因为坑在资源解析上,不在字体上。）
 
 - `Bundle.resources`（`Core/Resources.swift`）是唯一的访问器：`Contents/Resources` → .app 根 →
   `.module` 兜底（保留只为 `swift run` / `swift test`）。一条结构测试禁止其他源码碰生成的访问器。
@@ -420,6 +421,7 @@ docs/
 - **文档和提交信息用中文，代码注释用英文。** 注释解释「为什么」和「上一版为什么错」，不解释「做了什么」。
 - 面板里不用缩写；菜单栏里才靠剪影省地方。**菜单栏静态，不做动画。**
 - 品牌色：navy `#0E1729`、amber `#F5B335`（**只用于深底**）、deep amber `#A16207`（**只用于浅底**）、
-  paper `#F7F5F2`、ink `#0C0A09`。字体 Playfair Display + Inter。排版按 φ = 1.618034。
+  paper `#F7F5F2`、ink `#0C0A09`。**字体是系统字体**(1.2.0 起;Inter 没有汉字,双语界面里它
+  从来只覆盖了一半读者 —— 见 `Brand/Theme.swift` 顶部)。间距按 φ = 1.618034,字号不按。
 - 提交信息第一行是一句人话，不是 `feat:`。正文写清楚**为什么这么改**，以及改之前是怎么错的。
 - 一次改动配一个能失败的测试。渲染类的改动跑一遍 `--endurance` / `--panel` 用眼睛看过再提交。

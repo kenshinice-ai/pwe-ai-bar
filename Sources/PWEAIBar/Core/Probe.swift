@@ -291,7 +291,6 @@ enum Probe {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         app.finishLaunching()
-        Theme.registerFonts()
         let store = Store()
         store.start()
 
@@ -641,9 +640,6 @@ extension Probe {
         func check(_ label: String, _ found: Bool) {
             print("  " + label.padding(toLength: 24, withPad: " ", startingAt: 0) + (found ? "ok" : "MISSING"))
             ok = ok && found
-        }
-        for face in ["Inter", "PlayfairDisplay"] {
-            check("font \(face)", bundle.url(forResource: face, withExtension: "ttf") != nil)
         }
         check("pricing.json", bundle.url(forResource: "pricing", withExtension: "json") != nil)
         check("hook script", bundle.url(forResource: "pwe-ai-bar-hook", withExtension: "sh") != nil)
