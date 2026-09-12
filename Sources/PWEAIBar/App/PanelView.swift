@@ -19,6 +19,10 @@ struct PanelView: View {
     var onSettings: () -> Void
     var onOpen: (Provider) -> Void
     var onEnableQuota: () -> Void
+    /// Defaulted so every existing call site and test keeps compiling without knowing this
+    /// strip exists. Declared here rather than at the end because a struct's memberwise
+    /// initialiser takes its arguments in declaration order, and the shell passes it here.
+    @ObservedObject var updates: UpdateCheck = UpdateCheck()
     /// The usable height of the screen the panel will hang from.
     ///
     /// A closure, and supplied by whoever owns the status item, because `NSScreen.main` is the
@@ -72,6 +76,12 @@ struct PanelView: View {
             // Header and footer stay put. The gear is the only way into settings and the footer
             // carries the trophy link and how fresh the reading is; neither may scroll away.
             header.measuring(ChromeHeight.self)
+            // Above the fold and outside the scroller, because both things it can say are
+            // things you would otherwise never find out.
+            if showsUpdateStrip {
+                rule
+                updateStrip.measuring(ChromeHeight.self)
+            }
             rule
             scroller
             rule
@@ -164,6 +174,50 @@ struct PanelView: View {
             .buttonStyle(.plain).foregroundStyle(Theme.text2).accessibilityLabel(L("panel.settings.a11y", "Settings"))
         }
         .padding(.horizontal, Theme.s3).padding(.vertical, 11)
+    }
+
+    // MARK: Updates
+
+    /// One strip with two jobs, and it is nil the rest of the time.
+    ///
+    /// Before anyone has been asked, it asks — one line, in the place already being looked at,
+    /// rather than a dialog on launch. After that it only ever reappears to say a new version
+    /// exists, and it says it with a button rather than a command: someone who has to be told to
+    /// open Terminal and type `brew upgrade` is someone who stays on the version with the bug.
+    private var showsUpdateStrip: Bool {
+        updates.available != nil || prefs.updateChecks == nil
+    }
+
+    @ViewBuilder private var updateStrip: some View {
+        if let release = updates.available {
+            // One key with a placeholder, not two around a number: 「1.2.0 版已发布」 puts the
+            // version where English puts the word "Version", so a concatenated sentence can only
+            // be right in one language.
+            strip(String(format: L("panel.update.ready", "Version %@ is out"), release.version),
+                  primary: (L("panel.update.download", "Download"),
+                            { NSWorkspace.shared.open(UpdateCheck.downloadPage) }),
+                  secondary: (L("panel.update.later", "Later"), { updates.dismiss() }))
+        } else if prefs.updateChecks == nil {
+            strip(L("panel.update.ask", "Tell you when there is a new version?"),
+                  primary: (L("panel.update.yes", "Yes"), {
+                      prefs.updateChecks = true
+                      Task { await updates.check() }
+                  }),
+                  secondary: (L("panel.update.no", "No"), { prefs.updateChecks = false }))
+        }
+    }
+
+    private func strip(_ text: String,
+                       primary: (String, () -> Void),
+                       secondary: (String, () -> Void)) -> some View {
+        HStack(spacing: Theme.s2) {
+            Text(text).font(Theme.sans(11.5)).foregroundStyle(Theme.text)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: Theme.s1)
+            Button(secondary.0, action: secondary.1).buttonStyle(.link).font(Theme.sans(11))
+            Button(primary.0, action: primary.1).font(Theme.sans(11))
+        }
+        .padding(.horizontal, Theme.s3).padding(.vertical, 9)
     }
 
     // MARK: The one big number

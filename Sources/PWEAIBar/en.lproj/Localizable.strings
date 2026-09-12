@@ -164,6 +164,12 @@
 "panel.stale.a11y" = "The reading may be out of date";
 "panel.stale.help" = "Showing the last figure that was read successfully";
 "panel.staleTag" = "stale";
+"panel.update.ask" = "Tell you when there is a new version?";
+"panel.update.download" = "Download";
+"panel.update.later" = "Later";
+"panel.update.no" = "No";
+"panel.update.ready" = "Version %@ is out";
+"panel.update.yes" = "Yes";
 "panel.updated" = "updated %@";
 "panel.waiting.many" = "%d sessions are waiting on you";
 "panel.waiting.one" = "Waiting on your reply";
@@ -257,6 +263,13 @@
 "settings.token.verifying" = "Verifying…";
 "settings.tools" = "Tools";
 "settings.tracking.note" = "Switched off is never queried. Menu bar decides which of the ones you do query get a place up there — with eight of them the bar runs out of room long before you run out of interest.";
+"settings.updates" = "Updates";
+"settings.updates.available" = "Version %@";
+"settings.updates.download" = "Download";
+"settings.updates.later" = "Later";
+"settings.updates.note" = "Asks pwestudio.site once a day whether a newer version exists. It sends three things and nothing else: that this is PWE AI Bar, which version it is, and which macOS it runs on. No account, no tokens, no usage figures, and nothing that identifies the machine.";
+"settings.updates.now" = "Check now";
+"settings.updates.tell" = "Tell me when there is a new version";
 "span.ages" = "a long time";
 "span.day" = "d";
 "span.dayPlus" = "d+";

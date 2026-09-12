@@ -302,3 +302,17 @@
 "settings.col.menuBar" = "菜单栏";
 "settings.quit" = "退出";
 "settings.tools" = "工具";
+/* Updates — the one thing this app asks another server about itself. */
+"panel.update.ask" = "有新版本时告诉你?";
+"panel.update.yes" = "好";
+"panel.update.no" = "不用";
+"panel.update.ready" = "%@ 版已发布";
+"panel.update.download" = "下载";
+"panel.update.later" = "以后";
+"settings.updates" = "更新";
+"settings.updates.tell" = "有新版本时告诉我";
+"settings.updates.available" = "%@ 版";
+"settings.updates.download" = "下载";
+"settings.updates.later" = "以后";
+"settings.updates.now" = "现在检查";
+"settings.updates.note" = "每天向 pwestudio.site 问一次有没有更新的版本。它只发三样东西:这是 PWE AI Bar、它是哪个版本、运行在哪个 macOS 上。不发账号、不发令牌、不发用量,也不发任何能认出这台机器的东西。";

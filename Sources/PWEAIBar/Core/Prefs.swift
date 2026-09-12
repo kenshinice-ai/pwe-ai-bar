@@ -152,6 +152,17 @@ final class Prefs: ObservableObject {
         didSet { d.set(launchAtLogin, forKey: "launchAtLogin"); applyLoginItem() }
     }
 
+    /// Whether the app may ask the site if there is a newer version. Three states, not two:
+    /// `nil` means nobody has been asked yet, which is what the panel's one-line question reads
+    /// to decide whether to appear. Storing "off" and "not asked yet" as the same `false` would
+    /// either ask forever or never ask at all.
+    @Published var updateChecks: Bool? {
+        didSet {
+            if let updateChecks { d.set(updateChecks, forKey: "updateChecks") }
+            else { d.removeObject(forKey: "updateChecks") }
+        }
+    }
+
     init(defaults: UserDefaults = .standard) {
         d = defaults
         // Default to the dense bar. Giving everything up front and letting people dial back is
@@ -186,6 +197,7 @@ final class Prefs: ObservableObject {
         sound       = d.object(forKey: "sound")       as? Bool ?? true
         pushURL     = d.string(forKey: "pushURL") ?? ""
         launchAtLogin = d.object(forKey: "launchAtLogin") as? Bool ?? false
+        updateChecks = d.object(forKey: "updateChecks") as? Bool
     }
 
     /// True only when a screen actually has a notch. An option that cannot work must be visibly

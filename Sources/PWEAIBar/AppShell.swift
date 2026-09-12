@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var trophyWindow: NSWindow?
     private var settingsWindow: NSWindow?
     private let store = Store()
+    private let updates = UpdateCheck()
     private var appearanceObserver: NSKeyValueObservation?
     private var outsideMonitor: Any?
     private var prefsWatch: AnyCancellable?
@@ -39,6 +40,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         store.onSnapshot = { [weak self] snap in self?.redraw(snap) }
         store.start()
+
+        // After the interface is up, never before it: an update check is a convenience, and a
+        // convenience must not be on the path between launching and seeing a number.
+        Task { [weak self] in
+            await self?.updates.checkIfDue(enabled: Prefs.shared.updateChecks)
+        }
 
         // `.old`/`.new`, and only when the name actually changed. Without that this is a loop:
         // `redraw` assigns `button.image`, assigning it makes AppKit re-resolve the button's
@@ -142,6 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   onSettings: { [weak self] in self?.showSettings() },
                   onOpen: { [weak self] p in self?.activate(p) },
                   onEnableQuota: { [weak self] in Task { _ = await self?.store.enableRealQuota() } },
+                  updates: updates,
                   // The screen the status item is actually on. `NSScreen.main` is the screen
                   // holding the key window, which for a menu-bar app is whatever other app is
                   // frontmost — with a laptop plus an external display that is routinely the
@@ -282,6 +290,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return "" }
                 return await self.store.enableRealQuota()
             },
+            updates: updates,
             onHeight: { [weak self, weak w] height in
                 guard let self, let w else { return }
                 w.setContentHeight(height, animate: self.settingsSizedOnce)

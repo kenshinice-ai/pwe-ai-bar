@@ -54,16 +54,20 @@ struct SettingsView: View {
     @State private var keychainNote: String = ""
     @State private var keychainBusy = false
     @StateObject private var tokenEditor: TokenEditor
+    @ObservedObject var updates: UpdateCheck
+    @State private var checking = false
 
     init(installHooks: @escaping () -> Bool,
          saveToken: @escaping (String) async -> ClaudeProvider.TokenUpdate,
          enableRealQuota: @escaping () async -> String, prefs: Prefs? = nil,
          tokenEditor: TokenEditor? = nil, hookInstalled: Bool? = nil,
+         updates: UpdateCheck? = nil,
          usableHeight: @escaping () -> CGFloat? = { NSScreen.main?.visibleFrame.height },
          onHeight: @escaping (CGFloat) -> Void = { _ in }) {
         self.installHooks = installHooks; self.saveToken = saveToken; self.enableRealQuota = enableRealQuota
         self.usableHeight = usableHeight; self.onHeight = onHeight
         self.prefs = prefs ?? .shared
+        self.updates = updates ?? UpdateCheck()
         // The flag, not the keychain. Reading the item itself here is a synchronous trip to
         // securityd inside a view initialiser — measured on this machine at up to 84 s, which
         // is a settings window that appears to hang on open.
@@ -216,6 +220,7 @@ struct SettingsView: View {
                     }
                 }
                 switchRow(L("settings.launchAtLogin", "Launch at login"), $prefs.launchAtLogin)
+                row(L("settings.updates", "Updates")) { updatesRow }
                 row(L("settings.subscription", "Subscription price")) { subscription }
             }
             footer
@@ -230,6 +235,18 @@ struct SettingsView: View {
         HStack(spacing: 6) {
             Text(verbatim: "PWE AI Bar").font(Theme.sans(11)).foregroundStyle(Theme.text2)
             Text(verbatim: Self.version).font(Theme.figures(11)).foregroundStyle(Theme.text)
+            // The one place the version is already read to answer "is the fix in this copy". If
+            // there is a newer one, that is the same question and this is where it gets answered.
+            if let release = updates.available {
+                Button {
+                    NSWorkspace.shared.open(UpdateCheck.downloadPage)
+                } label: {
+                    Text(verbatim: "→ " + release.version)
+                        .font(Theme.figures(11)).foregroundStyle(Theme.accent)
+                }
+                .buttonStyle(.plain)
+                .help(L("settings.updates.download", "Download"))
+            }
             Spacer()
             Button { NSWorkspace.shared.open(Self.repository) } label: {
                 Text(verbatim: "GitHub").font(Theme.sans(11))
@@ -242,6 +259,59 @@ struct SettingsView: View {
                 .font(Theme.sans(11))
         }
         .padding(.horizontal, Theme.s3).padding(.top, Theme.s3).padding(.bottom, Theme.s4)
+    }
+
+    /// The updates control.
+    ///
+    /// Off until it is turned on, and the note says exactly what leaves the machine rather than
+    /// linking to a policy — three fields is short enough to print, and a promise you can read in
+    /// place is worth more than one you have to go and look up.
+    @ViewBuilder private var updatesRow: some View {
+        VStack(alignment: .leading, spacing: Theme.s2) {
+            HStack(spacing: 7) {
+                Text(L("settings.updates.tell", "Tell me when there is a new version"))
+                    .font(Theme.sans(12)).foregroundStyle(Theme.text)
+                Spacer(minLength: Theme.s1)
+                Toggle("", isOn: Binding(get: { prefs.updateChecks == true },
+                                         set: { on in
+                                             prefs.updateChecks = on
+                                             // Answer the question it was just asked. Turning
+                                             // this on and seeing nothing happen reads as a
+                                             // switch that did not work.
+                                             if on { Task { await updates.check() } }
+                                         }))
+                    .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+            }
+            if let release = updates.available {
+                HStack(spacing: 7) {
+                    Text(String(format: L("settings.updates.available", "Version %@"),
+                                release.version))
+                        .font(Theme.figures(11.5)).foregroundStyle(Theme.accent)
+                    Spacer(minLength: Theme.s1)
+                    // A button, not a command. Someone who has to be told to open Terminal and
+                    // type `brew upgrade` is someone who stays on the old version.
+                    Button(L("settings.updates.download", "Download")) {
+                        NSWorkspace.shared.open(UpdateCheck.downloadPage)
+                    }.font(Theme.sans(11))
+                    Button(L("settings.updates.later", "Later")) { updates.dismiss() }
+                        .buttonStyle(.link).font(Theme.sans(11))
+                }
+                if let notes = release.notes { note(notes) }
+            } else if prefs.updateChecks == true {
+                HStack(spacing: 7) {
+                    Button(L("settings.updates.now", "Check now")) {
+                        checking = true
+                        Task { await updates.check(); checking = false }
+                    }.font(Theme.sans(11)).disabled(checking)
+                    if checking { ProgressView().controlSize(.small) }
+                }
+            }
+            note(L("settings.updates.note",
+                   "Asks pwestudio.site once a day whether a newer version exists. It sends three "
+                   + "things and nothing else: that this is PWE AI Bar, which version it is, and "
+                   + "which macOS it runs on. No account, no tokens, no usage figures, and nothing "
+                   + "that identifies the machine."))
+        }
     }
 
     private static let repository = URL(string: "https://github.com/kenshinice-ai/pwe-ai-bar")!
