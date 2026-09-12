@@ -21,6 +21,20 @@ actor Transcript {
     private static let root = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".claude/projects")
 
+    /// Codex writes its own rollout logs, and until 1.4.0 nothing read them for usage: the Codex
+    /// provider opens the same files but only ever looks at `rate_limits`, which is the quota bar
+    /// and nothing else. So every turn spent in gpt-6-astra, gpt-5.6-sol or gpt-5.6-luna was
+    /// invisible — not merely unpriced, absent: no model row, no turns, no tokens.
+    private static let codexRoot = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".codex/sessions")
+
+    /// The two logs are different formats, so each needs its own reducer; everything downstream
+    /// works on the buckets they both produce.
+    private enum Source: CaseIterable {
+        case claude, codex
+        var root: URL { self == .claude ? Transcript.root : Transcript.codexRoot }
+    }
+
     /// One file's contribution, already reduced. Keys are absolute — a day number and an hour
     /// number since the epoch in local time — so a cached bucket stays valid as time passes and
     /// merging never needs to re-bucket anything.
@@ -65,6 +79,13 @@ actor Transcript {
         /// megabytes are re-read each time.
         let parsedUpTo: Int
         let digest: Digest
+        /// Codex only: root turn id → model.
+        ///
+        /// The model is named once in a `turn_context` line and the turns that follow carry only
+        /// the id, so a tail parse starting past that line has nothing to attribute to. Sessions
+        /// here run to hundreds of megabytes with a handful of context lines in them, so carrying
+        /// the map is a few entries per file and re-reading to find it is not an option.
+        var models: [String: String] = [:]
     }
 
     private var cache: [String: FileCache] = [:]
@@ -104,10 +125,12 @@ actor Transcript {
         var total = Digest()
         var changed = false
 
-        if let e = fm.enumerator(at: Self.root,
-                                 includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
-                                 options: [.skipsHiddenFiles]) {
+        for source in Source.allCases {
+            guard let e = fm.enumerator(at: source.root,
+                                        includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+                                        options: [.skipsHiddenFiles]) else { continue }
             for case let url as URL in e where url.pathExtension == "jsonl" {
+              autoreleasepool {
                 let key = url.path
                 seen.insert(key)
                 let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
@@ -116,7 +139,22 @@ actor Transcript {
 
                 if let hit = cache[key], hit.modified == modified, hit.size == size {
                     total.merge(hit.digest)
-                    continue
+                    return
+                }
+
+                /// One file, from an offset, with whatever the last pass learned about it.
+                func read(from offset: Int, carrying models: [String: String])
+                    -> (Digest, Int, [String: String]) {
+                    switch source {
+                    case .claude:
+                        let (d, end) = Self.digest(url, from: offset, pricing: pricing)
+                        return (d, end, [:])
+                    case .codex:
+                        var known = models
+                        let (d, end) = Self.codexDigest(url, from: offset, pricing: pricing,
+                                                        models: &known)
+                        return (d, end, known)
+                    }
                 }
 
                 // Appended to, and the part already read has not moved: parse only the tail.
@@ -124,20 +162,21 @@ actor Transcript {
                 // we hold no longer means anything.
                 if let hit = cache[key], size >= hit.parsedUpTo, hit.parsedUpTo > 0 {
                     var digest = hit.digest
-                    let (fresh, end) = Self.digest(url, from: hit.parsedUpTo, pricing: pricing)
+                    let (fresh, end, models) = read(from: hit.parsedUpTo, carrying: hit.models)
                     digest.merge(fresh)
                     cache[key] = FileCache(modified: modified, size: size,
-                                           parsedUpTo: end, digest: digest)
+                                           parsedUpTo: end, digest: digest, models: models)
                     total.merge(digest)
                     changed = true
-                    continue
+                    return
                 }
 
-                let (digest, end) = Self.digest(url, from: 0, pricing: pricing)
+                let (digest, end, models) = read(from: 0, carrying: [:])
                 cache[key] = FileCache(modified: modified, size: size,
-                                       parsedUpTo: end, digest: digest)
+                                       parsedUpTo: end, digest: digest, models: models)
                 total.merge(digest)
                 changed = true
+              }
             }
         }
         for key in cache.keys where !seen.contains(key) {
@@ -187,6 +226,73 @@ actor Transcript {
                 d.latest = (at, model, input + cacheWrite + cacheRead)
             }
         }
+        return (d, end)
+    }
+
+    /// Reduces one Codex rollout into the same buckets.
+    ///
+    /// Two line kinds matter and they are written apart from each other: `turn_context` names the
+    /// model and a `root_turn_id`, and every `token_usage_record` that follows carries that id and
+    /// the tokens. `models` is the correlation, carried in and out so a tail parse can still
+    /// attribute turns whose context line is behind the offset.
+    ///
+    /// The marker pre-filters on the two leading characters the type shares — `token_count` and
+    /// `text_result` come through it too and are dropped here. It is worth being narrow: this tree
+    /// is 5.5 GB on the machine this was written on, with single sessions near a gigabyte.
+    ///
+    /// **`latest` is deliberately not set.** It feeds the context reading, and the size of a
+    /// context window is a Claude question — letting a Codex turn win the "newest turn" race
+    /// would measure a gpt model against Claude's window and print a percentage of nothing.
+    ///
+    /// Older sessions carry no `token_usage_record` at all; they contribute nothing rather than
+    /// guessing, which is why the totals begin partway through the history.
+    static func codexDigest(_ url: URL, from offset: Int, pricing: Pricing,
+                                    models: inout [String: String]) -> (Digest, Int) {
+        var d = Digest()
+        let zone = Double(TimeZone.current.secondsFromGMT())
+        var known = models
+
+        let end = LineScanner.scan(url, marker: "\"type\":\"t", from: offset) { line in
+            guard let o = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+                  let kind = o["type"] as? String,
+                  let payload = o["payload"] as? [String: Any] else { return }
+
+            if kind == "turn_context" {
+                if let model = payload["model"] as? String,
+                   let id = payload["root_turn_id"] as? String {
+                    known[id] = model
+                }
+                return
+            }
+            guard kind == "token_usage_record",
+                  let id = payload["root_turn_id"] as? String,
+                  let model = known[id],
+                  let usage = (payload["turn_token_usage"] ?? payload["usage"]) as? [String: Any],
+                  let ts = o["timestamp"] as? String,
+                  let at = ISO8601DateFormatter.parse(ts)
+            else { return }
+
+            // `input_tokens` here is the whole prompt, cached part included — unlike Claude's,
+            // where the cached read is reported beside the input rather than inside it. Counting
+            // both would bill the cache twice.
+            let cachedIn = usage["cached_input_tokens"] as? Int ?? 0
+            let input = max((usage["input_tokens"] as? Int ?? 0) - cachedIn, 0)
+            let cacheWrite = usage["cache_write_input_tokens"] as? Int ?? 0
+            let output = usage["output_tokens"] as? Int ?? 0
+
+            // Zero for every model Codex runs: the price list is Anthropic's catalogue and has no
+            // OpenAI rates in it. The trophy already says so rather than implying the work was
+            // free — inventing a number for the headline figure would be worse than admitting
+            // there isn't one.
+            let cost = pricing.cost(model: model, input: input, output: output,
+                                    cacheWrite: cacheWrite, cacheRead: cachedIn)
+            let local = at.timeIntervalSince1970 + zone
+            d.add(day: Int(floor(local / 86400)), model: model,
+                  Counts(turns: 1, input: input, output: output,
+                         cacheWrite: cacheWrite, cacheRead: cachedIn, usd: cost))
+            d.perHour[Int(floor(local / 3600)), default: 0] += cost
+        }
+        models = known
         return (d, end)
     }
 
@@ -284,7 +390,7 @@ actor Transcript {
         loadedFromDisk = true
         guard let data = try? Data(contentsOf: Self.diskCache),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              root["version"] as? Int == 3,
+              root["version"] as? Int == 4,
               root["pricing"] as? String == pricingStamp,
               let files = root["files"] as? [String: [String: Any]] else { return }
 
@@ -309,7 +415,8 @@ actor Transcript {
                 d.latest = (Date(timeIntervalSince1970: at), model, ctx)
             }
             cache[path] = FileCache(modified: Date(timeIntervalSince1970: modified),
-                                    size: size, parsedUpTo: entry["p"] as? Int ?? 0, digest: d)
+                                    size: size, parsedUpTo: entry["p"] as? Int ?? 0, digest: d,
+                                    models: entry["models"] as? [String: String] ?? [:])
         }
     }
 
@@ -323,6 +430,7 @@ actor Transcript {
         for (path, entry) in cache {
             var e: [String: Any] = ["m": entry.modified.timeIntervalSince1970,
                                     "s": entry.size, "p": entry.parsedUpTo]
+            if !entry.models.isEmpty { e["models"] = entry.models }
             e["daymodels"] = Dictionary(uniqueKeysWithValues: entry.digest.perDayModel.map {
                 (String($0.key), $0.value.mapValues {
                     [Double($0.turns), Double($0.input), Double($0.output),
@@ -335,7 +443,7 @@ actor Transcript {
             }
             files[path] = e
         }
-        let root: [String: Any] = ["version": 3, "pricing": pricingStamp, "files": files]
+        let root: [String: Any] = ["version": 4, "pricing": pricingStamp, "files": files]
         guard let data = try? JSONSerialization.data(withJSONObject: root) else { return }
         try? data.write(to: Self.diskCache, options: .atomic)
     }
