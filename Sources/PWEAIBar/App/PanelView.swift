@@ -321,8 +321,8 @@ struct PanelView: View {
                 // This app reads the login and never renews it, so the fix is whatever does: Claude
                 // Code, used. A note here once argued the opposite from one observation — a record
                 // left expired for hours "while Claude Code ran" — without establishing which Claude
-                // Code was running or whether it had needed the login. How to confirm that the CLI
-                // writes its renewals back is in HANDOFF §二.
+                // Code was running or whether it had needed the login. The CLI does write its
+                // renewals back — seen on 2026-09-16 — and HANDOFF §二 says how to check it again.
                 //
                 // Its own sentence rather than the blocker's: under a headline that already says the
                 // login has expired, the blocker's message said it again word for word.
