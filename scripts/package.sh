@@ -24,6 +24,11 @@ DIST="dist"
 WORK="${TMPDIR:-/tmp}/pweaibar-release"
 BUILT="${TMPDIR:-/tmp}/pweaibar-build/$APP_NAME.app"
 STAGE="$WORK/stage"
+# The compiler's scratch directory has to be outside the repository for the same reason (2026-09-16,
+# Swift 6.4): the build now signs the resource bundle as it produces it, and codesign refuses a
+# bundle carrying the com.apple.FinderInfo the file provider keeps re-attaching. With `.build` in
+# iCloud the release fails at its first step, before anything is signed.
+export PWEBAR_BUILD_ROOT="${PWEBAR_BUILD_ROOT:-${TMPDIR:-/tmp}/pweaibar-spm}"
 
 NOTARIZE=0
 [[ "${1:-}" == "--notarize" ]] && NOTARIZE=1

@@ -18,7 +18,6 @@ struct PanelView: View {
     var onTrophy: () -> Void
     var onSettings: () -> Void
     var onOpen: (Provider) -> Void
-    var onEnableQuota: () -> Void
     /// Defaulted so every existing call site and test keeps compiling without knowing this
     /// strip exists. Declared here rather than at the end because a struct's memberwise
     /// initialiser takes its arguments in declaration order, and the shell passes it here.
@@ -34,6 +33,9 @@ struct PanelView: View {
     var onHeight: (CGFloat) -> Void = { _ in }
     /// Defaulted so no call site has to know about it; injectable so a test can.
     var onSignIn: () -> Void = { ClaudeLogin.begin() }
+    /// The way back for a login that has expired or could not be read. Defaulted and injectable,
+    /// like signing in.
+    var onOpenClaude: () -> Void = { ClaudeLogin.openClaudeCode() }
 
     @State private var middleHeight: CGFloat = 0
     @State private var chromeHeight: CGFloat = 0
@@ -131,7 +133,7 @@ struct PanelView: View {
                 // The way to turn real quota on cannot live only in the modes that show
                 // provider sections, or picking the compact one hides the single button the
                 // app needs you to press.
-                if let cta = claudeCallToAction {
+                if !stageCarriesTheFix, let cta = claudeCallToAction {
                     rule
                     ctaRow(cta)
                 }
@@ -298,10 +300,6 @@ struct PanelView: View {
     private var emptyState: some View {
         let (headline, fix): (String, String?) = {
             switch store.blocker {
-            case .needsSetup:
-                return (L("empty.noCredential", "Cannot read the Claude Code credential"),
-                        L("empty.noCredential.fix",
-                          "Below is a local estimate; switch to keychain access in settings"))
             case .notLoggedIn:
                 return (L("empty.notLoggedIn", "Not signed in"),
                         L("empty.notLoggedIn.fix", "Use the Sign in button below"))
@@ -310,20 +308,29 @@ struct PanelView: View {
                         L("empty.notInstalled.fix",
                           "Use the button below to get it, then sign in"))
             case .keychainRefused:
-                // Not "refused" — the item's access list simply does not carry this app, which
-                // is the state a fresh `claude auth login` leaves it in, every time.
-                return (L("empty.keychainRefused", "The keychain has not authorised this app"),
-                        L("empty.keychainRefused.fix",
-                          "Press Use keychain access and choose Always Allow. Signing in again "
-                          + "recreates the item, which clears it"))
-            case .unauthorized, .forbidden, .network, .storage, .invalidResponse, .credentialsChanged:
+                // Nothing to grant this app: the read goes through the same tool Claude Code uses.
+                // What stops it is a question macOS put to that tool, and Claude Code, opened, meets
+                // the same question — so answering it there is the fix, and it holds for both.
+                return (L("empty.unreadable", "Claude Code's login could not be read"),
+                        L("empty.unreadable.fix",
+                          "Open Claude Code, and if macOS asks about the keychain, choose Always Allow. "
+                          + "The quota comes back on its own"))
+            case .unauthorized, .forbidden, .network, .invalidResponse, .credentialsChanged:
                 return (L("empty.needsAttention", "The quota connection needs attention"), store.blocker.message)
-            case .expired:
-                // The old wording said opening Claude Code would renew it. Measured on this
-                // machine: the credential sat expired for seven and a half hours while Claude
-                // Code ran the whole time — the CLI does not rewrite that item on every refresh,
-                // so the advice sent people to do something that would not have worked.
-                return (L("empty.expired", "The Claude credential has expired"), store.blocker.message)
+            case .expired(let at):
+                // This app reads the login and never renews it, so the fix is whatever does: Claude
+                // Code, used. A note here once argued the opposite from one observation — a record
+                // left expired for hours "while Claude Code ran" — without establishing which Claude
+                // Code was running or whether it had needed the login. How to confirm that the CLI
+                // writes its renewals back is in HANDOFF §二.
+                //
+                // Its own sentence rather than the blocker's: under a headline that already says the
+                // login has expired, the blocker's message said it again word for word.
+                // The button underneath already says "Open Claude Code"; this says why it helps.
+                let fix = L("empty.expired.fix", "Using Claude Code once renews it, and the quota comes back on its own")
+                return (L("empty.expired", "Claude Code's login has expired"),
+                        at.map { String(format: L("empty.expired.fixDated", "Expired on %@. %@"),
+                                        ClaudeProvider.Blocker.stamp($0), fix) } ?? fix)
             case .rateLimited(let until):
                 let m = max(1, Int(until.timeIntervalSinceNow / 60))
                 return (L("empty.rateLimited", "Rate limited"),
@@ -338,14 +345,36 @@ struct PanelView: View {
                 Text(fix).font(Theme.sans(11)).foregroundStyle(Theme.text2)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if store.blocker == .unauthorized || store.blocker == .forbidden || store.blocker.isExpired {
-                Button(CTAAction.settings.title, action: onSettings).font(Theme.sans(11.5))
-            }
-            if store.blocker == .needsSetup || store.blocker == .keychainRefused {
-                Button(CTAAction.enableQuota.title) { onEnableQuota() }
+            if let action = stageAction {
+                Button(action.title) { perform(action) }
                     .font(Theme.sans(11.5))
-                    .help(CTAAction.enableQuota.help)
+                    .help(action.help)
             }
+        }
+    }
+
+    /// The button the stage's own explanation carries, when it carries one.
+    private var stageAction: CTAAction? {
+        switch store.blocker {
+        case .unauthorized, .forbidden: return .settings
+        case .expired, .keychainRefused: return .openClaude
+        default: return nil
+        }
+    }
+
+    /// True while the stage itself explains what is wrong, button and all. The Claude row would
+    /// otherwise repeat the same sentence and the same button a few points further down — which is
+    /// how the expired state looked the first time 1.5.0 rendered it.
+    private var stageCarriesTheFix: Bool {
+        snap.attention == nil && focused == nil && stageAction != nil
+    }
+
+    private func perform(_ action: CTAAction) {
+        switch action {
+        case .settings:      onSettings()
+        case .openClaude:    onOpenClaude()
+        case .installClaude: onOpen(.claude)
+        case .signIn:        onSignIn()
         }
     }
 
@@ -391,7 +420,7 @@ struct PanelView: View {
                     Text(claudeStatus).font(Theme.sans(10)).foregroundStyle(Theme.text2)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 4)
-                    Button(store.claudeRefreshing ? L("panel.refreshing", "Updating…") : L("panel.refresh", "Refresh")) { store.refreshClaudeOnly() }
+                    Button(store.claudeRefreshing ? L("panel.refreshing", "Updating…") : L("panel.refresh", "Refresh")) { store.refreshClaudeOnly(asked: true) }
                         .font(Theme.sans(11)).disabled(store.claudeRefreshing)
                         .accessibilityLabel(L("panel.refresh.a11y", "Refresh the Claude quota"))
                 }
@@ -417,7 +446,7 @@ struct PanelView: View {
             // The call to action has to live here, not only in the empty state. As soon as any
             // other provider reports a number the panel is no longer empty, and the one thing
             // the user needs to press disappears with it.
-            if p == .claude, let cta = claudeCallToAction {
+            if p == .claude, !stageCarriesTheFix, let cta = claudeCallToAction {
                 ctaRow(cta).padding(.top, 2)
             }
         }
@@ -442,12 +471,12 @@ struct PanelView: View {
     /// Every one of these is a button because the alternative was a sentence telling the reader
     /// to open Terminal — which is not something most people who need a quota meter have done.
     enum CTAAction {
-        case settings, enableQuota, installClaude, signIn
+        case settings, openClaude, installClaude, signIn
 
         var title: String {
             switch self {
             case .settings:      return L("cta.manageCredential", "Manage credential")
-            case .enableQuota:   return L("cta.useKeychain", "Use keychain access")
+            case .openClaude:    return L("cta.openClaude", "Open Claude Code")
             case .installClaude: return L("cta.installClaude", "Get Claude Code")
             case .signIn:        return L("cta.signIn", "Sign in")
             }
@@ -456,9 +485,9 @@ struct PanelView: View {
             switch self {
             case .settings:
                 return L("cta.manageCredential.help", "Open settings to replace or clear the token")
-            case .enableQuota:
-                return L("cta.useKeychain.help",
-                         "Reconnect the saved Claude Code login; macOS may ask for keychain access")
+            case .openClaude:
+                return L("cta.openClaude.help",
+                         "Opens Claude Code in Terminal; using it renews the login this app reads")
             case .installClaude:
                 return L("cta.installClaude.help", "Opens the Claude Code download page")
             case .signIn:
@@ -475,14 +504,7 @@ struct PanelView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: Theme.s1)
             if let action = cta.action {
-                Button(action.title) {
-                    switch action {
-                    case .settings:      onSettings()
-                    case .enableQuota:   onEnableQuota()
-                    case .installClaude: onOpen(.claude)
-                    case .signIn:        onSignIn()
-                    }
-                }
+                Button(action.title) { perform(action) }
                 .font(Theme.sans(11))
                 .help(action.help)
             }
@@ -525,37 +547,30 @@ struct PanelView: View {
     }
 
     /// Nil once real quota is flowing.
+    ///
+    /// One switch. There used to be two, and the second repeated cases the first had already
+    /// returned for, so most of it could never run.
     private var claudeCallToAction: (text: String, action: CTAAction?)? {
         switch store.blocker {
-        case .expired:
-            return (store.blocker.message, .signIn)
-        case .unauthorized, .forbidden, .storage, .credentialsChanged:
+        case .none:
+            return nil
+        // Shown over a stale reading as well: figures that have stopped moving need their reason
+        // beside them.
+        case .expired, .keychainRefused:
+            return (store.blocker.message, .openClaude)
+        case .unauthorized, .forbidden, .credentialsChanged:
             return (store.blocker.message, .settings)
-        case .network, .invalidResponse: return (store.blocker.message, nil)
+        case .network, .invalidResponse:
+            return (store.blocker.message, nil)
         case .rateLimited(let until):
             return (String(format: L("cta.rateLimited", "Rate limited — retrying in %d min"),
                            max(1, Int(ceil(until.timeIntervalSinceNow / 60)))), nil)
-        default: break
-        }
-        guard snap.windows(of: .claude).isEmpty else { return nil }
-        switch store.blocker {
-        case .needsSetup:
-            return (L("cta.localOnly", "Local estimate only — cannot read the Claude Code credential"),
-                    .enableQuota)
-        case .keychainRefused:
-            return (L("cta.keychainRefused", "The keychain has not authorised this app"), .enableQuota)
         case .notLoggedIn:
+            guard snap.windows(of: .claude).isEmpty else { return nil }
             return (L("cta.notLoggedIn", "Not signed in to Claude Code"), .signIn)
         case .notInstalled:
+            guard snap.windows(of: .claude).isEmpty else { return nil }
             return (L("cta.notInstalled", "Claude Code is not on this Mac"), .installClaude)
-        case .expired:
-            return (store.blocker.message, .signIn)
-        case .unauthorized, .forbidden, .network, .storage, .invalidResponse, .credentialsChanged:
-            return (store.blocker.message, .settings)
-        case .rateLimited(let until):
-            return (String(format: L("cta.rateLimited", "Rate limited — retrying in %d min"),
-                           max(1, Int(until.timeIntervalSinceNow / 60))), nil)
-        case .none:            return nil
         }
     }
 

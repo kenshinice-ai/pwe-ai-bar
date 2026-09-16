@@ -109,10 +109,16 @@ only needs to end the waiting state.
 
 ## It does not ask for your password
 
-macOS grants keychain access per item **per program**. Claude Code writes its own credential by
-shelling out to `/usr/bin/security`, so that binary is already on the item's ACL. **Reading it the
-same way is therefore silent** — no dialog, no "Always Allow", and no prompt after the app is
-re-signed either. The cost is one subprocess, about 20 ms.
+macOS checks keychain access per record, per program. Claude Code creates its login record with
+`/usr/bin/security`, so the record admits that tool — and this app reads the record through the same
+tool, with the same command Claude Code uses. **So the read is silent**: no dialog, no "Always
+Allow", and nothing to grant again after an update or after Claude Code signs in again. The cost is
+one subprocess of about 20 ms, run only when the record has changed or five minutes have passed.
+
+**It only reads.** The app never renews the login and never writes to that record. Up to 1.4.0 it
+did both, and it cost a real login: on 8 September 2026 three renewals on one machine could not be
+written back, and that machine's CLI had to sign in again. What reading only costs is under "Before
+you install".
 
 The token goes to `api.anthropic.com` and nowhere else. **No telemetry, no crash reporting, and no
 account of any kind.**
@@ -122,8 +128,8 @@ The diagnostics print no tokens, account identifiers or server bodies:
 | Command | What it does |
 |---|---|
 | `--cred` | Configuration only |
-| `--credentials-read-only` | Queries the quota but does **not** rotate the token |
-| `--credentials` | The full query and renewal path |
+| `--credentials` | Queries the quota, read-only, and prints when Claude Code last wrote its login and when it expires |
+| `--credprobe` | Reads Claude Code's login once through the security tool and prints how long that took |
 | `--popover` | Opens the real panel and prints its geometry |
 
 ---
@@ -173,11 +179,11 @@ Better said here than discovered later.
   and time out; but "it should work" is not "it works". Three of them report the reading inverted
   (Devin and Antigravity report what is **left**, Cursor and Grok what is **used**), and a test
   watches that specifically.
-- **It can renew an expired Claude Code token.** Claude Code has been observed leaving its
-  credential expired for 32 hours, so the app refreshes it and writes the replacement back to the
-  same place. Four invariants and their regression tests exist precisely because getting this wrong
-  would log you out of your own CLI. The success path has now completed once against a real
-  account; **the failure path — renewed but could not be written back — still has not.**
+- **It reads your Claude Code login and never renews it.** The app used to renew an expired token
+  itself and write the replacement back; since 1.5.0 renewing is left to Claude Code, which can store
+  what it renews. The trade: if you have not used Claude Code for a while and its login has expired,
+  the quota stops updating. The panel says so and offers **Open Claude Code** — using it once renews
+  the login, and the numbers come back on their own.
 - **The subscription price comes from a table.** Pro and Max monthly prices ship in `pricing.json`
   and are picked by the plan tier in your credential; **settings can override them, in USD or
   AUD**. When the tier cannot be determined the page shows the equivalent cost and **no return
@@ -191,7 +197,7 @@ Better said here than discovered later.
 No third-party dependencies.
 
 ```bash
-swift test                      # 128 tests
+swift test                      # 185 tests
 ./scripts/build-app.sh          # assembles and signs into build/PWE AI Bar.app
 open "build/PWE AI Bar.app"
 ```
@@ -205,8 +211,8 @@ nothing uses any more, and on one key given two different English texts. English
 site and `en.lproj` is generated from it, so drift is possible in one direction only.
 
 Before changing anything, read **[docs/HANDOFF.md](docs/HANDOFF.md)** — it covers the mechanisms
-that are not obvious from the code (why no keychain dialog appears, the four invariants around
-token renewal, why the rate is an interval, and how the localisation fails *silently* if you move
+that are not obvious from the code (why no keychain dialog appears, why the Claude Code login
+is only read and never renewed, why the rate is an interval, and how the localisation fails *silently* if you move
 one directory), and for each of them, what the previous version got wrong. The full design document
 is [docs/design.html](docs/design.html).
 

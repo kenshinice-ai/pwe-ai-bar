@@ -1,8 +1,7 @@
 # PWE AI Bar — 接手说明
 
-最后更新 2026-09-07 深夜。分支 `forecast-engine` 与 `main` 同步，版本 `0.1.0`。
-约 8,400 行 Swift，113 个测试，`swift test` 约 14 秒。经过两轮云端深度审阅（55 + 48 个 agent），
-提出的十二条全部落地。
+最后更新 2026-09-15。`main`，版本 1.5.0。约 10,200 行 Swift（测试另有约 4,200 行），185 个测试，
+`swift test` 约 18 秒。经过两轮云端深度审阅（55 + 48 个 agent），提出的十二条全部落地。
 
 macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。看八家 AI 编码工具的额度；
 真正花力气的只有两件事——**读到 Claude 和 Codex 的真实数字**，以及**回答「按这个节奏，到不到得了重置」**。
@@ -15,86 +14,105 @@ macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。
 读代码之前先读这几段，否则会把它们当成过度设计删掉。后三条是 1.0.13–1.1.1 补的，
 每一条都是「只在构建机以外才看得见」的那类问题。
 
-### 一、不用输密码，但需要授权一次（这一节 1.1.0 整节重写过）
+### 一、Claude Code 的登录：用 `security` 读，只读不写（1.5.0 整节重写）
 
-**上一版这里写的是错的，而且那个错误论证造成了 1.0.8–1.0.12 的全部麻烦。** 原文说：Claude Code
-写凭据时 shell 出去调 `/usr/bin/security`，所以那个二进制在记录的 ACL 上，「我们用同样的方式读就是
-静默的、不需要始终允许」。真实情况是：**那个子进程会弹它自己的授权框**，标题写的是工具的名字
-（`security` 想要访问……）而不是应用的名字，而且**每轮轮询都弹**。
+**一条规则：读 Claude Code 的登录，用 Claude Code 自己用的那条命令，而且从不写它。**
+`ClaudeCredentialStore` 跑的是
 
-真正的规则是**一个条目有两道互不相干的 UI 闸**：
+    /usr/bin/security find-generic-password -a <账户> -s "Claude Code-credentials" -w
+
+Claude Code 用 `security` 工具创建这条记录，所以记录的分区列表里有 `apple-tool:`、访问列表里有
+`/usr/bin/security` —— **这个工具读它不弹框，与是谁启动了工具无关**（分区检查看的是发起访问的那个进程的签名）。
+进程内的 `SecItemCopyMatching` 是另一个读者：它以本 app 的身份去问，而本 app 只有在有人点过「始终允许」之后
+才在列表上，下一次 `claude auth login` 重建记录又会把它清掉。1.0.10–1.4.0 走的正是这条路，所以当时需要
+「改用钥匙串授权」按钮，而且每次重新登录之后都要再按一次。1.5.0 删掉了那个按钮和它背后的一切。
+
+**那 1.0.9 fork 同一个工具，为什么每轮都弹框？** 已知的是：那时这个 app 自己也在写这条记录（续期后写回），
+而 Lee 看到过 Claude Code 自己读登录时弹框。推断是别的程序写过之后，记录不再认这个工具。**这个推断没有逐一复现**，
+而且 2026-09-15 有一个反例：1.4.0 在 14:27 写过之后，`security` 读取依然静默 —— 所以不是每次写都会触发。
+但不写，就不可能是我们触发的。**写已经删掉了**：`ClaudeCredentialStore.IO` 没有任何会改动东西的成员
+（结构测试用 `Mirror` 盯着），整个 app 只有这一个文件运行 `security`，而且只用 `find-generic-password` 一个动词。
+
+其余的进程内钥匙串读取（Cursor / gh / Antigravity 的条目，以及 Claude 那条记录的**属性**）照旧两道 UI 闸都关 ——
+一个条目有两道互不相干的闸：
 
 | 闸 | 管什么 | 用什么关 |
 |---|---|---|
 | LocalAuthentication | 带 `SecAccessControl` 的条目（Touch ID、密码） | `kSecUseAuthenticationContext` + `LAContext.interactionNotAllowed` |
 | 经典 ACL | `login.keychain` 上的普通条目 | **只有** `SecKeychainSetUserInteractionAllowed(false)` |
 
-这个 app 曾经处处装了第一把锁，**一个都没装第二把**。现在的形状：
+`Credentials.quietRead` / `quietAttributes` 同时关两道。别的工具的条目是它们在自己进程里建的，`security` 读它们
+**会**弹框（1.0.9 在设置页上每次打开都弹）—— 所以走工具的只有 Claude Code 这一条。
 
-- **跑在定时器上的读取一律不具备弹窗能力** —— `Credentials.quietRead(service:account:)` 同时关两道闸，
-  该弹窗的地方返回 `nil`。`ClaudeCredentialStore` 和 `ExtraSource`（Cursor / gh / Antigravity）都走它，
-  **没有任何后台路径 fork `security` 工具**，有一条结构测试扫全部源码盯着这件事。
-- **唯一允许弹窗的是 `Credentials.authoriseShared()`**，只由用户按下「改用钥匙串授权」触发，
-  不设看门狗——它等的是人在读授权框，掐断它正是最初那个 bug。
-- 弹框出现时必须选**「始终允许」**：只点「允许」仅对那一次读取有效，下一轮又被挡回去。
-- **`claude auth login` 会重建这个钥匙串条目**，新条目的访问列表不含本应用，授权随之清空 ——
-  登录之后需要再按一次那个按钮。这不是缺陷，是 macOS 的模型。
+**万一还是弹了**（钥匙串被锁，或者记录还带着旧版本写过的痕迹），三道保险，都在 `ClaudeProvider.candidates`：
 
-**那个按钮必须说出结果**（1.1.2）。它一度可以什么都不做：授权被拒 → `Task.detached` 里静默 return；
-授权成功但登录本身还是过期的 → 刷新后 blocker 没变，界面照旧。**两种结局对读者长得一模一样**，
-而其中一种根本不该按这个按钮 —— 过期的登录只有 `claude auth login` 能治。现在
-`enableSharedKeychain()` 返回是否拿到凭据，`Store.enableRealQuota()` 把它翻成一句人话：
-被拒就教「选始终允许」，拿到了但仍被挡就**把 blocker 的原话说出来**（里面带着那条命令）。
-面板的 CTA 行也去掉了 `lineLimit` —— 它曾把唯一可执行的那句截成「…run cla…」。
+- **定时器的读取只等 5 秒**（`timerPatience`），失败就记下来（`claudeUnreadable*`，存 defaults，跨重启）。
+  **在记录的修改时间变化之前、或者退避到期之前，定时器不再运行工具。** 退避 15 分钟起，同一条记录每再失败一次翻倍，
+  封顶 4 小时；修改时间一变（Claude Code 写过了）立刻重试。慢的 securityd 和没人答的弹框从这里看一模一样，
+  所以是退避而不是永久停：前者不该让额度停一天，后者不该按时间表回来。
+- **人按「刷新」是唯一的例外**（面板的刷新按钮、菜单的「立即刷新」→ `asked: true`）：越过退避，读取等 60 秒
+  （`personPatience`），够人点到「始终允许」。定时器那次读取还在途时人按了刷新，会等它结束、再自己读一次，
+  不拿定时器那份失败交差（`windows(force:asked:)`）。
+- **有手动令牌时它顶上**，但失败照样记录，不因为读数恢复了就去重跑工具。
 
-`Providers/Credentials.swift`、`Providers/ClaudeCredentialStore.swift`、`Providers/ExtraSource.swift`。
-诊断用 `--credprobe`：它在**真签名 bundle 内部**报告每种读法的 `OSStatus`（未签名的测试程序不在 ACL 上，
-结论不能外推）。
+**不必每轮起一个进程。** 记录的修改时间是属性，读属性不需要授权、也不会弹框。修改时间没变、上次读取不到 5 分钟，
+就沿用上次读到的内容（`lastRead`）；5 分钟上限是为了盖住「同一秒内又被写了一次」—— 一秒粒度的时间戳看不见它。
+收到 401 时绕过这份缓存重读一次。
 
-### 二、令牌自己续期（改这里之前请读完整节）
+诊断：`--credprobe` 打印记录的修改时间、读取成败与耗时，从不打印值。**走的是 `security` 工具，记录检查的是工具的签名，
+所以从哪个构建跑结论都一样** —— 以前「必须在真签名 bundle 里跑」的限制随进程内读取一起没了。
 
-Claude Code 会把这条钥匙串记录**晾着**——本机实测过一次，过期后放了 32 小时没管，面板因此显示了
-一整天前的数字。所以我们自己续：拿记录里的 refresh token，在到期前几分钟 POST
-`platform.claude.com/v1/oauth/token`（client_id 用 Claude Code 的公开值），再用 compare-and-swap
-写回**同一个位置**。
+`Providers/ClaudeCredentialStore.swift`、`Providers/ClaudeProvider.swift`、`Providers/Credentials.swift`。
 
-三条不能动的规矩：
+### 二、令牌不再由我们续期（1.5.0；想加回来之前请读完整节）
 
-1. **轮换时在原 JSON 上改字段**，不要用 Codable 结构体重新编码——那会把我们没建模的字段悄悄丢掉，
-   而那条记录不只属于我们。
-2. **写回前再比一次**（`ClaudeCredentialStore.save(_:expected:)`）。凭据在我们换令牌的这几百毫秒里
-   被 CLI 改过，就放弃，不要覆盖。
-3. **写回失败不要重试轮换**。交换已经发生了，如果服务端轮换了 refresh token，Claude Code 手里那份
-   可能已经作废。
+1.0.1–1.4.0 这个 app 自己续期：到期前几分钟拿记录里的 refresh token 去换，再 compare-and-swap 写回同一条记录。
+**1.5.0 把这一整套删了** —— `persist`、`storable`、`rotate`、`exchange`、`rotations`、`claudeRotationBlockedUntil`、
+`ClaudeUsageClient.refresh`，连同守着它们的八条不变量和各自的测试。
 
-**下面五条是不变量，不是风格偏好。破坏其中任何一条，代价是把用户从他自己的 Claude Code 里登出。
-第 8 条是 2026-09-08 用一次真实的登出换来的。**
+删的理由是两个代价，都不能靠更小心来消除：
 
-4. **换发返回之后，到写回之前，不许有任何取消检查、也不许重读凭据。** 一旦 POST 返回，服务端
-   可能已经作废了 CLI 手里那份，而替代品的唯一一份就在内存里。写回不是「为调用方生产结果」的
-   一部分，是无论还有没有人要结果都必须跑完的收尾。
-5. **换发整段跑在非结构化 `Task` 里**（`exchange`），因为非结构化任务不继承取消。`invalidate()`
-   会 `task?.cancel()`，而 URLSession 尊重取消——不这样做，一次设置里的「重新连接」就能在 POST
-   途中把它拆掉，替代品装在没人在听的响应里。
-6. **同一份凭据同时只能有一次换发在途**（`rotations` 按 generation 索引）。被取消的任务不等于
-   已停下的任务，下一次 `windows()` 会从磁盘读到那份还没写回的旧凭据，拿同一个 refresh token
-   再换一次；第二次的 `invalid_grant` 到达时，第一次换来的替代品可能已经是唯一能用的凭据。
-7. **写回之后再 `check(version)`。** 那时候丢弃结果是免费的。
-8. **先证明存得下，再花掉令牌。**（1.1.0）交换会让服务端作废旧 refresh token，而替代品的唯一一份
-   在响应里；所以 `rotate` 先做一次**只读**的 compare-and-swap 回读（`Access.storable`），通不过
-   就根本不交换。写回坏掉只损失一次轮询 + 30 分钟退避（`claudeRotationBlockedUntil`，**跨重启**
-   记住，因为进程内的 `rejected` 表随进程死掉，而这个 app 被反复强杀重开过）。
-   刻意保持只读：空写回去能证明更多，但那等于每次换发都往活凭据上写一次。
+1. **续期只对存得下替代品的一方是安全的。** 换发让服务端作废旧 refresh token，替代品的唯一一份在响应里。
+   2026-09-08，一台机器上三次写回失败（当时的 CAS 回读还在 fork `security`，弹框没人答），三个替代品全丢，
+   那台机器上 CLI 共享的登录只能用 `claude auth login` 重建。1.1.0 加的「先证明存得下，再花掉令牌」缩小了窗口，
+   但证明和写回之间永远有一道缝。
+2. **写会改动别人的记录**，而 Claude Code 自己读登录时弹框，正出现在这个 app 写它的那段时间（机制一）。
+   不写，这条记录就只有 Claude Code 用 `security` 写，两边用同一个分区读。
 
-这五条各有一个会失败的回归测试，都在 `ClaudeUsageTests`：
-`testARotationIsWrittenBackEvenIfTheAppStopsCaringMidFlight`、
-`testCancellingTheReadingDoesNotCancelTheExchange`、
-`testTwoFetchesNeverSpendTheSameRefreshTokenTwice`、
-`testARecordThatCannotBeWrittenBackIsNeverExchangedFor`、`testAFailedWriteBackSurvivesARelaunch`。
-改动这一段之后它们必须仍然通过，
-而且**撤掉你的改动它们必须失败**——我验过每一个。
+**代价，而且面板必须说出来：** Claude Code 很久没用、令牌过期时，额度停住。面板显示
+「Claude Code 的登录已于 … 过期 —— 打开 Claude Code 即可恢复」，旁边一个「打开 Claude Code」按钮
+（`ClaudeLogin.openClaudeCode()`，在终端里运行 `claude`）。Claude Code 续期并写回之后，下一次读取
+（修改时间变了，所以立刻）就恢复，不需要再按任何东西。
 
-`Providers/ClaudeUsageClient.swift`、`ClaudeCredentialStore.swift`、`ClaudeProvider.rotate`。
+现在的形状（`ClaudeProvider.probe`）：
+
+- 令牌没过期就用，**离过期多近都不续**；过期了直接 `.expired(到期时间)`，不发请求。
+- 有手动令牌时，过期的 CLI 登录让位给它。
+- **401 不再是续期的信号，而是重读的信号**：绕过缓存重读一次，记录变了（Claude Code 刚续过）就换新令牌再问，没变就是 `.unauthorized`。
+
+**未验证，而且是这个方案成立的前提：Claude Code CLI 续期之后，会把新令牌写回这条记录。** 以前有过「过期后放了 32 小时没人管」
+「CLI 运行期间过期 7.5 小时」的观察，都没区分当时用的是 CLI 还是桌面 app、有没有真的需要令牌。2026-09-15 本机看到记录在
+14:27:01 被写过 —— 和 1.4.0 的 `claudeRefreshAt`（14:27:01，累计第 19 次）逐秒一致，**是我们自己写的，不是 Claude Code**。
+验证方法（装上 1.5.0、1.4.0 已退出之后）：
+
+    "/Applications/PWE AI Bar.app/Contents/MacOS/PWEAIBar" --credentials
+
+看「登录最近写入」和「登录到期」。现在除了 Claude Code 没有别人写这条记录，所以令牌过期后用一次 `claude`、修改时间跟着变，
+就证明了前提。**如果用过 CLI、令牌已过期、修改时间却不动，这个方案需要重新审视** —— 那说明额度会一直停着。
+
+守着这两节的测试（`ClaudeUsageTests`、`ReadOnlyLoginTests`）：
+`testANearlyExpiredLoginIsReadNotRenewed`、`testAnExpiredLoginStopsAndPointsAtClaudeCode`、
+`testOnceClaudeCodeRenewsTheNextReadRecovers`、`testA401ReReadsTheLoginInsteadOfRenewingIt`、
+`testTheLoginIsReadThroughTheSecurityToolAndOnlyRead`、`testAFileDoesNotHideARefusedRecord`、
+`testATimerDoesNotRetryAReadThatFailed`、`testAPersonAskingRetriesAndWaitsForAnAnswer`、
+`testAPersonAskingDuringATimerReadGetsAReadOfTheirOwn`、`testAnUnchangedRecordIsNotReadAgain`，
+以及结构测试 `testOnlyTheCredentialStoreRunsTheSecurityTool`、`testNothingCanWriteOrRenewClaudeCodesLogin`。
+退避、文件不吞拒绝、人按刷新自己读、人按刷新等 60 秒、401 重读、修改时间缓存 —— 这六道各自撤掉之后对应测试都失败过
+（2026-09-15 验过），恢复后全绿。
+
+**不要把续期加回来**，除非同时解决「替代品存不下」和「写会改动别人的记录」—— 前者在不写的前提下无解。
+
+`Providers/ClaudeProvider.swift`、`Providers/ClaudeUsageClient.swift`（只剩一个只读端点）、`App/ClaudeLogin.swift`。
 
 ### 三、速率是区间，不是数字
 
@@ -171,7 +189,7 @@ rate.high = (Δp + 1) / S
    `hookState == "未安装"`、`states[.claude] == "已登录"`），翻译之后每一处都会
    稳定地走错分支。全部换成了 case。
 3. **存进 defaults 的记录存 key，不存句子。** `claudeRefreshOutcome` 原来存中文句子，
-   而那是一条比写它的那次运行活得更久的法证记录——事后没法翻译。
+   而那是一条比写它的那次运行活得更久的法证记录——事后没法翻译。（这条记录 1.5.0 随续期一起删了；规矩留着。）
 
 `loccheck` 是构建闸门（`build-app.sh` 里，编译之前），不是提醒。汉字排印按品牌标准
 §7.2 例外：`Theme.labelSize` / `labelTracking`，汉字 +1pt、0.4× 字距。
@@ -268,22 +286,27 @@ SwiftPM 给**可执行**目标生成的 `Bundle.module` 按两条路径找资源
 ## 怎么跑
 
 ```bash
-swift test                      # 147 个
+swift test --scratch-path "$TMPDIR/pweaibar-spm"   # 185 个
 ./scripts/build-app.sh          # 组装、签名，并跑 --selfcheck 闸门
 ```
+
+**编译产物不能留在 iCloud 里**（2026-09-16，Swift 6.4）。构建现在会给资源包签名，而 codesign 拒绝任何带着
+iCloud 文件提供者反复盖上的 `com.apple.FinderInfo` 的 bundle —— 仓库里的 `.build` 会让 `swift build`
+第一步就失败（`CodeSign … PWEAIBar_PWEAIBar.bundle failed`）。`release.sh` 和 `package.sh` 已经把
+scratch path 默认指到 `$TMPDIR/pweaibar-spm`；手跑 `swift test` 时自己加 `--scratch-path`。
+仓库里的 `.build` 还混着另一台机器的产物（`/Users/leeliu/...`），那是 iCloud 同步来的，删掉即可。
 
 自检子命令（都不打印令牌、账号或服务器正文）：
 
 | 命令 | 用途 |
 |---|---|
-| `--credentials-read-only` | 查询额度但**不轮换**令牌；顺带打印「本 app 续期过没有」 |
-| `--credentials` | 完整查询 + 续期流程 |
+| `--credentials` | 走 app 的同一条路径只读查询额度（以「人按刷新」的身份，钥匙串问了会等人答），并打印登录最近写入与到期时间 —— 机制二的验证方法。`--credentials-read-only` 是它的别名 |
 | `--endurance <dir>` | 续航仪 14 个敌意状态 × 明暗两套，渲染成 PNG |
 | `--panel <dir>` | 三种密度 × 明暗，真实数据 |
 | `--probe` | 全链路 |
 | `--version` | 打印版本号，和设置页页脚读同一处 |
 | `--selfcheck` | 从 .app 内部证明每项资源都在 .app 内部；`build-app.sh` 拿它当出包闸门（机制七） |
-| `--credprobe` | 在真签名 bundle 里报告各种钥匙串读法的 `OSStatus`（机制一） |
+| `--credprobe` | 用 `security` 读一次 Claude Code 的登录，打印修改时间、成败与耗时，从不打印值（机制一） |
 | `PWEBAR_DEBUG=1` | 每次菜单栏重绘打一行。判断「是不是画得太频繁」，这个计数器比 profiler 快得多（机制九） |
 
 **注意**：`--panel`、`--stress`、`--probe` 会各起一个完整的 `Store`，也就是**一次真实的网络请求**，
@@ -317,31 +340,21 @@ Team ID `2SQV3H5MH9`，产物在 `dist/`。签名和打包都在 `$TMPDIR` 里�
 
 ## 已验证 / 未验证
 
-**已验证**：真实只读查询成功；面板读到 Claude 周窗口、五小时、上下文三行实况；147 个测试通过；
-**在构建机以外的 Mac 上装好、打开、进入设置**（1.0.13 起，见机制七）；
-钥匙串条目在多轮读写后 accessToken / refreshToken / scopes 完整；续航仪 14 个状态明暗两套渲染无溢出；
+**已验证**：真实只读查询成功；面板读到 Claude 周窗口、五小时、上下文三行实况；185 个测试通过；
+**在构建机以外的 Mac 上装好、打开、进入设置**（1.0.13 起，见机制七）；续航仪 14 个状态明暗两套渲染无溢出；
 两轮云端审阅的十二条全部修复，其中六条配了先失败后通过的回归测试。
+
+**1.5.0，2026-09-15，本机**：`security find-generic-password … -w` 退出码 0、25 ms、无弹框；Developer ID 签名的构建
+`--credprobe` 13 ms 读到 1 份凭据，`--credentials` 状态「已验证」、3 个窗口、不陈旧。机制一、二的六道保险逐一撤掉，
+对应测试各自失败，恢复后全绿。
 
 **未验证，且要说清楚**：
 
-0. **~~写回失败那条路径没被真实触发过~~ —— 2026-09-08 触发了三次，而且代价是真的。**
-   三次交换都成功（服务器当场作废旧 refresh token 并发新的），三次写回都失败（当时的 CAS 回读还在
-   fork `security`，弹框在超时内没人答得上），三个替代品全丢。第三次之后钥匙串里那个 refresh token
-   已被服务器拒绝（`invalid_grant`），**那台机器上 Claude Code CLI 共享的登录只能用
-   `claude auth login` 重建**。这正是机制二一直在防的事，防错了顺序而已 —— 修法见机制二。
-
-1. **~~续期路径从没成功过~~ —— 2026-09-08 07:37:49 成功了一次，`累计成功 1 次`。**
-   这条从「安全网，没人验过」变成了「真的跑过，真的写回去了，真的没把人登出」。
-   剩下没验证的是**失败**分支：写回失败那条路径（`.storage`）依旧没被真实触发过。
-
-   在此之前的那次是 2026-09-07 23:29，失败，而且失败是对的： 那条钥匙串
-   记录从 09-01 起就没被写过，`expiresAt` 停在 09-02、`refreshTokenExpiresAt` 停在 09-03——
-   我们拿一个已经死了四天的 refresh token 去换，服务端回 `invalid_grant`。**没有写入发生，
-   记录的修改时间仍然是 09-01，没有任何人因此掉线。** 四条不变量守住了。
-   顺带暴露的真问题见下一节第一条。**累计成功续期仍然是 0 次**，所以「换到了但写不回去」
-   那条风险路径依旧没有被真实触发过。
-2. **refresh token 会不会轮换，不知道。** 零风险的验证方式：记下当前 refresh token 的 SHA-256 前
-   16 位，等 Claude Code 下次续期后再取一次比对。变了就说明会轮换，那条写回失败的风险窗口就是真的。
+0. **Claude Code CLI 续期后是否写回这条记录 —— 1.5.0 的前提。** 本机 09-15 14:27 那次写入是 1.4.0 自己做的
+   （见机制二），所以至今没有任何一次「Claude Code 写回」被直接观察到。验证方法在机制二。
+1. **被旧版本写过的记录，`security` 读会不会弹框，因机器而异。** 本机被 1.4.0 写过之后读取仍静默；另一台机器没看过。
+   弹了的话机制一的退避兜底，面板会让人打开 Claude Code 并选「始终允许」。
+2. **~~写回失败那条路径没被真实触发过~~ —— 2026-09-08 触发了三次，代价是一次真实的登出。** 1.5.0 起这条路径不存在了。
 3. **另外五家（Cursor、Copilot、Devin、Grok、Antigravity）从未在真实账户上验证过**——
    本机一个都没装。全部只读、全部 `appPresent()` 门控、全部有超时。
 
@@ -349,12 +362,6 @@ Team ID `2SQV3H5MH9`，产物在 `dist/`。签名和打包都在 `$TMPDIR` 里�
 
 ## 已知风险与待办
 
-- **~~拿死掉的 refresh token 去换~~（1.0.1 修）**。那条记录里一直有 `refreshTokenExpiresAt`，
-  我们没读。现在读了：这个日期已经过去、并且**本 app 从未成功续期过**（`claudeRefreshCount == 0`）
-  的时候，直接不换发，并且把日期和 `claude auth login` 一起说出来。第二个条件不能去掉——
-  一旦我们自己换过一次，这个字段描述的可能是一个已经不存在的 refresh token，
-  凭一个过期的日期拒绝续一个还活着的凭据，比白发一次请求糟得多。
-  两个方向各有一个回归测试（`ClaudeUsageTests`）。
 - **~~面板高度~~（1.0.1、1.0.2、1.0.3 都没修对，1.0.4 才对）**。原问题是真的：内容最多 913 pt，
   1440×900 放不下，溢出被推到屏幕上方，标题栏和续航仪够不着。三次修错值得写下来，
   因为每一次的测试都是绿的。
@@ -376,15 +383,10 @@ Team ID `2SQV3H5MH9`，产物在 `dist/`。签名和打包都在 `$TMPDIR` 里�
   **`PWEAIBar --popover`**：在真实状态栏项上开真实弹出框，打印窗口 frame 与屏幕 frame 的关系。
   `PWEBAR_PROBE_NO_RESIZE=1` 可以复现 1.0.3 的行为。**改这一段之后跑一次。**
 
-- **~~写回失败的窗口~~ —— 2026-09-08 发生了，代价是一次真实的登出（1.1.0、1.1.1 收口）**。
-  当时的 CAS 回读还在 fork `security`，弹框在超时内没人答得上，三次交换的替代品全丢，
-  第三次之后钥匙串里的 refresh token 被服务端拒绝。现在两头都堵上了：读取不再具备弹窗能力
-  （机制一），交换之前先证明写得回（机制二第 8 条）。**残余风险**：证明和写回之间仍有一道缝，
-  磁盘在那一瞬坏掉依然无法撤销 —— 只能记录，失败写进 `claudeRefreshOutcome`，
-  `--credentials-read-only` 会打印。
-- **`offActor` 的 15 秒超时会把一次慢成功报成失败**。超时后继续跑的那次写入仍可能成功，而我们
-  已经记了「换到了但写不回去」并把这份凭据标成 `.storage` 拒绝。下一次凭据变化会自愈（`adopt`
-  清空 `rejected`），所以留着没修，但报出来的话不准。
+- **~~写回失败的窗口~~ —— 1.5.0 随续期一起删除。** 旧安装的 defaults 里还留着 `claudeRefreshAt` / `Outcome` /
+  `Count`、`claudeRotationBlockedUntil`、`sharedKeychainOptIn`、`keychainRefused`，都不再读取，留着无害。
+- **`offActor` 的超时会把一次慢成功报成失败**（定时器 15 秒、人按刷新 75 秒）。超时算一次读取失败，进入机制一的退避，
+  所以一次慢的 securityd 可能让额度停 15 分钟；按「刷新」立刻重试。
 - **history.json 双写者**（见上）。修法是 History 写之前先读回来合并，或者自检子命令改用独立缓存目录。
 - **周窗口上的区间带只有约 11pt 宽**。七天的横轴上本来就该窄，信息由尺寸线和结论句承担，不打算改。
 - `.fallsShort` 的大数字取自 `enduranceLow`、缺口取自 `enduranceHigh`，两者相加不等于 trip。
@@ -409,7 +411,7 @@ docs/
   HANDOFF.md                    这份
   FORECAST_ENGINE_SPEC_2026-09-06.md            预报引擎规格（§9 是对抗审查结论）
   AI_USAGE_MENUBAR_RESEARCH_AND_IMPLEMENTATION_2026-09-05.md   为什么不用输密码
-  CLAUDE_USAGE_IMPLEMENTATION_RESEARCH_2026-09-07.md   续期方案的调研
+  CLAUDE_USAGE_IMPLEMENTATION_RESEARCH_2026-09-07.md   续期方案的调研（1.5.0 起不再续期，留档）
   design.html                   设计方案全文
   history/                      已经完成的几轮交接与审计报告，留档不再维护
 ```

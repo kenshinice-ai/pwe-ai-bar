@@ -37,7 +37,6 @@ struct SettingsView: View {
     @ObservedObject var prefs = Prefs.shared
     var installHooks: () -> Bool
     var saveToken: (String) async -> ClaudeProvider.TokenUpdate
-    var enableRealQuota: () async -> String
     /// Injectable so a test can assert against a stated screen height rather than whichever
     /// machine happens to run it.
     var usableHeight: () -> CGFloat? = { NSScreen.main?.visibleFrame.height }
@@ -51,20 +50,18 @@ struct SettingsView: View {
     @State private var hookState: HookState
     @State private var states: [Provider: Detected] = [:]
     @State private var token: String = ""
-    @State private var keychainNote: String = ""
-    @State private var keychainBusy = false
     @StateObject private var tokenEditor: TokenEditor
     @ObservedObject var updates: UpdateCheck
     @State private var checking = false
 
     init(installHooks: @escaping () -> Bool,
          saveToken: @escaping (String) async -> ClaudeProvider.TokenUpdate,
-         enableRealQuota: @escaping () async -> String, prefs: Prefs? = nil,
+         prefs: Prefs? = nil,
          tokenEditor: TokenEditor? = nil, hookInstalled: Bool? = nil,
          updates: UpdateCheck? = nil,
          usableHeight: @escaping () -> CGFloat? = { NSScreen.main?.visibleFrame.height },
          onHeight: @escaping (CGFloat) -> Void = { _ in }) {
-        self.installHooks = installHooks; self.saveToken = saveToken; self.enableRealQuota = enableRealQuota
+        self.installHooks = installHooks; self.saveToken = saveToken
         self.usableHeight = usableHeight; self.onHeight = onHeight
         self.prefs = prefs ?? .shared
         self.updates = updates ?? UpdateCheck()
@@ -371,18 +368,15 @@ struct SettingsView: View {
                  ? L("settings.token.stored",
                      "The token is kept in this app's keychain and can still expire or be "
                      + "revoked. Paste a new one to replace it, or clear the field and press Clear.")
-                 : L("settings.token.none",
-                     "Usually unnecessary. The Claude Code login is reused automatically and "
-                     + "renewed in place when it can be. A manual token must pass the quota "
-                     + "endpoint; being long-lived does not mean it can read usage."))
+                 : L("settings.token.none.readOnly",
+                     "Usually unnecessary. The Claude Code login is read automatically — this app "
+                     + "only reads it, and never renews or rewrites it. A manual token must pass the "
+                     + "quota endpoint; being long-lived does not mean it can read usage."))
 
-            // The prompting path is a fallback for machines where reading Claude Code's
-            // credential the quiet way did not work. With a token in hand it would change
-            // nothing, so it is not offered. On its own line, not squeezed against the
-            // paragraph above: a button beside wrapping text collides with it at every width
-            // the text happens to reflow at.
-            // The same button the panel offers, here too: this section is where someone goes
-            // looking when the panel told them something is wrong with the login.
+            // The same buttons the panel offers, here too: this section is where someone goes
+            // looking when the panel told them something is wrong with the login. On their own
+            // line, not squeezed against the paragraph above: a button beside wrapping text
+            // collides with it at every width the text happens to reflow at.
             HStack(spacing: Theme.s2) {
                 Button(L("cta.signIn", "Sign in")) { ClaudeLogin.begin() }
                     .font(Theme.sans(11))
@@ -392,24 +386,6 @@ struct SettingsView: View {
                 }
                 .font(Theme.sans(11))
                 .help(L("cta.installClaude.help", "Opens the Claude Code download page"))
-            }
-            if !tokenEditor.hasToken {
-                Button(keychainBusy ? L("keychain.asking", "Asking macOS…")
-                                    : L("cta.useKeychain", "Use keychain access")) {
-                    Task { @MainActor in
-                        keychainBusy = true
-                        keychainNote = await enableRealQuota()
-                        keychainBusy = false
-                    }
-                }
-                .disabled(keychainBusy)
-                    .font(Theme.sans(11))
-                    .help(L("settings.keychain.help",
-                            "The fallback when the Claude Code credential cannot be read; "
-                            + "macOS will ask for authorisation once"))
-            }
-            if !keychainNote.isEmpty {
-                note(keychainNote).foregroundStyle(Theme.accent)
             }
             if !tokenEditor.message.isEmpty {
                 Text(tokenEditor.message).font(Theme.sans(10.5)).foregroundStyle(Theme.accent)
@@ -462,10 +438,6 @@ struct SettingsView: View {
             return L("settings.source.manualToken",
                      "A manual token is saved. Its permissions and validity are decided by the "
                      + "quota endpoint.")
-        }
-        if prefs.sharedKeychainOptIn {
-            return L("settings.source.keychain",
-                     "Keychain access is selected; the result is shown in the quota panel.")
         }
         return L("settings.source.none",
                  "No usable Claude Code login was found. Use Sign in below.")

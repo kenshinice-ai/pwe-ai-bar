@@ -77,13 +77,12 @@ final class FakeCredential {
                   self.ownReads += 1
                   return self.value.map { .init(value: $0, expiresAt: nil, source: .ownToken) }
               },
-              claudeCode: {
+              load: { _ in
                   self.claudeCodeReads += 1
                   return self.claudeCode.map {
-                      .init(value: $0, expiresAt: self.claudeCodeExpiry, source: .claudeKeychain)
-                  }
+                      [.init(value: $0, expiresAt: self.claudeCodeExpiry, source: .claudeKeychain)]
+                  } ?? []
               },
-              sharedExists: { false }, shared: { XCTFail("Unexpected shared keychain read"); return nil },
               save: { text in
                   if case .failed = self.result { return self.result }
                   self.value = text.isEmpty ? nil : text

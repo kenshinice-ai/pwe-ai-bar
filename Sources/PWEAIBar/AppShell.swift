@@ -145,7 +145,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   onTrophy: { [weak self] in self?.showTrophy() },
                   onSettings: { [weak self] in self?.showSettings() },
                   onOpen: { [weak self] p in self?.activate(p) },
-                  onEnableQuota: { [weak self] in Task { _ = await self?.store.enableRealQuota() } },
                   updates: updates,
                   // The screen the status item is actually on. `NSScreen.main` is the screen
                   // holding the key window, which for a menu-bar app is whatever other app is
@@ -240,7 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = nil
     }
 
-    @objc private func refreshNow() { store.refresh(forceClaude: true) }
+    @objc private func refreshNow() { store.refresh(forceClaude: true, asked: true) }
 
     // MARK: Windows
 
@@ -282,10 +281,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             saveToken: { [weak self] t in
                 guard let self else { return .failed(-1) }
                 return await self.store.saveToken(t)
-            },
-            enableRealQuota: { [weak self] in
-                guard let self else { return "" }
-                return await self.store.enableRealQuota()
             },
             updates: updates,
             onHeight: { [weak self, weak w] height in

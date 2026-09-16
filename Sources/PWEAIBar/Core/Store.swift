@@ -142,10 +142,13 @@ final class Store: ObservableObject {
         timer = t
     }
 
-    func refresh(forceClaude: Bool = false) {
+    /// `asked` is a person — the menu's Refresh now, or the panel's Refresh — rather than a timer or
+    /// a turn landing. It is the one read of Claude Code's login allowed to wait for macOS to ask
+    /// about the keychain and for somebody to answer, and the one that retries a read that failed.
+    func refresh(forceClaude: Bool = false, asked: Bool = false) {
         // One sweep at a time. Clicking the icon asks for a refresh, and a burst of clicks
         // used to stack sweeps that each re-read the whole log tree.
-        guard !inFlight else { if forceClaude { refreshClaudeOnly() }; return }
+        guard !inFlight else { if forceClaude || asked { refreshClaudeOnly(asked: asked) }; return }
         inFlight = true
         sweepVersion += 1
         let sweep = sweepVersion
@@ -154,7 +157,7 @@ final class Store: ObservableObject {
             var snap = Snapshot()
 
             if tracks().claude {
-                await updateClaude(force: forceClaude)
+                await updateClaude(force: forceClaude || asked, asked: asked)
             } else {
                 snapshot.windows.removeAll { $0.provider == .claude }
                 snapshot.claudeDetails = .init(); snapshot.plans[.claude] = nil
@@ -217,11 +220,11 @@ final class Store: ObservableObject {
     }
 
     /// Claude publishes independently of slow providers and transcript statistics.
-    private func updateClaude(force: Bool) async {
+    private func updateClaude(force: Bool, asked: Bool = false) async {
         claudeRefreshing = true
         claudeUpdateVersion += 1
         let update = claudeUpdateVersion
-        let reading = await claude.windows(force: force)
+        let reading = await claude.windows(force: force, asked: asked)
         let details = await claude.details
         let windows = await observe(reading.windows)
         let login = await claude.loggedIn
@@ -240,10 +243,12 @@ final class Store: ObservableObject {
         claudeRefreshing = false
     }
 
-    func refreshClaudeOnly() {
-        guard tracks().claude, !claudeRefreshing else { return }
+    /// A person asking is not turned away by a refresh already under way: that one may be a
+    /// timer's, which gives up on the keychain within seconds.
+    func refreshClaudeOnly(asked: Bool = false) {
+        guard tracks().claude, asked || !claudeRefreshing else { return }
         claudeRefreshing = true
-        Task { await updateClaude(force: true) }
+        Task { await updateClaude(force: true, asked: asked) }
     }
 
     /// Only used by `--stress`, which needs a snapshot that real data will never produce.
@@ -324,25 +329,5 @@ final class Store: ObservableObject {
         let result = await claude.useOwnToken(t)
         await updateClaude(force: false)
         return result
-    }
-
-    /// Returns the sentence to show the reader. A button whose whole job is to fix something
-    /// must say whether it did: the keychain can refuse, and it can also grant while the login
-    /// behind it stays expired — which is not the same outcome and must not look like one.
-    func enableRealQuota() async -> String {
-        claudeUpdateVersion += 1
-        let granted = await claude.enableSharedKeychain()
-        await updateClaude(force: true)
-        guard granted else {
-            return L("keychain.notGranted",
-                     "macOS did not grant access. Press again and choose Always Allow — plain "
-                     + "Allow covers that one read and nothing after it.")
-        }
-        if blocker == .none {
-            return L("keychain.granted", "Connected. The quota is being read now.")
-        }
-        // Granted, and still blocked: say what by. For an expired login that sentence carries
-        // the only command that helps, and it is not this button.
-        return blocker.message
     }
 }

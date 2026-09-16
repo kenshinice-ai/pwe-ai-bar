@@ -125,15 +125,14 @@ enum Probe {
             let suffix = dark ? "dark" : "light"
             shoot(AnyView(TrophyView(trophy: store.snapshot.trophy)),
                   width: 460, dark: dark, to: dir + "/trophy-\(suffix).png")
-            shoot(AnyView(SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
-                                       enableRealQuota: { "" })),
+            shoot(AnyView(SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) })),
                   width: 380, dark: dark, to: dir + "/settings-\(suffix).png")
         }
 
         for dark in [true, false] {
             for mode in PanelMode.allCases {
                 Prefs.shared.panelMode = mode
-                let view = PanelView(store: store, onTrophy: {}, onSettings: {}, onOpen: { _ in }, onEnableQuota: {})
+                let view = PanelView(store: store, onTrophy: {}, onSettings: {}, onOpen: { _ in })
                     .environment(\.colorScheme, dark ? .dark : .light)
                 let host = NSHostingView(rootView: view)
                 host.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
@@ -160,9 +159,9 @@ enum Probe {
         print(L("probe.reuseNote",
                 "The Claude Code login is reused by default. The panel is authoritative for which "
                 + "source was used and when it last worked."))
-        print(L("probe.refreshNote",
-                "A usable refresh token is spent on renewal and written safely back to where it came "
-                + "from; if that fails, sign in again."))
+        print(L("probe.readOnlyNote",
+                "The login is only read, through the same security tool Claude Code uses, and never "
+                + "renewed or rewritten. When it has expired, open Claude Code and the quota comes back."))
         print(L("probe.keychainNote",
                 "Keychain access is macOS's decision; this command does not test whether it is granted."))
     }
@@ -176,43 +175,32 @@ enum Probe {
     /// `--endurance DIR` draws the forecast instrument on its own, across every state it can
     /// reach. Real data is tidy: it will show one or two of these and never the other seven, so
     /// the branches that only appear on a bad day would never be looked at.
-    /// `--credentials` answers the one question this app should never make someone guess at:
-    /// why it cannot read Claude quota right now. Each source is reported separately — present
-    /// or not, expired or not, and what the endpoint actually says to it. No token is printed.
+    /// `--credentials` answers the one question this app should never make someone guess at: why
+    /// it cannot read Claude quota right now. Same pipeline as the app, as a person asking, so a
+    /// keychain question macOS raises waits to be answered. No token, account or body is printed.
     ///
-    /// Written because the answer turned out to be genuinely surprising: the credential Claude
-    /// Code keeps in the keychain sat expired for twelve hours while Claude Code itself ran the
-    /// whole time, and no surface in the app could tell you that was what had happened.
-    static func credentials() async { await quotaStatus(readOnly: false) }
-
-    /// Uses the same pipeline as the app; output contains no credentials, account IDs or bodies.
-    static func quotaStatus(readOnly: Bool) async {
-        var access = ClaudeProvider.Access.live
-        if readOnly { access.persist = nil }
-        let provider = ClaudeProvider(access: access)
-        let reading = await provider.windows(force: true)
+    /// It also prints when Claude Code last wrote its login and when that login runs out. Those two
+    /// are how to see from outside that Claude Code renews what this app reads: nothing else writes
+    /// the record now, so a stamp that moves is Claude Code's doing.
+    static func quotaStatus() async {
+        let provider = ClaudeProvider()
+        let reading = await provider.windows(force: true, asked: true)
         let details = await provider.details
         let state = await provider.blocker
-        print("PWE AI Bar — " + String(format: L("probe.quotaCheck", "Claude quota check (%@)"),
-                                       readOnly ? L("probe.noRotate", "no renewal")
-                                                : L("probe.withRotate", "renewal as normal")))
+        print("PWE AI Bar — " + L("probe.quotaCheck.readOnly", "Claude quota check (read-only)"))
         print(L("probe.state", "State") + ": " + state.message)
         print(L("probe.source", "Source") + ": " + details.source.rawValue)
         print(String(format: L("probe.windows", "Windows: %d   stale: %@"), reading.windows.count,
                      reading.stale ? L("probe.yes", "yes") : L("probe.no", "no")))
         print(L("probe.everSucceeded", "Ever read successfully") + ": "
               + (details.lastSuccessAt != nil ? L("probe.yes", "yes") : L("probe.no", "no")))
-        // The one question the credential itself cannot answer. Claude Code writes the same
-        // keychain item, and the rotation preserves every field it does not own, so after the
-        // fact there is no telling from the record which of the two rewrote it.
-        if let r = ClaudeProvider.refreshRecord() {
-            let f = DateFormatter(); f.dateFormat = "MM-dd HH:mm:ss"
-            print(String(format: L("probe.renewal", "Renewed by this app: %@ · %@ · %d successful in total"),
-                         f.string(from: r.at), r.outcome, r.count))
-        } else {
-            print(L("probe.renewal.never",
-                    "Renewed by this app: never — every keychain update so far was somebody else's"))
-        }
+        let f = DateFormatter(); f.dateFormat = "MM-dd HH:mm:ss"
+        let store = ClaudeCredentialStore()
+        print(L("probe.loginWritten", "Login last written") + ": "
+              + (store.stamp().map { f.string(from: $0) } ?? "—"))
+        // Not asked again after a refusal: one keychain question per run is the most this may cost.
+        let expiry = state == .keychainRefused ? nil : (try? store.load(patient: true))?.first?.expiresAt
+        print(L("probe.loginExpires", "Login expires") + ": " + (expiry.map { f.string(from: $0) } ?? "—"))
     }
 
     static func endurance(into dir: String) {
@@ -304,7 +292,6 @@ enum Probe {
         // acts on it, and AppKit is left to resize a popover that is already on screen.
         let sizeIt = ProcessInfo.processInfo.environment["PWEBAR_PROBE_NO_RESIZE"] != "1"
         let panel = PanelView(store: store, onTrophy: {}, onSettings: {}, onOpen: { _ in },
-                              onEnableQuota: {},
                               // The same screen the app uses, or this check measures one display
                               // while the panel sized itself against another.
                               usableHeight: { item.button?.window?.screen?.visibleFrame.height },
@@ -403,14 +390,13 @@ enum Probe {
             let tag = dark ? "dark" : "light"
             Prefs.shared.panelMode = .full
             shoot(AnyView(PanelView(store: store, onTrophy: {}, onSettings: {},
-                                    onOpen: { _ in }, onEnableQuota: {})),
+                                    onOpen: { _ in })),
                   width: Theme.panelWidth, dark: dark, to: dir + "/stress-panel-\(tag).png")
             shoot(AnyView(TrophyView(trophy: snap.trophy)),
                   width: 460, dark: dark, to: dir + "/stress-trophy-\(tag).png")
             // Settings is two clicks deep, which is exactly why it rots — and it is now the
             // one surface every provider has to fit on.
-            shoot(AnyView(SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
-                                       enableRealQuota: { "" })),
+            shoot(AnyView(SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) })),
                   width: 380, dark: dark, to: dir + "/stress-settings-\(tag).png")
 
             // One snapshot has one protagonist, and the two hero states worth checking are
@@ -422,7 +408,7 @@ enum Probe {
             let paced = Store()
             paced.injectForTesting(racing)
             shoot(AnyView(PanelView(store: paced, onTrophy: {}, onSettings: {},
-                                    onOpen: { _ in }, onEnableQuota: {})),
+                                    onOpen: { _ in })),
                   width: Theme.panelWidth, dark: dark, to: dir + "/stress-pace-\(tag).png")
         }
         for mode in MenuBarMode.allCases {
@@ -442,7 +428,7 @@ enum Probe {
         }
         Task { @MainActor in
             mark("start")
-            _ = Credentials.claudeCodeCredential()
+            _ = try? ClaudeCredentialStore().load()
             mark("credential")
             _ = Transcript.lastRateLimit()
             mark("lastRateLimit")
@@ -469,11 +455,10 @@ enum Probe {
             let blocker = await claude.blocker
             switch blocker {
             case .none: why = "—"
-            case .needsSetup: why = "未授权（面板点「启用真实额度」，或用 --token 设长期令牌）"
             case .notLoggedIn: why = "未登录（运行 claude auth login）"
             case .notInstalled: why = "这台 Mac 上没有 Claude Code（从 claude.ai/code 安装）"
-            case .keychainRefused: why = "钥匙串未授权本应用（面板点「改用钥匙串授权」，弹框选「始终允许」；claude auth login 会重建条目并清空授权）"
-            case .unauthorized, .forbidden, .network, .storage, .invalidResponse,
+            case .keychainRefused: why = "读不到 Claude Code 的登录（打开 Claude Code；若 macOS 询问钥匙串，选「始终允许」）"
+            case .unauthorized, .forbidden, .network, .invalidResponse,
                  .credentialsChanged, .expired: why = blocker.message
             case .rateLimited(let d): why = "限流至 \(f(d))"
             }
@@ -577,50 +562,29 @@ extension NSView {
 }
 
 extension Probe {
-    /// Which way of reading Claude Code's item actually works *as this app*, signed as it ships.
-    /// An unsigned test binary is not on the item's access list, so its answers do not transfer —
-    /// this has to run from inside the real bundle. Prints status codes and byte counts only;
-    /// never the credential.
+    /// `--credprobe`: how reading Claude Code's login goes from this process — when the record was
+    /// last written, whether the security tool hands the value over, and how long that takes.
+    /// Prints dates, counts and timings; never the credential, the account or a server reply.
     ///
-    /// Only the variants that cannot draw are attempted, so running this never nags anyone.
-    static func credentials() {
-        func report(_ name: String, _ status: OSStatus, _ item: CFTypeRef?) {
-            let bytes = (item as? Data)?.count
-            let note: String
-            switch status {
-            case errSecSuccess:              note = "ok, \(bytes ?? -1) bytes"
-            case errSecItemNotFound:         note = "errSecItemNotFound"
-            case errSecInteractionNotAllowed: note = "errSecInteractionNotAllowed"
-            case errSecAuthFailed:           note = "errSecAuthFailed"
-            case errSecParam:                note = "errSecParam"
-            case errSecUserCanceled:         note = "errSecUserCanceled"
-            default:                         note = "OSStatus \(status)"
+    /// It used to report an `OSStatus` per in-process way of reading, and had to run inside the
+    /// signed bundle because only that signature could be on the record's access list. The read
+    /// that ships now goes through the security tool, and the record checks the tool's signature,
+    /// so the answer no longer depends on which build of this app asks.
+    static func keychainProbe() {
+        let store = ClaudeCredentialStore()
+        let f = DateFormatter(); f.dateFormat = "MM-dd HH:mm:ss"
+        print("services      " + store.services.joined(separator: ", "))
+        print("last written  " + (store.stamp().map { f.string(from: $0) } ?? "—"))
+        let started = Date()
+        do {
+            let tokens = try store.load(patient: true)
+            print("read          ok, \(tokens.count) credential(s), \(Int(Date().timeIntervalSince(started) * 1000)) ms")
+            for token in tokens {
+                let expiry = token.expiresAt.map { f.string(from: $0) + ($0 <= Date() ? " (expired)" : "") } ?? "—"
+                print("  " + token.source.rawValue.padding(toLength: 16, withPad: " ", startingAt: 0) + "expires " + expiry)
             }
-            print(String(format: "  %-34s %@", (name as NSString).utf8String!, note))
-        }
-        let account = NSUserName()
-        for service in Credentials.sharedServiceCandidates() {
-            print("service: \(service)  account: \(account)")
-            var base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                       kSecAttrService as String: service,
-                                       kSecAttrAccount as String: account,
-                                       kSecReturnData as String: true,
-                                       kSecMatchLimit as String: kSecMatchLimitOne]
-            SecKeychainSetUserInteractionAllowed(false)
-            var item: CFTypeRef?
-            report("UI off, no LAContext", SecItemCopyMatching(base as CFDictionary, &item), item)
-
-            base[kSecUseAuthenticationContext as String] = Credentials.noninteractiveContext()
-            item = nil
-            report("UI off, with LAContext", SecItemCopyMatching(base as CFDictionary, &item), item)
-            SecKeychainSetUserInteractionAllowed(true)
-
-            let quiet = Credentials.quietRead(service, account)
-            print(String(format: "  %-34s %@", ("Credentials.quietRead" as NSString).utf8String!,
-                         quiet == nil ? "nil" : "ok, \(quiet!.utf8.count) bytes"))
-            let shared = Credentials.readShared()
-            print(String(format: "  %-34s %@", ("Credentials.readShared" as NSString).utf8String!,
-                         shared == nil ? "nil" : "ok"))
+        } catch {
+            print("read          failed (\(error)) after \(Int(Date().timeIntervalSince(started) * 1000)) ms")
         }
     }
 }

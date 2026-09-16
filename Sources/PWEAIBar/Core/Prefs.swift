@@ -63,7 +63,6 @@ enum RefreshInterval: String, CaseIterable, Identifiable {
 final class Prefs: ObservableObject {
     static let shared = Prefs()
     private let d: UserDefaults
-    var sharedKeychainOptIn: Bool { d.bool(forKey: "sharedKeychainOptIn") }
 
     /// Which settings groups are open. Display and Alerts by default — the two an existing user
     /// opens this window to change — so the window opens at roughly half its full height and the

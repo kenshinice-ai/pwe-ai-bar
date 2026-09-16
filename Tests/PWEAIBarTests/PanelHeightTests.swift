@@ -32,9 +32,7 @@ final class PanelHeightTests: XCTestCase {
         prefs.panelMode = .full
 
         let store = Store(claude: ClaudeProvider(defaults: space.defaults,
-                                                 access: .init(own: { nil }, claudeCode: { nil },
-                                                               sharedExists: { false }, shared: { nil },
-                                                               save: { _ in .failed(-1) }),
+                                                 access: .init(own: { nil }, load: { _ in [] }, save: { _ in .failed(-1) }),
                                                  request: { _ in throw ClaudeProvider.Blocker.network }),
                           rules: RuleEngine(defaults: space.defaults, away: { false }, remaining: { true }),
                           readEvents: { [] },
@@ -68,7 +66,7 @@ final class PanelHeightTests: XCTestCase {
         final class Box: @unchecked Sendable { var heights: [CGFloat] = [] }
         let box = Box()
         let view = PanelView(store: store, prefs: prefs, onTrophy: {}, onSettings: {},
-                             onOpen: { _ in }, onEnableQuota: {},
+                             onOpen: { _ in },
                              usableHeight: { usableHeight },
                              onHeight: { box.heights.append($0) })
         let controller = NSHostingController(rootView: AnyView(view))
@@ -191,8 +189,7 @@ final class SettingsGroupTests: XCTestCase {
         let space = try TestSpace()
         let prefs = Prefs(defaults: space.defaults)
         func height(usable: CGFloat) -> CGFloat {
-            let v = SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
-                                 enableRealQuota: { "" }, prefs: prefs,
+            let v = SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) }, prefs: prefs,
                                  tokenEditor: TokenEditor(hasToken: false), hookInstalled: false,
                                  usableHeight: { usable })
             return NSHostingView(rootView: v).fittingSize.height
@@ -226,8 +223,7 @@ final class SettingsWindowTests: XCTestCase {
                          styleMask: [.titled, .closable, .fullSizeContentView],
                          backing: .buffered, defer: false)
         let reports = Reports()
-        let view = SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
-                                enableRealQuota: { "" }, prefs: prefs,
+        let view = SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) }, prefs: prefs,
                                 tokenEditor: TokenEditor(hasToken: false), hookInstalled: false,
                                 usableHeight: { 900 },
                                 onHeight: { [weak w] h in reports.heights.append(h); w?.setContentHeight(h, animate: false) })

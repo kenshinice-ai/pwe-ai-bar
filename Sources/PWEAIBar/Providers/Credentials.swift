@@ -3,9 +3,11 @@ import Foundation
 import Security
 import LocalAuthentication
 
-/// Compatibility accessors for manually stored tokens and explicit shared-keychain access.
-/// The live quota provider uses ClaudeCredentialStore for exact-source discovery and rotation.
-/// Keychain access can be refused or require system authorization; it is never bypassed.
+/// The keychain from this app's side: its own manual token, quiet reads of other tools' items,
+/// and what can be learned about Claude Code's login without reading it — whether the record
+/// exists, when it was last written, and whether Claude Code is installed at all.
+///
+/// Claude Code's login itself is read by `ClaudeCredentialStore`, and only read.
 enum Credentials {
 
     static func noninteractiveContext() -> LAContext {
@@ -18,9 +20,8 @@ enum Credentials {
 
     enum Source: String {
         case ownToken        // long-lived token we hold ourselves
-        case claudeKeychain  // Claude Code's item, read through /usr/bin/security
-        case claudeFile      // ~/.claude/.credentials.json
-        case sharedKeychain  // Claude Code's item via SecItemCopyMatching — may show a dialog
+        case claudeKeychain  // Claude Code's record, read through the security tool, never written
+        case claudeFile      // ~/.claude/.credentials.json, read and never written
         case none
     }
 
@@ -29,13 +30,6 @@ enum Credentials {
         let expiresAt: Date?
         let source: Source
         var refreshToken: String? = nil
-        /// When the *refresh* token dies, from `refreshTokenExpiresAt` in Claude Code's record.
-        ///
-        /// Read, never written. Once this is past, the credential is beyond saving: presenting
-        /// the refresh token can only return `invalid_grant`, and the only fix is a new login.
-        /// Nil means the record did not say, which is not the same as "still good" — it means
-        /// try the exchange and let the server answer.
-        var refreshExpiresAt: Date? = nil
         var scopes: [String]? = nil
         var document: Data? = nil
         var origin: ClaudeCredentialStore.Origin? = nil
@@ -53,6 +47,11 @@ enum Credentials {
 
     // MARK: Manually stored credential
 
+    /// Serialises the process-wide interaction switch so two readers cannot leave it off for
+    /// each other, or restore it out from under one another.
+    private static let interactionLock = NSLock()
+
+    private static let ownFlag = "ownTokenStored"
     /// Set once when a token is stored, so the common case — nobody ran `claude setup-token` —
     /// never touches the keychain at all.
     ///
@@ -60,11 +59,6 @@ enum Credentials {
     /// and it has been measured on this machine at 4 s, 10 s and 84 s for the same item. Whatever
     /// makes it slow, an app that reads a token it does not have on every refresh is paying for
     /// nothing.
-    /// Serialises the process-wide interaction switch so two readers cannot leave it off for
-    /// each other, or restore it out from under one another.
-    private static let interactionLock = NSLock()
-
-    private static let ownFlag = "ownTokenStored"
     static var mayHaveOwnToken: Bool {
         let d = UserDefaults.standard
         guard d.object(forKey: ownFlag) == nil else { return d.bool(forKey: ownFlag) }
@@ -100,6 +94,27 @@ enum Credentials {
         guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess,
               let data = item as? Data else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+
+    /// Records' attributes and never their values, with both dialog gates closed: which accounts a
+    /// service has, and when each was last written. Attributes need no permission to read; the gates
+    /// are shut regardless, so "cannot ask" holds by construction rather than by whatever securityd
+    /// happens to do today. Empty when there is no such record, nil when the query itself failed.
+    static func quietAttributes(service: String, account: String? = nil) -> [[String: Any]]? {
+        interactionLock.lock()
+        SecKeychainSetUserInteractionAllowed(false)
+        defer { SecKeychainSetUserInteractionAllowed(true); interactionLock.unlock() }
+        var q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                kSecAttrService as String: service,
+                                kSecReturnAttributes as String: true,
+                                kSecMatchLimit as String: kSecMatchLimitAll,
+                                kSecUseAuthenticationContext as String: noninteractiveContext()]
+        if let account { q[kSecAttrAccount as String] = account }
+        var items: CFTypeRef?
+        let status = SecItemCopyMatching(q as CFDictionary, &items)
+        if status == errSecItemNotFound { return [] }
+        guard status == errSecSuccess else { return nil }
+        return items as? [[String: Any]]
     }
 
     private static func read(_ service: String, _ account: String) -> String? {
@@ -192,10 +207,8 @@ enum Credentials {
         UserDefaults.standard.bool(forKey: ownFlag)
     }
 
-    // MARK: Claude Code's own credential — no dialog
+    // MARK: Claude Code's own credential — facts about it, never its value
 
-    /// True when Claude Code has ever logged in on this machine. Asks the keychain only for
-    /// attributes, never the data, so it answers the question without tripping any dialog.
     /// Whether Claude Code exists on this Mac at all — as opposed to existing but signed out.
     ///
     /// Worth the distinction because the advice differs and one of them is unfollowable: a Mac
@@ -216,81 +229,13 @@ enum Credentials {
         return false
     }
 
+    /// True when Claude Code has ever logged in on this machine. Asks the keychain only for
+    /// attributes, never the data, so it answers the question without tripping any dialog.
     static func sharedItemExists() -> Bool {
-        for service in sharedServiceCandidates() {
-            let q: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: service,
-                kSecReturnAttributes as String: true,
-                kSecMatchLimit as String: kSecMatchLimitOne,
-            ]
-            var item: CFTypeRef?
-            if SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess { return true }
+        for service in sharedServiceCandidates() where quietAttributes(service: service)?.isEmpty == false {
+            return true
         }
         return FileManager.default.fileExists(atPath: credentialsFilePath())
-    }
-
-    /// The zero-dialog read. Blocking — run it off any executor you care about.
-    ///
-    /// Keychain before file: on macOS the keychain item is the one Claude Code keeps current,
-    /// and a `.credentials.json` left over from a container or an older install would hand back
-    /// a token that expired weeks ago.
-    static func claudeCodeCredential(run: ProcessLine = Subprocess.line) -> Token? {
-        for service in sharedServiceCandidates() {
-            // `-a <user>` first: that is how the CLI writes it. Without it, `security` returns
-            // whichever item it finds first, which on a shared Mac may belong to someone else.
-            for arguments in [["-a", currentAccount(), "-s", service, "-w"], ["-s", service, "-w"]] {
-                guard let text = run(["/usr/bin/security", "find-generic-password"] + arguments),
-                      let token = parse(text, source: .claudeKeychain) else { continue }
-                return token
-            }
-        }
-        guard let text = try? String(contentsOfFile: credentialsFilePath(), encoding: .utf8)
-        else { return nil }
-        return parse(text, source: .claudeFile)
-    }
-
-    /// Direct keychain read — the call that puts the access dialog on screen when the app is not
-    /// on the item's access list. It now cannot, and that took the right switch:
-    ///
-    /// `kSecUseAuthenticationContext` does **not** cover this. An `LAContext` governs
-    /// LocalAuthentication — Touch ID, the passcode — for items carrying a `SecAccessControl`.
-    /// A classic ACL on a `login.keychain` item is a different gate with a different door, and
-    /// `SecKeychainSetUserInteractionAllowed` is the only switch that closes it. Every sibling
-    /// read here passes a non-interactive `LAContext` and is quiet; this one passed none and was
-    /// the loud one. 1.0.9 then moved it out from behind the refusal latch on the stated grounds
-    /// that "this read is in-process and non-interactive, so it cannot be the thing that nags",
-    /// which was simply wrong — with the latch armed, every poll landed here, on the one call
-    /// documented three lines up as the dialog-raiser.
-    ///
-    /// Suppressed rather than skipped: where the ACL does allow the read it still succeeds, so
-    /// the panel keeps its numbers instead of going blank. Where it does not, this fails quietly
-    /// and the provider reports it. Silence is the fix; not reading was never the fix.
-    ///
-    /// `interactive` is the one exception, and it exists because suppressing everything left no
-    /// way back in. `claude auth login` recreates the item, and the new access list carries only
-    /// whoever created it — so a quiet read answers `errSecAuthFailed` for ever, with nothing the
-    /// reader can do about it. Exactly one door stays openable, and only a person pressing
-    /// 「改用钥匙串授权」 opens it. Never from a timer.
-    static func authoriseShared() -> Bool { readShared(interactive: true) != nil }
-
-    static func readShared(interactive: Bool = false) -> Token? {
-        interactionLock.lock()
-        SecKeychainSetUserInteractionAllowed(interactive)
-        defer { SecKeychainSetUserInteractionAllowed(true); interactionLock.unlock() }
-        for service in sharedServiceCandidates() {
-            let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                   kSecAttrService as String: service, kSecAttrAccount as String: NSUserName(),
-                                   kSecReturnData as String: true, kSecReturnAttributes as String: true,
-                                   kSecMatchLimit as String: kSecMatchLimitOne]
-            var item: CFTypeRef?
-            guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess,
-                  let record = item as? [String: Any], let data = record[kSecValueData as String] as? Data,
-                  let account = record[kSecAttrAccount as String] as? String else { continue }
-            return ClaudeCredentialStore.decode(String(decoding: data, as: UTF8.self), source: .sharedKeychain,
-                                                 origin: .keychain(service: service, account: account))
-        }
-        return nil
     }
 
     /// `security -w` prints the raw value, but falls back to hex when the bytes are not printable
@@ -333,15 +278,10 @@ enum Credentials {
         return NSString(string: dir).expandingTildeInPath + "/.credentials.json"
     }
 
-    private static func currentAccount() -> String {
-        let user = ProcessInfo.processInfo.environment["USER"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return user?.isEmpty == false ? user! : NSUserName()
-    }
 }
 
 /// Runs a command and returns its standard output, or nil for any non-zero exit, timeout or
-/// launch failure. Injectable so tests never touch the real keychain.
+/// launch failure. Injectable so tests never run the real one.
 typealias ProcessLine = ([String]) -> String?
 
 enum Subprocess {

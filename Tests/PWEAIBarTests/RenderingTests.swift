@@ -8,9 +8,9 @@ final class RenderingTests: XCTestCase {
         let space = try TestSpace(); let prefs = Prefs(defaults: space.defaults)
         prefs.panelMode = .standard
         let at = Date()
-        let auth = ClaudeProvider.Access(own: { nil }, claudeCode: {
-            Credentials.Token(value: "synthetic", expiresAt: nil, source: .claudeKeychain, plan: "pro")
-        }, sharedExists: { false }, shared: { nil }, save: { _ in .failed(-1) })
+        let auth = ClaudeProvider.Access(own: { nil }, load: { _ in
+            [Credentials.Token(value: "synthetic", expiresAt: nil, source: .claudeKeychain, plan: "pro")]
+        }, save: { _ in .failed(-1) })
         let body = """
         {"five_hour":{"utilization":7.4,"resets_at":\(at.addingTimeInterval(3600).timeIntervalSince1970)},
          "seven_day":{"utilization":18.2,"resets_at":\(at.addingTimeInterval(5*86400).timeIntervalSince1970)},
@@ -36,7 +36,7 @@ final class RenderingTests: XCTestCase {
             XCTAssertEqual(store.snapshot.windows(of: .claude).count, 3)
             XCTAssertEqual(store.snapshot.claudeDetails.spend?.usedUSD, Decimal(string: "12.34"))
             for dark in [false, true] {
-                let panel = PanelView(store: store, prefs: prefs, onTrophy: {}, onSettings: {}, onOpen: { _ in }, onEnableQuota: {})
+                let panel = PanelView(store: store, prefs: prefs, onTrophy: {}, onSettings: {}, onOpen: { _ in })
                 try render(AnyView(panel), width: Theme.panelWidth, dark: dark,
                            output: output.appendingPathComponent("claude-\(stale ? "stale" : "live")-\(dark ? "dark" : "light").png"))
             }
@@ -59,8 +59,7 @@ final class RenderingTests: XCTestCase {
         store.injectForTesting(snap)
         let editor = TokenEditor(hasToken: true)
         _ = await editor.submit("synthetic") { _ in .saved(.unauthorized) }
-        let settings = SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
-                                    enableRealQuota: { "" }, prefs: prefs, tokenEditor: editor, hookInstalled: true)
+        let settings = SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) }, prefs: prefs, tokenEditor: editor, hookInstalled: true)
         let output = ProcessInfo.processInfo.environment["PWEBAR_TEST_ARTIFACTS"].map { URL(fileURLWithPath: $0) } ?? space.root
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         _ = NSApplication.shared
@@ -69,7 +68,7 @@ final class RenderingTests: XCTestCase {
                        output: output.appendingPathComponent("settings-\(dark ? "dark" : "light").png"))
             for mode in PanelMode.allCases {
                 prefs.panelMode = mode
-                let panel = PanelView(store: store, prefs: prefs, onTrophy: {}, onSettings: {}, onOpen: { _ in }, onEnableQuota: {})
+                let panel = PanelView(store: store, prefs: prefs, onTrophy: {}, onSettings: {}, onOpen: { _ in })
                 try render(AnyView(panel), width: Theme.panelWidth, dark: dark,
                            output: output.appendingPathComponent("pending-\(mode.rawValue)-\(dark ? "dark" : "light").png"))
             }

@@ -13,9 +13,7 @@ final class BilingualRenderTests: XCTestCase {
             let prefs = Prefs(defaults: space.defaults)
             prefs.panelMode = .full
             let store = Store(claude: ClaudeProvider(defaults: space.defaults,
-                                                     access: .init(own: { nil }, claudeCode: { nil },
-                                                                   sharedExists: { false }, shared: { nil },
-                                                                   save: { _ in .failed(-1) }),
+                                                     access: .init(own: { nil }, load: { _ in [] }, save: { _ in .failed(-1) }),
                                                      request: { _ in throw ClaudeProvider.Blocker.network }),
                               rules: RuleEngine(defaults: space.defaults, away: { false }, remaining: { true }),
                               readEvents: { [] },
@@ -42,7 +40,7 @@ final class BilingualRenderTests: XCTestCase {
             snap.contextPercent = 23.5
             store.injectForTesting(snap)
             let panel = PanelView(store: store, prefs: prefs, onTrophy: {}, onSettings: {},
-                                  onOpen: { _ in }, onEnableQuota: {}, usableHeight: { 1334 })
+                                  onOpen: { _ in }, usableHeight: { 1334 })
             for dark in [true, false] {
                 try shoot(AnyView(panel), width: Theme.panelWidth, dark: dark,
                           to: out.appendingPathComponent("panel-\(lang.rawValue)-\(dark ? "dark" : "light").png"))
@@ -51,8 +49,7 @@ final class BilingualRenderTests: XCTestCase {
             // everything open. The first is what a reader sees; the second is the height check.
             for (state, open) in [("default", nil), ("expanded", true)] as [(String, Bool?)] {
                 if let open { for g in ["display", "alerts", "sources", "general"] { prefs.setOpen(g, open) } }
-                let settings = SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) },
-                                            enableRealQuota: { "" }, prefs: prefs,
+                let settings = SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) }, prefs: prefs,
                                             tokenEditor: TokenEditor(hasToken: false), hookInstalled: false,
                                             usableHeight: { 1334 })
                 try shoot(AnyView(settings), width: 380,

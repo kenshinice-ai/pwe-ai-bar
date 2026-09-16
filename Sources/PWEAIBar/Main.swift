@@ -30,7 +30,7 @@ enum PWEAIBarMain {
             exit(Probe.selfcheck() ? 0 : 1)
         }
         if CommandLine.arguments.contains("--credprobe") {
-            Probe.credentials()
+            Probe.keychainProbe()
             return
         }
         if let i = CommandLine.arguments.firstIndex(of: "--icon"),
@@ -78,9 +78,12 @@ enum PWEAIBarMain {
                                 : (ok ? "已保存令牌，额度有效性将在应用中验证" : "保存失败"))
             return
         }
-        if CommandLine.arguments.contains("--credentials") {
+        // `--credentials-read-only` stays as a spelling people already type. Every check is
+        // read-only now: nothing in the app renews or rewrites the login any more.
+        if CommandLine.arguments.contains("--credentials")
+            || CommandLine.arguments.contains("--credentials-read-only") {
             let sem = DispatchSemaphore(value: 0)
-            Task { await Probe.credentials(); sem.signal() }
+            Task { await Probe.quotaStatus(); sem.signal() }
             while sem.wait(timeout: .now()) == .timedOut {
                 RunLoop.main.run(until: Date().addingTimeInterval(0.05))
             }
@@ -94,14 +97,6 @@ enum PWEAIBarMain {
         if let i = CommandLine.arguments.firstIndex(of: "--stress"),
            i + 1 < CommandLine.arguments.count {
             Probe.stress(into: CommandLine.arguments[i + 1])
-            return
-        }
-        if CommandLine.arguments.contains("--credentials-read-only") {
-            let sem = DispatchSemaphore(value: 0)
-            Task { @MainActor in await Probe.quotaStatus(readOnly: true); sem.signal() }
-            while sem.wait(timeout: .now()) == .timedOut {
-                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-            }
             return
         }
         if CommandLine.arguments.contains("--cred") {

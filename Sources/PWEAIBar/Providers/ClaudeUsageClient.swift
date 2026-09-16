@@ -1,10 +1,12 @@
 import Foundation
 
-/// One ephemeral session for quota/refresh traffic; credentials never enter a cookie store.
+/// One ephemeral session for quota traffic; credentials never enter a cookie store.
+///
+/// One endpoint, and it only reads. The token endpoint that used to sit beside it is gone on
+/// purpose: renewing is Claude Code's to do, because only the renewer can store the replacement.
 final class ClaudeUsageClient: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     static let shared = ClaudeUsageClient()
     static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
-    static let refreshURL = URL(string: "https://platform.claude.com/v1/oauth/token")!
     private lazy var session: URLSession = {
         let c = URLSessionConfiguration.ephemeral
         c.urlCache = nil
@@ -27,7 +29,7 @@ final class ClaudeUsageClient: NSObject, URLSessionTaskDelegate, @unchecked Send
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
                     completionHandler: @escaping (URLRequest?) -> Void) {
-        // These two endpoints should answer directly. Never forward bearer tokens on redirects.
+        // The endpoint should answer directly. Never forward a bearer token on a redirect.
         completionHandler(nil)
     }
 
@@ -38,19 +40,6 @@ final class ClaudeUsageClient: NSObject, URLSessionTaskDelegate, @unchecked Send
         r.setValue("application/json", forHTTPHeaderField: "Accept")
         r.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         r.setValue(ClaudeProvider.userAgent, forHTTPHeaderField: "User-Agent")
-        return r
-    }
-
-    static func refresh(token: String) throws -> URLRequest {
-        var r = URLRequest(url: refreshURL)
-        r.httpMethod = "POST"
-        r.timeoutInterval = 12
-        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        r.httpBody = try JSONSerialization.data(withJSONObject: [
-            "grant_type": "refresh_token", "refresh_token": token,
-            "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
-            "scope": "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
-        ])
         return r
     }
 }

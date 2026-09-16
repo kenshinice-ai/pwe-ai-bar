@@ -2,73 +2,72 @@ import Foundation
 import os
 
 /// Account-bound, in-memory quota state. UI, history and retries never manufacture usage.
+///
+/// Claude Code's login is read here and nothing else: never renewed, never rewritten. How it is
+/// read is `ClaudeCredentialStore`'s business; what an expired one means is `probe`'s.
 actor ClaudeProvider {
     typealias Reading = (windows: [QuotaWindow], stale: Bool)
     struct Access {
         var own: () -> Credentials.Token?
-        var claudeCode: () -> Credentials.Token?
-        var sharedExists: () -> Bool
-        var shared: () -> Credentials.Token?
+        /// Claude Code's login, read and only read. `patient` means a person is waiting on the
+        /// read and can answer a keychain question; a timer's read gives up on one in seconds.
+        var load: (_ patient: Bool) throws -> [Credentials.Token]
         var save: (String) -> Credentials.SaveResult
-        var load: (() throws -> [Credentials.Token])? = nil
-        var persist: ((Credentials.Token, Credentials.Token) throws -> Bool)? = nil
-        /// Can the record still be read back, i.e. would the write-back's compare-and-swap
-        /// succeed? Asked *before* the exchange, never after.
-        var storable: ((Credentials.Token) -> Bool)? = nil
-        /// The single read allowed to put a dialog on screen, run only when a person presses the
-        /// button that asks for it.
-        var authorise: (() -> Bool)? = nil
+        /// When Claude Code last wrote its login, from attributes alone. Nil means unknown, and
+        /// unknown means read again rather than trust the last read.
+        var stamp: () -> Date? = { nil }
         /// Whether Claude Code is on this Mac at all. Injectable so a test can state it.
         var claudeCodePresent: () -> Bool = Credentials.claudeCodePresent
-        static let live = Access(own: Credentials.ownToken, claudeCode: { Credentials.claudeCodeCredential() },
-                                 sharedExists: Credentials.sharedItemExists, shared: { Credentials.readShared() },
+        static let live = Access(own: Credentials.ownToken,
+                                 load: { try ClaudeCredentialStore().load(patient: $0) },
                                  save: { Credentials.storeOwnToken($0) },
-                                 load: { try ClaudeCredentialStore().load() },
-                                 persist: { try ClaudeCredentialStore().save($0, expected: $1) },
-                                 storable: { (try? ClaudeCredentialStore().unchanged($0)) == true },
-                                 authorise: Credentials.authoriseShared)
+                                 stamp: { ClaudeCredentialStore().stamp() })
     }
     enum Blocker: Error, Equatable {
-        case none, needsSetup, notLoggedIn, notInstalled, keychainRefused, unauthorized, forbidden, network
-        /// The login is beyond renewal. Carries when the refresh token died, when the record
-        /// said so — the date is the difference between "何时" and a shrug.
+        case none, notLoggedIn, notInstalled, keychainRefused, unauthorized, forbidden, network
+        /// Claude Code's login has run out. Carries when, if the record said.
         case expired(Date?)
-        case storage, invalidResponse, credentialsChanged
+        case invalidResponse, credentialsChanged
         case rateLimited(Date)
         var message: String {
             switch self {
             case .none: return L("blocker.ok", "Verified — the quota connection is working")
-            case .needsSetup: return L("blocker.needsSetup", "Could not read the login credential — reconnect in settings")
             case .notLoggedIn: return L("blocker.notLoggedIn", "No credential found — sign in to Claude Code")
             case .notInstalled: return L("blocker.notInstalled",
                                          "Claude Code is not installed on this Mac — install it from claude.ai/code")
-            case .keychainRefused: return L("blocker.keychainRefused", "The keychain has not authorised this app to read the login")
+            case .keychainRefused:
+                // Not "the keychain has not authorised this app". Reading through the security
+                // tool needs nothing granted to this app, so that sentence pointed at a button
+                // that no longer exists. What can stop the read is a question macOS put to the
+                // tool, and Claude Code meets the same question when it next reads its login.
+                return L("blocker.unreadable",
+                         "Claude Code's login could not be read — open Claude Code, and if macOS asks, "
+                         + "choose Always Allow")
             case .expired(let at):
-                // Naming the date and the command is the whole improvement. "凭据已失效" is true
-                // and leaves the reader with nothing to do; this sentence ends in something they
-                // can paste. Signing in again is what rewrites the record the app reads — and
-                // that is a button now, because "open a terminal and type this" is not an
-                // instruction most people who need a quota meter can follow.
+                // The remedy is whatever renews the login, and that is Claude Code, not this app.
+                // The old sentence said to sign in again, which rebuilt a login that only needed
+                // renewing.
                 guard let at else {
-                    return L("blocker.expired.noDate",
-                             "The login has expired and cannot be renewed — sign in again")
+                    return L("blocker.expired.open",
+                             "The Claude Code login has expired — open Claude Code to restore it")
                 }
-                return String(format: L("blocker.expired.dated",
-                                        "The Claude Code login expired on %@ — sign in again"),
+                return String(format: L("blocker.expired.openDated",
+                                        "The Claude Code login expired on %@ — open Claude Code to restore it"),
                               Blocker.stamp(at))
             case .unauthorized: return L("blocker.unauthorized", "The credential is no longer valid — sign in to Claude Code again or replace the manual token")
             case .forbidden: return L("blocker.forbidden", "This credential may not read quota — check the account's permissions or sign in again")
             case .network: return L("blocker.network", "No new reading just now — retrying automatically")
-            case .storage: return L("blocker.storage", "The renewed credential could not be saved safely — sign in to Claude Code again")
             case .invalidResponse: return L("blocker.invalidResponse", "The quota response was malformed — keeping the last reading and retrying")
             case .credentialsChanged: return L("blocker.credentialsChanged", "The login source changed or conflicts — confirm the current Claude Code login and retry")
             case .rateLimited: return L("blocker.rateLimited", "Rate limited — retrying on the server's schedule")
             }
         }
 
-        private static func stamp(_ date: Date) -> String {
+        /// In the reader's language. A fixed `zh_Hans_CN` locale put a Chinese month into the
+        /// English sentence.
+        static func stamp(_ date: Date) -> String {
             let f = DateFormatter()
-            f.locale = Locale(identifier: "zh_Hans_CN")
+            f.locale = Locale(identifier: Loc.isCJK ? "zh_Hans_CN" : "en")
             f.setLocalizedDateFormatFromTemplate("MMMdHHmm")
             return f.string(from: date)
         }
@@ -105,7 +104,10 @@ actor ClaudeProvider {
     private var generation: String?
     private var historyNamespace: String?
     private var revision = 0
-    private var task: Task<Reading, Never>?
+    /// The read in flight, and whether a person asked for it.
+    private var task: (work: Task<Reading, Never>, asked: Bool)?
+    /// The last read of Claude Code's login, with the record's stamp when it was taken.
+    private var lastRead: (tokens: [Credentials.Token], stamp: Date, at: Date)?
     private var rejected: [String: Blocker] = [:]
     private var retryNetworkAt: Date?
     private(set) var details = Details()
@@ -113,8 +115,7 @@ actor ClaudeProvider {
     var source: Credentials.Source { details.source }
     var loggedIn: Bool {
         switch blocker {
-        case .notLoggedIn, .notInstalled, .needsSetup, .expired, .unauthorized, .keychainRefused,
-             .credentialsChanged, .storage: return false
+        case .notLoggedIn, .notInstalled, .expired, .unauthorized, .keychainRefused, .credentialsChanged: return false
         default: return true
         }
     }
@@ -138,7 +139,9 @@ actor ClaudeProvider {
         set { defaults.set(newValue?.timeIntervalSince1970 ?? 0, forKey: "quotaRetryAfter") }
     }
 
-    private func offActor<T>(_ work: @escaping () throws -> T) async throws -> T {
+    /// Blocking work, off the actor, with a budget. Running out of budget reads as a refusal: the
+    /// work this guards is the keychain, and a read that never comes back is one nobody answered.
+    private func offActor<T>(patience: TimeInterval = 15, _ work: @escaping () throws -> T) async throws -> T {
         try await withCheckedThrowingContinuation { cont in
             let done = OSAllocatedUnfairLock(initialState: false)
             func claim() -> Bool { done.withLock { value in
@@ -148,50 +151,98 @@ actor ClaudeProvider {
                 let result = Result { try work() }
                 if claim() { cont.resume(with: result) }
             }
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 15) {
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + patience) {
                 if claim() { cont.resume(throwing: Blocker.keychainRefused) }
             }
         }
     }
 
-    private func candidates() async throws -> [Credentials.Token] {
+    /// How long a read of an unchanged record stands in for a fresh one.
+    ///
+    /// Reading the value launches the security tool; reading the record's stamp is an attribute
+    /// query that cannot ask anything. So while the stamp says Claude Code has not written the
+    /// record since, the last read is still the record, and a poll every twenty seconds need not
+    /// launch a process to learn that. The bound covers a write inside the same second as the
+    /// read before it, which a stamp with one-second grain cannot see.
+    private static let rereadAfter: TimeInterval = 300
+
+    private func candidates(asked: Bool, fresh: Bool = false) async throws -> [Credentials.Token] {
         let access = self.access
         if defaults.bool(forKey: "claudeManualTokenSelected") {
             return try await offActor { access.own().map { [$0] } ?? [] }
         }
-        // No gate here any more, and that is the point. 1.0.9 gated this leg on the refusal
-        // latch because it could raise a dialog; the reads themselves are now incapable of it,
-        // so gating them buys nothing and costs the reader a working panel on a machine whose
-        // ACL was perfectly willing. A quiet read that fails is free to try again next poll.
-        var tokens: [Credentials.Token]
+        let stamp = try await offActor(access.stamp)
+        if !asked, !fresh, let last = lastRead, last.stamp == stamp,
+           now().timeIntervalSince(last.at) < Self.rereadAfter {
+            return last.tokens
+        }
+        // A timer does not repeat a read that failed until the record changes or the wait is up.
+        // A person asking is the exception, and the one read allowed to wait for an answer.
+        if !asked, let until = unreadableUntil(stamp), until > now() {
+            return try await standIn()
+        }
+        let tokens: [Credentials.Token]
         do {
-            if let load = access.load { tokens = try await offActor(load) }
-            else { tokens = try await offActor { access.claudeCode().map { [$0] } ?? [] } }
-        } catch {
-            // The fallback on the next line reads the same item in-process, where nothing can
-            // prompt, and it usually succeeds — which is precisely how this looped in silence.
-            // The subprocess read raised a dialog every sweep, failed, and was rescued here, so
-            // no error ever propagated, `classify` never ran, and the latch that exists to stop
-            // the asking could never arm. The quota kept displaying correctly the whole time.
-            // Record the refusal *first*, then recover: recovering is not the same as fine.
-            if case ClaudeCredentialStore.Failure.denied = error { latchKeychainRefusal() }
-            if defaults.bool(forKey: "sharedKeychainOptIn"), let shared = try await offActor(access.shared) { return [shared] }
-            throw error
+            tokens = try await offActor(patience: asked ? 75 : 15) { try access.load(asked) }
+        } catch let error where Self.refused(error) {
+            noteUnreadable(stamp)
+            lastRead = nil
+            return try await standIn()
         }
-        let unrefreshable = !tokens.isEmpty && tokens.allSatisfy {
-            $0.expiresAt.map { $0 <= now() } == true && $0.refreshToken == nil
-        }
-        if tokens.isEmpty || unrefreshable {
-            if let own = try await offActor(access.own) { return [own] }
-            // Not gated on the latch: this read is in-process and non-interactive, so it cannot
-            // be the thing that nags. Gating it too would trade a dialog storm for a dead panel.
-            if defaults.bool(forKey: "sharedKeychainOptIn"),
-               let shared = try await offActor(access.shared) { return [shared] }
-        }
-        // Nothing to show, and the keychain is what would not open. Say that, rather than
-        // "not logged in" about a credential that is sitting right there unread.
-        if tokens.isEmpty, defaults.bool(forKey: "keychainRefused") { throw Blocker.keychainRefused }
+        clearUnreadable()
+        lastRead = stamp.map { (tokens, $0, now()) }
+        // Nothing here renews an expired login, so a saved token stands in while there is one.
+        // Without one, the expired login is still what gets reported: its message names the fix.
+        let expired = !tokens.isEmpty && tokens.allSatisfy { $0.expiresAt.map { $0 <= now() } == true }
+        if tokens.isEmpty || expired, let own = try await offActor(access.own) { return [own] }
         return tokens
+    }
+
+    /// A saved token when Claude Code's login cannot be read; otherwise, the plain fact.
+    private func standIn() async throws -> [Credentials.Token] {
+        if let own = try await offActor(access.own) { return [own] }
+        throw Blocker.keychainRefused
+    }
+
+    // MARK: A read that failed
+
+    /// When a timer may next try a read of Claude Code's login that failed.
+    ///
+    /// From here two causes look the same: the tool put a question on screen and was stopped
+    /// before anyone answered, or securityd was slow. The first must not come back on a schedule —
+    /// a dialog that returns every poll is the defect this app has shipped before — and the second
+    /// should not stall the quota for a day. So the wait starts at a quarter of an hour and doubles
+    /// each time an unchanged record fails again, up to four hours. A new stamp ends it at once:
+    /// once Claude Code has written the record, whatever stopped the read may be gone. Kept in
+    /// defaults, because this app gets relaunched and a relaunch is not news.
+    private func unreadableUntil(_ stamp: Date?) -> Date? {
+        let at = defaults.double(forKey: "claudeUnreadableAt")
+        guard at > 0, defaults.object(forKey: "claudeUnreadableStamp") as? Double == stamp?.timeIntervalSince1970
+        else { return nil }
+        let failures = min(max(1, defaults.integer(forKey: "claudeUnreadableCount")), 8)
+        let wait = min(15 * 60 * pow(2, Double(failures - 1)), 4 * 3600)
+        return Date(timeIntervalSince1970: at).addingTimeInterval(wait)
+    }
+
+    private func noteUnreadable(_ stamp: Date?) {
+        let again = defaults.double(forKey: "claudeUnreadableAt") > 0
+            && defaults.object(forKey: "claudeUnreadableStamp") as? Double == stamp?.timeIntervalSince1970
+        defaults.set(again ? defaults.integer(forKey: "claudeUnreadableCount") + 1 : 1, forKey: "claudeUnreadableCount")
+        defaults.set(now().timeIntervalSince1970, forKey: "claudeUnreadableAt")
+        defaults.set(stamp?.timeIntervalSince1970, forKey: "claudeUnreadableStamp")
+    }
+
+    private func clearUnreadable() {
+        guard defaults.object(forKey: "claudeUnreadableAt") != nil else { return }
+        for key in ["claudeUnreadableAt", "claudeUnreadableStamp", "claudeUnreadableCount"] {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
+    /// The tool refused or went unanswered, or the read as a whole ran out of budget.
+    private static func refused(_ error: Error) -> Bool {
+        if case ClaudeCredentialStore.Failure.denied = error { return true }
+        return (error as? Blocker) == .keychainRefused
     }
 
     private func signature(_ tokens: [Credentials.Token]) -> String {
@@ -203,12 +254,11 @@ actor ClaudeProvider {
         generation = signature
         // Keyed on *who* the credential belongs to, not on the bytes of the credential.
         //
-        // `signature` fingerprints the whole document, so a routine access-token rotation —
-        // which Claude Code performs roughly hourly under load, and which this app now performs
-        // itself — changed it, and with it every window's `observationKey`. The sample ring and
-        // every pending reset promise were orphaned once an hour by an event that is not a
-        // change of account at all: the forecast fell back to the whole-window average, and the
-        // "you can start again" alert was left waiting on a key nobody would write to again.
+        // `signature` fingerprints the whole document, so every renewal Claude Code performs
+        // changes it, and with it every window's `observationKey`. Keyed on that, the sample ring
+        // and every pending reset promise were orphaned by an event that is not a change of
+        // account at all: the forecast fell back to the whole-window average, and the "you can
+        // start again" alert was left waiting on a key nobody would write to again.
         //
         // `accountKey` is the fingerprint of account uuid + organisation uuid that `sameIdentity`
         // already trusts to decide whether two credentials are the same person. Nil when the
@@ -220,19 +270,29 @@ actor ClaudeProvider {
         rejected = [:]
     }
 
-    func windows(force: Bool = false) async -> Reading {
-        if let task { return await task.value }
+    /// `asked` is a person — the Refresh button, the menu's Refresh now — as opposed to a timer or
+    /// a turn landing. Only that read retries one that failed, and only that read waits long
+    /// enough for someone to answer macOS.
+    func windows(force: Bool = false, asked: Bool = false) async -> Reading {
+        // Join the read in flight, unless a person is asking and that read is a timer's: it gives
+        // up on the keychain within seconds, and a failure it leaves behind is not retried for a
+        // while. Someone who pressed Refresh gets a read of their own.
+        while let running = task {
+            if running.asked || !asked { return await running.work.value }
+            _ = await running.work.value
+            if task?.work == running.work { task = nil }
+        }
         let version = revision
-        let fresh = Task { await fetch(force: force, version: version) }
-        task = fresh
-        let result = await fresh.value
-        if revision == version { task = nil }
+        let work = Task { await fetch(force: force || asked, asked: asked, version: version) }
+        task = (work, asked)
+        let result = await work.value
+        if revision == version, task?.work == work { task = nil }
         return result
     }
 
-    private func fetch(force: Bool, version: Int, reloads: Int = 1) async -> Reading {
+    private func fetch(force: Bool, asked: Bool, version: Int, reloads: Int = 1) async -> Reading {
         do {
-            let tokens = try await candidates()
+            let tokens = try await candidates(asked: asked)
             try check(version)
             let expected = signature(tokens)
             adopt(expected, identity: tokens.first?.accountKey)
@@ -259,7 +319,7 @@ actor ClaudeProvider {
                 do {
                     guard candidate.hasUsageScope else { throw Blocker.forbidden }
                     if let error = rejected[candidate.generation] { throw error }
-                    return try await probe(candidate, all: tokens, expected: expected, version: version)
+                    return try await probe(candidate, expected: expected, asked: asked, version: version)
                 } catch let error as Blocker where error == .unauthorized || error == .forbidden
                                                      || error.isExpired {
                     rejected[candidate.generation] = error
@@ -268,15 +328,15 @@ actor ClaudeProvider {
             }
             throw lastFailure
         } catch Blocker.credentialsChanged where reloads > 0 {
-            return await fetch(force: force, version: version, reloads: reloads - 1)
+            return await fetch(force: force, asked: asked, version: version, reloads: reloads - 1)
         } catch {
             guard version == revision, !Task.isCancelled else { return staleReading() }
             let failure = classify(error)
             blocker = failure
             switch failure {
-            case .unauthorized, .forbidden, .expired, .notLoggedIn, .notInstalled, .storage, .credentialsChanged:
+            case .unauthorized, .forbidden, .expired, .notLoggedIn, .notInstalled, .credentialsChanged:
                 cache = []; details.spend = nil; details.plan = nil; details.tier = nil
-            details.lastSuccessAt = nil
+                details.lastSuccessAt = nil
             case .network, .invalidResponse:
                 retryNetworkAt = now().addingTimeInterval(60)
             default: break
@@ -285,43 +345,29 @@ actor ClaudeProvider {
         }
     }
 
-    private func probe(_ original: Credentials.Token, all: [Credentials.Token], expected: String,
+    private func probe(_ token: Credentials.Token, expected: String, asked: Bool,
                        version: Int) async throws -> Reading {
-        var token = original
-        var current = all
-        var expected = expected
-        var rotated = false
-        if let expiry = token.expiresAt, expiry.timeIntervalSince(now()) <= 300,
-           token.refreshToken != nil, access.persist != nil {
-            token = try await rotate(token, expected: expected, version: version)
-            rotated = true
-            current = all.map { $0.generation == original.generation ? token : $0 }
-            expected = signature(current)
-            generation = expected
-        }
-        if let expiry = token.expiresAt, expiry <= now() { throw Blocker.expired(expiryToReport(token)) }
+        // No renewal, however close the expiry. Renewing spends a refresh token Claude Code also
+        // holds and returns the only copy of its replacement, so it is safe only for whoever can
+        // store that replacement — and this app stores nothing. On 2026-09-08 three renewals here
+        // could not be stored, and the login that machine's CLI shared had to be rebuilt by hand.
+        // An expired login now waits for Claude Code to renew it, and the next read finds the
+        // replacement where Claude Code put it.
+        if let expiry = token.expiresAt, expiry <= now() { throw Blocker.expired(expiry) }
         details.source = token.source
         details.lastAttemptAt = now()
-        var reply = try await request(ClaudeUsageClient.usage(token: token.value))
+        let reply = try await request(ClaudeUsageClient.usage(token: token.value))
         try check(version)
-        guard var http = reply.1 as? HTTPURLResponse else { throw Blocker.invalidResponse }
+        guard let http = reply.1 as? HTTPURLResponse else { throw Blocker.invalidResponse }
+        // A 401 is often Claude Code having renewed while the request was out. Read the record
+        // again before believing anything about the old token — past the saved read, since the
+        // saved read is the old token.
         if http.statusCode == 401 {
-            // The CLI may already have replaced the source; adopt it before rotating anything.
-            guard signature(try await candidates()) == expected else { throw Blocker.credentialsChanged }
-            try check(version)
-            if !rotated, token.refreshToken != nil, access.persist != nil {
-                token = try await rotate(token, expected: expected, version: version)
-                current = current.map { $0.generation == original.generation ? token : $0 }
-                expected = signature(current); generation = expected
-                reply = try await request(ClaudeUsageClient.usage(token: token.value))
-                try check(version)
-                guard let retried = reply.1 as? HTTPURLResponse else { throw Blocker.invalidResponse }
-                http = retried
+            guard signature(try await candidates(asked: asked, fresh: true)) == expected else {
+                throw Blocker.credentialsChanged
             }
+            try check(version)
         }
-        // The preferred source may have changed even though this request succeeded.
-        guard signature(try await candidates()) == expected else { throw Blocker.credentialsChanged }
-        try check(version)
         do { try checkHTTP(http) }
         catch let failure as Blocker {
             if failure == .unauthorized || failure == .forbidden { rejected[token.generation] = failure }
@@ -340,213 +386,6 @@ actor ClaudeProvider {
         details.source = token.source
         blocker = .none; retryNetworkAt = nil
         return (cache, cache.contains(where: \.isStale))
-    }
-
-    /// A record of our own token refreshes, kept because the alternative is guesswork.
-    ///
-    /// Claude Code writes the same keychain item this app does, and the rotation deliberately
-    /// preserves every field it does not own — so after the fact the credential itself cannot
-    /// say which of the two rewrote it. Twice now that question has mattered and twice the
-    /// honest answer was "cannot tell". This is the app stating, in its own store, what it did
-    /// and when. A timestamp, an outcome and a count: no token, no account, no server body.
-    /// `success` is a parameter rather than a comparison against the outcome string, because
-    /// the string is display copy: it is printed, in Chinese, next to every failure phrase.
-    /// Deciding "did it work" by matching it against the literal `"saved"` entangled the counter
-    /// with the wording, so the first time anyone rephrased the success line the tally would
-    /// have silently stopped — and the line was the only English word in a Chinese readout.
-    /// What the last rotation attempt did, stored as a **key** rather than as its own words.
-    ///
-    /// It used to store the Chinese sentence. That is a forensic record which outlives the run
-    /// that wrote it, so once the app became bilingual an English reader got their self-check
-    /// output in English with one Chinese phrase in the middle of it — and there is no way to
-    /// translate a sentence after the fact. A key can be rendered in whatever language is asked
-    /// for, including one chosen after the event was recorded.
-    enum Outcome: String {
-        case invalidated, refused, unreadable, savedFailed, changedUnderUs, renewed
-
-        var message: String {
-            switch self {
-            case .invalidated:    return L("outcome.invalidated", "credential no longer valid")
-            case .refused:        return L("outcome.refused", "exchange refused")
-            case .unreadable:     return L("outcome.unreadable", "reply not understood")
-            case .savedFailed:    return L("outcome.savedFailed", "renewed but could not write it back")
-            case .changedUnderUs: return L("outcome.changedUnderUs", "credential changed during write-back")
-            case .renewed:        return L("outcome.renewed", "renewed")
-            }
-        }
-    }
-
-    private func note(_ outcome: Outcome, detail: String? = nil, success: Bool = false) {
-        defaults.set(now().timeIntervalSince1970, forKey: "claudeRefreshAt")
-        defaults.set(detail.map { outcome.rawValue + "|" + $0 } ?? outcome.rawValue,
-                     forKey: "claudeRefreshOutcome")
-        if success {
-            defaults.set(defaults.integer(forKey: "claudeRefreshCount") + 1, forKey: "claudeRefreshCount")
-        }
-    }
-
-    nonisolated static func refreshRecord(_ d: UserDefaults = .standard)
-        -> (at: Date, outcome: String, count: Int)? {
-        let stamp = d.double(forKey: "claudeRefreshAt")
-        guard stamp > 0 else { return nil }
-        // Records written before 1.0.7 hold the Chinese sentence itself; there is nothing to
-        // translate after the fact, so those pass through as they were written.
-        let raw = d.string(forKey: "claudeRefreshOutcome") ?? ""
-        let parts = raw.split(separator: "|", maxSplits: 1).map(String.init)
-        let text: String
-        if let o = Outcome(rawValue: parts.first ?? "") {
-            text = parts.count > 1 ? o.message + " (" + parts[1] + ")" : o.message
-        } else {
-            text = raw.isEmpty ? L("outcome.unknown", "unknown") : raw
-        }
-        return (Date(timeIntervalSince1970: stamp), text, d.integer(forKey: "claudeRefreshCount"))
-    }
-
-    /// Exchanges in flight, keyed by the credential each one started from.
-    ///
-    /// A refresh token is single-use in the worst case: present it twice and the second attempt
-    /// is `invalid_grant`, and by then the first attempt's replacement may be the only working
-    /// credential in existence. Two concurrent fetches can otherwise both reach the exchange
-    /// with the same token — `invalidate()` clears the memoised fetch and cancels it, but a
-    /// cancelled task is not a stopped one, so the next `windows()` starts a second fetch that
-    /// happily spends the same refresh token again. The second caller joins the first exchange
-    /// instead of racing it.
-    private var rotations: [String: Task<Credentials.Token, Error>] = [:]
-
-    /// The expiry date it is honest to put in front of the reader, or nil.
-    ///
-    /// `refreshTokenExpiresAt` describes the refresh token Claude Code wrote. `rotated` rewrites
-    /// `accessToken`, `refreshToken` and `expiresAt` but deliberately not this field — invariant
-    /// one forbids reshaping a record we co-own — so once this app has swapped a token, the date
-    /// on disk may belong to a refresh token that no longer exists. Naming a date we cannot vouch
-    /// for is worse than naming none: the reader would go looking for what happened that day.
-    private func expiryToReport(_ token: Credentials.Token) -> Date? {
-        defaults.integer(forKey: "claudeRefreshCount") == 0 ? token.refreshExpiresAt : nil
-    }
-
-    /// A write-back that failed will fail again, and the retry is not free: a refresh token is
-    /// single-use in the worst case, so every exchange whose replacement cannot be stored can
-    /// kill the copy Claude Code still holds. Twenty seconds later is not a retry, it is the
-    /// same mistake at a cadence — and the mistake logs someone out of their own CLI. Cleared by
-    /// 设置 → 重新连接, and by any exchange that does complete.
-    private var rotationBlockedUntil: Date? {
-        get {
-            let n = defaults.double(forKey: "claudeRotationBlockedUntil")
-            guard n.isFinite, n > 0 else { return nil }
-            let date = Date(timeIntervalSince1970: n)
-            return date > now() ? date : nil
-        }
-        set { defaults.set(newValue?.timeIntervalSince1970 ?? 0, forKey: "claudeRotationBlockedUntil") }
-    }
-
-    private func rotate(_ token: Credentials.Token, expected: String, version: Int) async throws -> Credentials.Token {
-        guard let refresh = token.refreshToken, let persist = access.persist
-        else { throw Blocker.expired(expiryToReport(token)) }
-        // Deliberately no `note()` here: this path performs no exchange, and writing a record
-        // once per poll would erase the one that says why the write-back failed.
-        if rotationBlockedUntil != nil { throw Blocker.storage }
-        // The exchange spends a refresh token that is single-use in the worst case, and the
-        // reply carries the only copy of its replacement. So the order matters more than it
-        // looks: prove the record can still be read back *first*, and a broken write-back costs
-        // a poll. Prove it afterwards — which is all this did — and it costs the reader the
-        // login their CLI shares.
-        //
-        // That is not hypothetical. On 2026-09-08 the compare-and-swap read failed after three
-        // exchanges, because it forked a tool that raised a dialog nobody could answer in time.
-        // Each exchange had already made the server rotate the refresh token; each replacement
-        // was lost; the credential in the keychain was dead by the third. The read is quiet now
-        // and that particular cause is gone, but the ordering was the deeper mistake.
-        if let storable = access.storable, !storable(token) {
-            rotationBlockedUntil = now().addingTimeInterval(30 * 60)
-            throw Blocker.storage
-        }
-
-        // 1.0.1 also skipped the exchange outright when `refreshTokenExpiresAt` had passed. That
-        // is gone, and three separate reasons say it should be:
-        //
-        //   * it was gated on `claudeRefreshCount == 0`, a global counter that only ever goes up
-        //     and is never reset — so the skip was unreachable on any install that had rotated
-        //     even once, which is every install more than an hour old;
-        //   * it ran ahead of the signature check below, so a reader who had just fixed their
-        //     login with `claude auth login` was told "已过期" for another poll instead of the
-        //     mismatch being caught and re-read within the same cycle;
-        //   * it called `note()` on a path where no exchange happened, once per poll, which
-        //     overwrites the one record that says a write-back failed.
-        //
-        // Saving a round-trip was always the minor half of that idea. The half worth keeping is
-        // telling the reader the date, and that needs no gate — see `expiryToReport`.
-        guard signature(try await candidates()) == expected else { throw Blocker.credentialsChanged }
-        try check(version)
-
-        // This is the last cancellation check before the exchange, and the exchange itself runs
-        // in an unstructured task on purpose: an unstructured `Task` does not inherit
-        // cancellation, so once the POST has started, nothing can stop it from running through
-        // to the write-back.
-        //
-        // That matters more than it looks. `invalidate()` — the reader tapping 「重新连接」 or
-        // saving a manual token — cancels the in-flight fetch, and URLSession honours
-        // cancellation: the refresh POST would be torn down mid-flight. If the server had
-        // already rotated the refresh token by then, its replacement arrives in a response
-        // nobody is listening for, Claude Code's stored copy is dead, and the reader is logged
-        // out of their own CLI by a settings tap. Losing interest in the *reading* must not be
-        // able to abandon the *credential*.
-        //
-        // `await work.value` is not a cancellation point, so this waits for the exchange to
-        // finish either way; the caller can be told the reading was cancelled afterwards.
-        if let inFlight = rotations[token.generation] { return try await inFlight.value }
-        let work = Task { try await self.exchange(token, refresh: refresh, persist: persist) }
-        rotations[token.generation] = work
-        defer { rotations[token.generation] = nil }
-        let fresh = try await work.value
-        // Now that the replacement is safely on disk, losing interest is free again.
-        try check(version)
-        return fresh
-    }
-
-    /// The exchange and the write-back, as one unit that always completes.
-    private func exchange(_ token: Credentials.Token, refresh: String,
-                          persist: @escaping (Credentials.Token, Credentials.Token) throws -> Bool)
-        async throws -> Credentials.Token {
-        let (data, response) = try await request(ClaudeUsageClient.refresh(token: refresh))
-        guard let http = response as? HTTPURLResponse else { throw Blocker.invalidResponse }
-        if http.statusCode == 400 || http.statusCode == 401 {
-            let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            if body?["error"] as? String == "invalid_grant" || http.statusCode == 401 {
-                note(.invalidated); throw Blocker.expired(expiryToReport(token))
-            }
-            rejected[token.generation] = .invalidResponse
-            note(.refused, detail: "\(http.statusCode)")
-            throw Blocker.invalidResponse
-        }
-        try checkHTTP(http)
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw Blocker.invalidResponse }
-        let rotated: Credentials.Token
-        do { rotated = try ClaudeCredentialStore.rotated(token, response: object, now: now()) }
-        catch {
-            rejected[token.generation] = .invalidResponse
-            note(.unreadable); throw Blocker.invalidResponse
-        }
-        // Nothing between the response and the write below re-reads the credential or checks
-        // for cancellation. The re-read that used to sit here was redundant with the store's own
-        // compare-and-swap — `save(_:expected:)` reads the record again and refuses to write
-        // unless it still matches, which is the check that actually protects against the CLI
-        // changing it underneath us. Cancellation is not a concurrent change; it is us losing
-        // interest, and losing interest must not cost anyone their login.
-        let saved: Bool
-        do { saved = try await offActor { try persist(rotated, token) } }
-        catch {
-            rejected[token.generation] = .storage
-            // The dangerous one, and the reason it is recorded rather than merely thrown: the
-            // exchange has already happened, so if the server rotated the refresh token then
-            // the copy Claude Code still holds may now be dead. Nothing here can undo that; the
-            // least the app can do is leave a note saying it is what happened.
-            rotationBlockedUntil = now().addingTimeInterval(30 * 60)
-            note(.savedFailed); throw Blocker.storage
-        }
-        guard saved else { note(.changedUnderUs); throw Blocker.credentialsChanged }
-        rotationBlockedUntil = nil
-        note(.renewed, success: true)
-        return rotated
     }
 
     private func check(_ version: Int) throws {
@@ -569,49 +408,19 @@ actor ClaudeProvider {
         if let error = error as? Blocker { return error }
         if let error = error as? ClaudeCredentialStore.Failure {
             switch error {
-            case .denied:
-                latchKeychainRefusal()
-                return .keychainRefused
-            case .ambiguous, .changed: return .credentialsChanged
+            case .denied: return .keychainRefused
+            case .ambiguous: return .credentialsChanged
             case .malformed: return .invalidResponse
-            case .storage: return .storage
             }
         }
         if error is ClaudeUsageMapper.Failure { return .invalidResponse }
         return .network
     }
 
-    /// A refusal is a decision the reader made, and asking again every twenty seconds is how an
-    /// app teaches people to click Deny on reflex. Deny and "left the dialog standing" both land
-    /// here on purpose: from this side they are the same answer, and the second one is the one
-    /// that used to loop. It closes only the interactive door — the in-process read stays open,
-    /// so the panel keeps its numbers. 设置 → 重新连接 reopens it (`enableSharedKeychain`).
-    private func latchKeychainRefusal() { defaults.set(true, forKey: "keychainRefused") }
-
     private func sameIdentity(_ a: Credentials.Token, _ b: Credentials.Token) -> Bool {
         if let first = a.accountKey, let second = b.accountKey { return first == second }
         if let refresh = a.refreshToken, refresh == b.refreshToken { return true }
         return a.value == b.value
-    }
-
-    /// True when the authorised read came back with a credential. The caller has to say so:
-    /// this used to fire and forget, so a refusal returned silently and a success that changed
-    /// no blocker looked identical to it — the button did nothing anyone could see, twice over.
-    @discardableResult
-    func enableSharedKeychain() async -> Bool {
-        defaults.set(true, forKey: "sharedKeychainOptIn")
-        defaults.set(false, forKey: "keychainRefused")
-        defaults.set(0, forKey: "claudeRotationBlockedUntil")
-        defaults.set(false, forKey: "claudeManualTokenSelected")
-        invalidate()
-        guard let authorise = access.authorise else { return true }
-        // The one read allowed to ask, and deliberately without a watchdog — what it waits for
-        // is a person reading a permission prompt, and cutting that short is the original bug.
-        let granted = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
-            DispatchQueue.global(qos: .userInitiated).async { cont.resume(returning: authorise()) }
-        }
-        if granted { invalidate() }
-        return granted
     }
 
     func useOwnToken(_ raw: String) async -> TokenUpdate {
@@ -632,7 +441,7 @@ actor ClaudeProvider {
     }
 
     private func invalidate() {
-        revision += 1; task?.cancel(); task = nil
+        revision += 1; task?.work.cancel(); task = nil; lastRead = nil
         generation = nil; cache = []; details = Details()
         rejected = [:]; retryNetworkAt = nil; blocker = .none
     }
@@ -667,7 +476,7 @@ actor ClaudeProvider {
             var w = value; w.isStale = true
             if let reset = w.resetsAt, reset <= now() {
                 w.percent = nil; w.severity = .normal
-            w.note = L("note.unconfirmed", "unconfirmed"); w.confirmedExhausted = false
+                w.note = L("note.unconfirmed", "unconfirmed"); w.confirmedExhausted = false
             }
             return w
         }, true)
@@ -715,6 +524,4 @@ actor ClaudeProvider {
         }
         return now.addingTimeInterval(300)
     }
-
-
 }

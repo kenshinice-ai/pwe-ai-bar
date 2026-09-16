@@ -140,8 +140,12 @@ echo "── tests ────────────────────�
 # was misleading, which is its own kind of wrong.
 # `grep` returning 1 on a run with no matching line would abort a *passing* build under
 # pipefail, so the test result is taken from swift itself and grep only shapes the report.
+# Outside iCloud, like everything else that gets signed: Swift 6.4 signs the resource bundle as
+# it builds it, and codesign refuses one carrying the file provider's com.apple.FinderInfo.
+# Exported, so build-app.sh and package.sh build into the same place.
+export PWEBAR_BUILD_ROOT="${PWEBAR_BUILD_ROOT:-${TMPDIR:-/tmp}/pweaibar-spm}"
 set +o pipefail
-TEST_OUT="$(swift test 2>&1)"; TEST_RC=$?
+TEST_OUT="$(swift test --scratch-path "$PWEBAR_BUILD_ROOT" 2>&1)"; TEST_RC=$?
 set -o pipefail
 grep -E "Executed [0-9]+ tests|error:" <<<"$TEST_OUT" | tail -3
 [[ $TEST_RC -eq 0 ]] || { echo "✗ tests failed"; exit 1; }

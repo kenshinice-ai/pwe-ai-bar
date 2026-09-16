@@ -80,9 +80,8 @@ final class CredentialTests: XCTestCase {
         let count = await http.count; XCTAssertEqual(count, 1)
     }
 
-    /// Claude Code's credential is the one the CLI keeps refreshed and the one that costs no
-    /// dialog. A token the user pasted in months ago is the fallback for machines without the
-    /// CLI, not the preferred source — and neither path may reach the prompting keychain read.
+    /// Claude Code's credential is the one the CLI keeps renewed. A token the user pasted in months
+    /// ago is the fallback for machines without the CLI, not the preferred source.
     func testClaudeCodeCredentialWinsAndOwnTokenIsTheFallback() async throws {
         let space = try TestSpace(); let clock = TestClock(); let credential = FakeCredential()
         credential.claudeCode = "from-claude-code"
@@ -190,11 +189,9 @@ final class CredentialTests: XCTestCase {
         XCTAssertTrue(reading.stale); XCTAssertNil(reading.windows.first?.percent)
         XCTAssertEqual(reading.windows.first?.note, "unconfirmed")
     }
-    /// Measured on the machine this was written on: Claude Code's keychain credential sat
-    /// expired for seven and a half hours while Claude Code itself ran the entire time. The CLI
-    /// does not rewrite that item on every refresh, so "open Claude Code and it will renew" was
-    /// advice that would not have worked — and taking the first credential found meant the app
-    /// reported 登录过期 while a perfectly good long-lived token sat in its own item, never tried.
+    /// This app does not renew Claude Code's login, so an expired one stays expired until Claude
+    /// Code runs. Taking the first credential found meant reporting 登录过期 in the meantime while a
+    /// perfectly good long-lived token sat in the app's own item, never tried.
     func testAnExpiredCLICredentialFallsThroughToTheStoredToken() async throws {
         let space = try TestSpace(); let clock = TestClock(); let credential = FakeCredential()
         credential.claudeCode = "expired-cli-token"
@@ -242,7 +239,7 @@ final class CredentialTests: XCTestCase {
         XCTAssertTrue(reading.stale)
         let blocker = await p.blocker
         XCTAssertTrue(blocker.isExpired, "an expired credential blocks, whatever the record said")
-        XCTAssertTrue(blocker.message.lowercased().contains("sign in"),
+        XCTAssertTrue(blocker.message.contains("open Claude Code"),
                       "the remedy has to be one the reader can actually reach: \(blocker.message)")
         let count = await http.count
         XCTAssertEqual(count, 0, "an expired credential is not worth a request")
