@@ -115,6 +115,14 @@ done)
   exit 1; }
 echo "✓ no iCloud conflict copies tracked"
 
+# The check above reads the index, and on 2026-09-16 the copies that mattered were untracked: two
+# 20 MB "PWE-Loan-Bar-Windows 2.zip" in a staging directory .gitignore covers, which the site
+# deploy would have uploaded on every run. This one walks the working tree instead. Skipped
+# quietly when the file is not beside this app, like the shared-sources check below.
+if [[ -x ../check-icloud-copies.py ]]; then
+  ../check-icloud-copies.py . || exit 1
+fi
+
 gh auth status >/dev/null 2>&1 || { echo "✗ gh is not authenticated (run: gh auth login)"; exit 1; }
 echo "✓ gh authenticated"
 
