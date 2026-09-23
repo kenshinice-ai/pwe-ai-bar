@@ -60,7 +60,7 @@ watcher，走不到这一行。第一次启动 app 就能看出来；崩了的�
   `Store` 里不调 `watchSpool()` 并把 `eventInterval` 默认值改回 1，就退回每秒轮询。
 - 去重出问题：`digest` 的 `counted:` 传 `{ _ in false }`，同时把 `messageKey` 改成对每行都返回不同的值，
   就退回按行计数。缓存版本号记得再加一。
-- 四个提交之间可以分开 revert：`3ba07ab` 计数 / 定价 / FSEvents，`4b448d4` 钩子 / spool / 倒计时 / 登录项，
+- 这几个提交可以分开 revert：`3ba07ab` 计数 / 定价 / FSEvents，`4b448d4` 钩子 / spool / 倒计时 / 登录项，
   `bc2069b` 退避 / 历史 / Bark / 格式化器，`5b1852d` CI 与文档，`7be03ad` 两处测试字面量。
 
 ---
