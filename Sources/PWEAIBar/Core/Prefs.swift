@@ -148,8 +148,12 @@ final class Prefs: ObservableObject {
     @Published var sound: Bool       { didSet { d.set(sound, forKey: "sound") } }
     @Published var pushURL: String   { didSet { d.set(pushURL, forKey: "pushURL") } }
     @Published var launchAtLogin: Bool {
-        didSet { d.set(launchAtLogin, forKey: "launchAtLogin"); applyLoginItem() }
+        didSet {
+            d.set(launchAtLogin, forKey: "launchAtLogin")
+            if !syncingLoginItem { applyLoginItem() }
+        }
     }
+    private var syncingLoginItem = false
 
     /// Whether the app may ask the site if there is a newer version. Three states, not two:
     /// `nil` means nobody has been asked yet, which is what the panel's one-line question reads
@@ -211,6 +215,23 @@ final class Prefs: ObservableObject {
         do {
             if launchAtLogin { try SMAppService.mainApp.register() }
             else { try SMAppService.mainApp.unregister() }
-        } catch { /* the switch reflects intent; a failure here is not worth interrupting for */ }
+        } catch { /* reported by the sync below rather than by an alert */ }
+        syncLoginItem()
+    }
+
+    /// Puts the switch back in line with what macOS actually has registered.
+    ///
+    /// It used to reflect intent only, so a registration that failed — an app run from outside
+    /// /Applications, or one the user removed under System Settings ▸ Login Items — left a switch
+    /// saying "on" for an app that would never launch at login. Waiting for the user's approval
+    /// counts as on: that is a state they can finish, not one to hide from them.
+    func syncLoginItem() {
+        guard #available(macOS 13.0, *) else { return }
+        let status = SMAppService.mainApp.status
+        let actual = status == .enabled || status == .requiresApproval
+        guard actual != launchAtLogin else { return }
+        syncingLoginItem = true
+        launchAtLogin = actual
+        syncingLoginItem = false
     }
 }

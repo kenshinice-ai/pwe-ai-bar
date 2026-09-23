@@ -5,6 +5,8 @@ enum HookProvider {
     static let directory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".cache/pwe-ai-bar")
     static let log = directory.appendingPathComponent("events.jsonl")
+    /// Where the hook script drops one file per event.
+    static let spool = directory.appendingPathComponent("events")
     static let settingsURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".claude/settings.json")
     static let required = [("Notification", "waiting"), ("UserPromptSubmit", "answered"), ("Stop", "finished")]
@@ -132,6 +134,56 @@ enum HookProvider {
         } catch { return false }
     }
 
+    /// Takes out exactly the entries `install` put in, and nothing else.
+    ///
+    /// The settings file is the user's own Claude Code configuration, merged into rather than
+    /// owned — which is why the cask cannot zap it, and why this has to exist: until 1.6.0 the
+    /// cask pointed people at a Remove button there was no code behind. Same guards as install:
+    /// a symlinked or unreadable file is refused, the original bytes are backed up first, and a
+    /// file that changed under us is left alone. A matcher left with no hooks, and an event
+    /// left with no matchers, go too; anything else in them stays exactly where it was.
+    @discardableResult
+    static func uninstall(scriptPath: String? = nil, settings: URL = settingsURL) -> Bool {
+        let fm = FileManager.default
+        let path = scriptPath ?? script.path
+        do {
+            if (try? settings.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true { return false }
+            let original: Data
+            do { original = try Data(contentsOf: settings) }
+            catch let error as CocoaError where error.code == .fileReadNoSuchFile { return true }
+            var root = try configuration(original)
+            guard var hooks = root["hooks"] as? [String: Any] else { return true }
+            var removed = false
+            for (event, kind) in required {
+                guard let matchers = hooks[event] as? [[String: Any]] else { continue }
+                var kept: [[String: Any]] = []
+                for var matcher in matchers {
+                    let entries = matcher["hooks"] as? [[String: Any]] ?? []
+                    let others = entries.filter {
+                        !($0["type"] as? String == "command"
+                          && isOurCommand($0["command"] as? String, path: path, kind: kind))
+                    }
+                    if others.count == entries.count { kept.append(matcher); continue }
+                    removed = true
+                    if others.isEmpty { continue }
+                    matcher["hooks"] = others
+                    kept.append(matcher)
+                }
+                if kept.isEmpty { hooks.removeValue(forKey: event) } else { hooks[event] = kept }
+            }
+            guard removed else { return true }
+            if hooks.isEmpty { root.removeValue(forKey: "hooks") } else { root["hooks"] = hooks }
+            let output = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+            guard try Data(contentsOf: settings) == original else { return false }
+            let backup = settings.appendingPathExtension("pwe-backup-\(UUID().uuidString)")
+            try original.write(to: backup, options: .atomic)
+            try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backup.path)
+            try output.write(to: settings, options: .atomic)
+            try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: settings.path)
+            return true
+        } catch { return false }
+    }
+
     static func decode(_ data: Data) -> AgentEvent? {
         guard let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let kind = (o["kind"] as? String).flatMap(AgentEvent.Kind.init),
@@ -230,5 +282,45 @@ actor HookEventReader {
         if let previous = latest[event.id], previous.at > event.at
             || (previous.at == event.at && previous.key >= event.key) { return }
         latest[event.id] = event
+    }
+}
+
+/// Calls back when a directory's entries change — a file added, renamed into it, or removed.
+///
+/// The hook spool used to be listed once a second, all day, to catch an event that arrives a
+/// few times an hour. A kqueue on the directory costs nothing until something lands, and it
+/// lands the moment the hook script renames its file into place. Nil where it cannot be set up
+/// (the directory does not exist yet, or not on macOS); the caller keeps a slow poll either way.
+final class DirectoryWatch {
+    #if os(macOS)
+    private let source: DispatchSourceFileSystemObject
+    #endif
+    /// Set once the directory itself was removed or renamed; the watch is dead and the caller
+    /// should make a new one.
+    private(set) var gone = false
+
+    init?(_ url: URL, queue: DispatchQueue = .main, onChange: @escaping () -> Void) {
+        #if os(macOS)
+        let fd = open(url.path, O_EVTONLY)
+        guard fd >= 0 else { return nil }
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd,
+                                                               eventMask: [.write, .delete, .rename],
+                                                               queue: queue)
+        self.source = source
+        source.setEventHandler { [weak self] in
+            if !source.data.isDisjoint(with: [.delete, .rename]) { self?.gone = true }
+            onChange()
+        }
+        source.setCancelHandler { close(fd) }
+        source.resume()
+        #else
+        return nil
+        #endif
+    }
+
+    deinit {
+        #if os(macOS)
+        source.cancel()
+        #endif
     }
 }

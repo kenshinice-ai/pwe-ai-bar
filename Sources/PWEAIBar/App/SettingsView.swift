@@ -36,6 +36,9 @@ enum Detected: Equatable {
 struct SettingsView: View {
     @ObservedObject var prefs = Prefs.shared
     var installHooks: () -> Bool
+    /// Takes our three entries back out of `~/.claude/settings.json`. The cask's zap stanza
+    /// cannot touch that file, so this is the only clean way out.
+    var removeHooks: () -> Bool = { HookProvider.uninstall() }
     var saveToken: (String) async -> ClaudeProvider.TokenUpdate
     /// Injectable so a test can assert against a stated screen height rather than whichever
     /// machine happens to run it.
@@ -55,13 +58,14 @@ struct SettingsView: View {
     @State private var checking = false
 
     init(installHooks: @escaping () -> Bool,
+         removeHooks: @escaping () -> Bool = { HookProvider.uninstall() },
          saveToken: @escaping (String) async -> ClaudeProvider.TokenUpdate,
          prefs: Prefs? = nil,
          tokenEditor: TokenEditor? = nil, hookInstalled: Bool? = nil,
          updates: UpdateCheck? = nil,
          usableHeight: @escaping () -> CGFloat? = { NSScreen.main?.visibleFrame.height },
          onHeight: @escaping (CGFloat) -> Void = { _ in }) {
-        self.installHooks = installHooks; self.saveToken = saveToken
+        self.installHooks = installHooks; self.removeHooks = removeHooks; self.saveToken = saveToken
         self.usableHeight = usableHeight; self.onHeight = onHeight
         self.prefs = prefs ?? .shared
         self.updates = updates ?? UpdateCheck()
@@ -200,6 +204,12 @@ struct SettingsView: View {
                             hookState = installHooks() ? .installed : .failed
                         }
                         .font(Theme.sans(12))
+                        if hookState != .absent {
+                            Button(L("settings.hooks.remove", "Remove")) {
+                                hookState = removeHooks() ? .absent : .failed
+                            }
+                            .font(Theme.sans(12))
+                        }
                     }
                 }
             }
@@ -217,6 +227,7 @@ struct SettingsView: View {
                     }
                 }
                 switchRow(L("settings.launchAtLogin", "Launch at login"), $prefs.launchAtLogin)
+                    .onAppear { prefs.syncLoginItem() }
                 row(L("settings.updates", "Updates")) { updatesRow }
                 row(L("settings.subscription", "Subscription price")) { subscription }
             }

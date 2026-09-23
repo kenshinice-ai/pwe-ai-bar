@@ -48,6 +48,9 @@ final class StoreTests: XCTestCase {
         let store = Store(claude: p, rules: rules, readEvents: { await reader.events() },
                           readLocal: { _, _ in .init(trophy: Trophy(), context: nil, lastTurnAt: nil) }, readCodex: { ([], nil) },
                           deliver: { alert, _ in delivered.append(alert); return true }, tracks: { (true, false) },
+                          // An injected reader has no spool to watch, so it is polled; at the
+                          // production backstop of 10 s this would outlast the 5 s it asserts.
+                          eventInterval: 1,
                           lastActivity: Date().addingTimeInterval(-7200))
         store.start(observeSystem: false)
         defer { store.stop() }

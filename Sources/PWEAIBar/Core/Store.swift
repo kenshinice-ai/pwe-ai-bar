@@ -15,6 +15,9 @@ final class Store: ObservableObject {
     @Published private(set) var claudeRefreshing = false
     @Published private(set) var loggedIn = true
     @Published private(set) var blocker: ClaudeProvider.Blocker = .none
+    /// Moves once a minute. Nothing reads its value; publishing it is what makes the panel's
+    /// countdowns re-render between snapshots, which on an idle machine are fifteen minutes apart.
+    @Published private(set) var clock = Date()
 
     var onSnapshot: ((Snapshot) -> Void)?
 
@@ -45,7 +48,12 @@ final class Store: ObservableObject {
     private func tracks(extra p: Provider) -> Bool { tracksExtra(p) }
     private let eventInterval: TimeInterval
     private var eventTimer: Timer?
+    /// The spool directory to watch for new events, when events come from the real hook.
+    private let spool: URL?
+    private var spoolWatch: DirectoryWatch?
+    private var lastMinute = 0
     private var eventsInFlight = false
+    private var eventsAgain = false
     private var deliveries = Set<String>()
     private var retryDelivery: [String: Date] = [:]
 
@@ -58,7 +66,8 @@ final class Store: ObservableObject {
          tracksExtra: ((Provider) -> Bool)? = nil,
          readExtras: (([Provider]) async -> ExtraStore.Result)? = nil,
          observe: (([QuotaWindow]) async -> [QuotaWindow])? = nil,
-         eventInterval: TimeInterval = 1,
+         eventInterval: TimeInterval = 10,
+         spool: URL? = nil,
          lastActivity: Date = Date()) {
         self.claude = claude; self.rules = rules ?? RuleEngine()
         self.readEvents = readEvents ?? { await HookEventReader.shared.events() }
@@ -80,6 +89,8 @@ final class Store: ObservableObject {
         // Injectable so a test never writes to the real cache directory.
         self.observe = observe ?? { await History.shared.observe($0) }
         self.eventInterval = eventInterval
+        // Only the real reader has a real spool behind it; an injected one is polled.
+        self.spool = spool ?? (readEvents == nil ? HookProvider.spool : nil)
         self.lastActivity = lastActivity
     }
     private var timer: Timer?
@@ -117,9 +128,18 @@ final class Store: ObservableObject {
                 }
         }
         pollEvents()
+        watchSpool()
         eventTimer?.invalidate()
+        // With the spool watched this is a backstop, not the way events arrive: it catches a
+        // watch that could not be set up yet (the directory appears with the first event), and
+        // it is the clock the time-based alerts and the countdowns run on.
         let timer = Timer(timeInterval: eventInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.pollEvents() }
+            Task { @MainActor in
+                guard let self else { return }
+                self.watchSpool()
+                self.pollEvents()
+                self.tick()
+            }
         }
         RunLoop.main.add(timer, forMode: .common)
         eventTimer = timer
@@ -262,14 +282,38 @@ final class Store: ObservableObject {
         inFlight = false; claudeRefreshing = false
         timer?.invalidate(); timer = nil
         eventTimer?.invalidate(); eventTimer = nil
+        spoolWatch = nil
         settleTimer?.invalidate(); settleTimer = nil
     }
 
+    private func watchSpool() {
+        if spoolWatch?.gone == true { spoolWatch = nil }
+        guard spoolWatch == nil, let spool else { return }
+        spoolWatch = DirectoryWatch(spool) { [weak self] in
+            Task { @MainActor in self?.pollEvents() }
+        }
+    }
+
+    /// Countdowns are computed when drawn, so they only move when something redraws. Once a
+    /// minute is as fine as any of them is printed.
+    private func tick() {
+        let minute = Int(Date().timeIntervalSince1970 / 60)
+        guard minute != lastMinute else { return }
+        lastMinute = minute
+        clock = Date()
+        onSnapshot?(snapshot)
+    }
+
     private func pollEvents() {
-        guard !eventsInFlight else { return }
+        // A change that lands while a read is under way may have been missed by it; rather than
+        // drop it until the next tick, read once more when this one finishes.
+        guard !eventsInFlight else { eventsAgain = true; return }
         eventsInFlight = true
         Task { @MainActor in
-            defer { eventsInFlight = false }
+            defer {
+                eventsInFlight = false
+                if eventsAgain { eventsAgain = false; pollEvents() }
+            }
             let events = await readEvents()
             if events.map(\.key) != snapshot.events.map(\.key) {
                 snapshot.events = events

@@ -180,4 +180,75 @@ final class HookTests: XCTestCase {
                        "already current")
     }
 
+    /// Until 1.6.0 there was no way back out: the cask pointed at a Remove button that did not
+    /// exist. Removing takes out exactly our three entries and leaves everything else alone.
+    func testUninstallRemovesOnlyOurEntriesAndBacksUp() throws {
+        let space = try TestSpace()
+        let original = "{\"keep\":1,\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"echo existing\"}]}],"
+            + "\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo other\"}]}]}}"
+        let settings = try space.file("settings.json", original)
+        let source = try space.file("source.sh", "#!/bin/bash\nexit 0\n")
+        let script = space.root.appendingPathComponent("hook dir/pwe-ai-bar-hook.sh")
+        XCTAssertTrue(HookProvider.install(scriptPath: script.path, settings: settings, source: source))
+        XCTAssertTrue(HookProvider.isInstalled(settings: settings, script: script))
+
+        XCTAssertTrue(HookProvider.uninstall(scriptPath: script.path, settings: settings))
+        XCTAssertFalse(HookProvider.isInstalled(settings: settings, script: script))
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: settings)) as? [String: Any])
+        XCTAssertEqual(root["keep"] as? Int, 1)
+        let hooks = try XCTUnwrap(root["hooks"] as? [String: [[String: Any]]])
+        XCTAssertEqual(Set(hooks.keys), ["Stop", "PreToolUse"], "events we emptied are gone, others stay")
+        XCTAssertEqual(hooks["Stop"]?.count, 1, "the user's own Stop hook survives")
+        XCTAssertEqual((hooks["Stop"]?.first?["hooks"] as? [[String: Any]])?.first?["command"] as? String,
+                       "echo existing")
+
+        // A second removal finds nothing to do and writes nothing.
+        let after = try Data(contentsOf: settings)
+        XCTAssertTrue(HookProvider.uninstall(scriptPath: script.path, settings: settings))
+        XCTAssertEqual(try Data(contentsOf: settings), after)
+        XCTAssertTrue(HookProvider.uninstall(scriptPath: script.path,
+                                             settings: space.root.appendingPathComponent("absent.json")))
+    }
+
+    func testUninstallRefusesWhatInstallRefuses() throws {
+        let space = try TestSpace()
+        let corrupt = try space.file("settings.json", "{\"hooks\":{\"Stop\":42}}")
+        XCTAssertFalse(HookProvider.uninstall(scriptPath: "/x/hook.sh", settings: corrupt))
+        XCTAssertEqual(try String(contentsOf: corrupt, encoding: .utf8), "{\"hooks\":{\"Stop\":42}}")
+    }
+
+    /// Without the Command Line Tools, /usr/bin/python3 is an installer prompt, not Python. The
+    /// script's own fallback has to produce records the reader accepts, escapes and all.
+    func testTheShellFallbackWritesRecordsTheReaderAccepts() async throws {
+        let space = try TestSpace()
+        let project = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let script = project.appendingPathComponent("hooks/pwe-ai-bar-hook.sh")
+        let payloads: [(String, String)] = [
+            ("waiting", #"{"session_id":"s-1","cwd":"/Users/x/my \"proj\"","message":"Needs \"permission\" — ü"}"#),
+            ("answered", #"{"session_id":"s-2","prompt":"private synthetic input"}"#),
+            ("finished", "not json"),
+        ]
+        for (kind, payload) in payloads {
+            let process = Process(); let input = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.arguments = [script.path, kind]
+            process.environment = ProcessInfo.processInfo.environment.merging(
+                ["PWEBAR_EVENT_DIR": space.root.path, "PWEBAR_NO_PYTHON": "1"]) { _, new in new }
+            process.standardInput = input
+            try process.run()
+            input.fileHandleForWriting.write(Data(payload.utf8))
+            try input.fileHandleForWriting.close()
+            process.waitUntilExit()
+            XCTAssertEqual(process.terminationStatus, 0)
+        }
+        let files = try FileManager.default.contentsOfDirectory(at: space.root.appendingPathComponent("events"),
+                                                                includingPropertiesForKeys: nil)
+        XCTAssertEqual(files.count, 2, "a payload that is not JSON is not an event")
+        let events = await HookEventReader(directory: space.root).events()
+        let waiting = try XCTUnwrap(events.first { $0.id == "s-1" })
+        XCTAssertEqual(waiting.kind, .waiting)
+        XCTAssertEqual(waiting.text, "Needs \"permission\" — ü")
+        let answered = try XCTUnwrap(events.first { $0.id == "s-2" })
+        XCTAssertFalse(answered.text.contains("private"))
+    }
 }

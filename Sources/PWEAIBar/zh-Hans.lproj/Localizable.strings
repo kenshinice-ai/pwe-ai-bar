@@ -116,6 +116,7 @@
 "settings.sessionEvents" = "会话事件";
 "settings.hooks.install" = "安装";
 "settings.hooks.reinstall" = "重新安装";
+"settings.hooks.remove" = "移除";
 "settings.pushAway" = "离座时推送";
 "settings.push.field" = "ntfy / Bark 的 URL，留空则不推送";
 "settings.push.note" = "只在你离开键盘超过 5 分钟时才会用到。";
