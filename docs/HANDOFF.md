@@ -501,6 +501,7 @@ Sources/PWEAIBar/
 .github/workflows/ci.yml        macOS 上的 loccheck + build + test（2026-09-23）
 docs/
   HANDOFF.md                    这份
+  MAC_HANDOFF_2026-09-23.md     这一轮在 Mac 上的编译风险点与真机核对清单
   FORECAST_ENGINE_SPEC_2026-09-06.md            预报引擎规格（§9 是对抗审查结论）
   AI_USAGE_MENUBAR_RESEARCH_AND_IMPLEMENTATION_2026-09-05.md   为什么不用输密码
   CLAUDE_USAGE_IMPLEMENTATION_RESEARCH_2026-09-07.md   续期方案的调研（1.5.0 起不再续期，留档）
