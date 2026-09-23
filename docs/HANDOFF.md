@@ -1,7 +1,7 @@
 # PWE AI Bar — 接手说明
 
 最后更新 2026-09-23。`main` 上是 1.5.0；分支 `claude/token-monitor-optimization-iitxj3` 在它之上做了一轮修复
-（**未发版**，见下面「2026-09-23 这一轮」）。约 10,800 行 Swift，208 个测试。经过两轮云端深度审阅
+（**未发版**，见下面「2026-09-23 这一轮」）。约 10,800 行 Swift，212 个测试。经过两轮云端深度审阅
 （55 + 48 个 agent），提出的十二条全部落地。
 
 macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。看八家 AI 编码工具的额度；
@@ -291,7 +291,7 @@ SwiftPM 给**可执行**目标生成的 `Bundle.module` 按两条路径找资源
 ## 怎么跑
 
 ```bash
-swift test --scratch-path "$TMPDIR/pweaibar-spm"   # 208 个
+swift test --scratch-path "$TMPDIR/pweaibar-spm"   # 212 个
 ./scripts/build-app.sh          # 组装、签名，并跑 --selfcheck 闸门
 ```
 
@@ -417,8 +417,10 @@ Team ID `2SQV3H5MH9`，产物在 `dist/`。签名和打包都在 `$TMPDIR` 里�
 - 纯逻辑的部分（Transcript、Pricing、History、HookProvider、Codex 两个文件、Forecast、LineScanner、TreeWatcher 的状态机）
   在 Linux 的 Swift 6.0 上编译，并跑了 `TranscriptTests`、`HookTests`、`HistoryTests`、`ForecastTests`、
   `CodexUsageTests`、`CodexAppServerTests`、`TrophyRangeTests`，72 个全过。钩子脚本两条路径都用真实输入跑过。
-- **CI（macOS 15）上 208 个测试全过**，包括只在 macOS 上编译的那些改动。但 **FSEvents 与 kqueue 在真机上是否按预期触发，
-  CI 证明不了**。发版前在本机开着 app 干活，看奖杯页和等待提醒是否及时——清单见 `MAC_HANDOFF_2026-09-23.md`。
+- **CI（macOS 15）上 212 个测试全过**，包括只在 macOS 上编译的那些改动，以及 `WatcherRuntimeTests`：在 CI 那台真 Mac 上
+  起真的 FSEvents 流和 kqueue，证明两者会触发、FSEvents 常量不会在运行时崩。它还抓到一个真 bug——FSEvents 报 `/private/var/…`、
+  `resolvingSymlinksInPath` 却去掉 `/private`，事件对不上全被丢掉——已由 `TreeWatcher` 用 `realpath(3)` 翻译路径修掉。
+  剩下只有本机能回答的核对（去重和真实日志、界面），清单见 `MAC_HANDOFF_2026-09-23.md`。
 - 去重依赖的日志形状（一条消息多行、每行带 `message.id` 和 `requestId`）来自 ccusage 等工具的公开做法，这一轮**没有拿本机真实
   日志核对**。发版前在本机比一下改前改后的回合数：应该明显下降，且不应该出现某一天变成 0。
 
@@ -475,8 +477,8 @@ Team ID `2SQV3H5MH9`，产物在 `dist/`。签名和打包都在 `$TMPDIR` 里�
 - **`offActor` 的超时会把一次慢成功报成失败**（定时器 15 秒、人按刷新 75 秒）。超时算一次读取失败，进入机制一的退避，
   所以一次慢的 securityd 可能让额度停 15 分钟；按「刷新」立刻重试。
 - **~~history.json 双写者~~ —— 2026-09-23 修**：写之前读回合并，见「这一轮」第 15 条。
-- **FSEvents / kqueue 两个监听器没在真机上跑过**（2026-09-23）。都是「失败就退回老路径」的设计，最坏是和以前一样慢，
-  但如果它们**报少了**（该报的没报），奖杯页会最多晚 15 分钟、等待提醒最多晚 10 秒。
+- **FSEvents / kqueue 两个监听器**（2026-09-23）在 CI 的真内核上验证过会触发；还没在一台装着真实日志树的 Mac 上长时间跑过。
+  都是「失败就退回老路径」的设计；如果它们**报少了**，奖杯页最多晚 15 分钟、等待提醒最多晚 10 秒。
 - **周窗口上的区间带只有约 11pt 宽**。七天的横轴上本来就该窄，信息由尺寸线和结论句承担，不打算改。
 - `.fallsShort` 的大数字取自 `enduranceLow`、缺口取自 `enduranceHigh`，两者相加不等于 trip。
   两个数回答两个问题且都是下界，图上针与红线画在不同位置分得开，不打算改。
