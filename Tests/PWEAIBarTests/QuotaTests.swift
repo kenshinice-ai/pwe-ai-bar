@@ -236,10 +236,10 @@ final class QuotaTests: XCTestCase {
         let http = HTTPStub([(200, body, [:])])
         let p = provider(space, clock: clock, credential: credential, http: http)
         let first = await p.windows()
-        XCTAssertEqual(first.windows.map(\.windowLength), [5 * 3600, 7 * 86400])
+        XCTAssertEqual(first.windows.map(\.windowLength), [5 * 3600, 7 * 86400] as [TimeInterval?])
 
         let cached = await p.windows()
-        XCTAssertEqual(cached.windows.map(\.windowLength), [5 * 3600, 7 * 86400])
+        XCTAssertEqual(cached.windows.map(\.windowLength), [5 * 3600, 7 * 86400] as [TimeInterval?])
     }
 
     /// From the audit: a failed refresh used to overwrite the *success* time, so a miss extended

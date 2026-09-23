@@ -29,7 +29,7 @@ final class ForecastFuzzTests: XCTestCase {
         for _ in 0..<120_000 {
             let percent: Double? = Bool.random(using: &rng) ? Double.random(in: 0...100, using: &rng).rounded() : nil
             let resetIn = [Double.random(in: -7200...(7 * 86400), using: &rng), 0, 60, 600].randomElement(using: &rng)!
-            let length: TimeInterval? = [5 * 3600, 7 * 86400, 300, 60, nil].randomElement(using: &rng)!
+            let length: TimeInterval? = ([5 * 3600, 7 * 86400, 300, 60, nil] as [TimeInterval?]).randomElement(using: &rng)!
             let observedAgo = Double.random(in: -600...2400, using: &rng)
             let n = Int.random(in: 0...6, using: &rng)
             var samples: [(TimeInterval, Double)] = []
