@@ -12,6 +12,8 @@ final class WatcherRuntimeTests: XCTestCase {
     /// one-second latency, so a few seconds is generous.
     func testFSEventsReportsAFileWrittenUnderTheRoot() throws {
         let space = try TestSpace()
+        // Spelled the way Transcript spells its roots — which, for a temporary directory, is not
+        // the way FSEvents reports them (`/var/…` against `/private/var/…`).
         let root = space.root.resolvingSymlinksInPath()
         let watcher = TreeWatcher(paths: [root.path])
         XCTAssertEqual(watcher.drain(), .unknown, "the first answer is always a full listing")
@@ -52,6 +54,12 @@ final class WatcherRuntimeTests: XCTestCase {
         XCTAssertFalse(watch.gone)
     }
     #endif
+
+    func testReportedPathsComeBackInTheCallersSpelling() {
+        let w = TreeWatcher.started(spellings: [(real: "/private/var/x", given: "/var/x")])
+        w.record(["/private/var/x/a/b.jsonl", "/private/var/x", "/elsewhere/c.jsonl"], lost: false)
+        XCTAssertEqual(w.drain(), .files(["/var/x/a/b.jsonl", "/var/x", "/elsewhere/c.jsonl"]))
+    }
 
     func testNoRootsMeansNoClaims() {
         XCTAssertEqual(TreeWatcher(paths: ["/nonexistent/\(UUID().uuidString)"]).drain(), .unknown)
