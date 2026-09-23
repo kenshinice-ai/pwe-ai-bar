@@ -1,7 +1,8 @@
 # PWE AI Bar — 接手说明
 
-最后更新 2026-09-15。`main`，版本 1.5.0。约 10,200 行 Swift（测试另有约 4,200 行），185 个测试，
-`swift test` 约 18 秒。经过两轮云端深度审阅（55 + 48 个 agent），提出的十二条全部落地。
+最后更新 2026-09-23。`main` 上是 1.5.0；分支 `claude/token-monitor-optimization-iitxj3` 在它之上做了一轮修复
+（**未发版**，见下面「2026-09-23 这一轮」）。约 10,800 行 Swift，208 个测试。经过两轮云端深度审阅
+（55 + 48 个 agent），提出的十二条全部落地。
 
 macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。看八家 AI 编码工具的额度；
 真正花力气的只有两件事——**读到 Claude 和 Codex 的真实数字**，以及**回答「按这个节奏，到不到得了重置」**。
@@ -158,7 +159,7 @@ rate.high = (Δp + 1) / S
 
 `Digest.perDayModel: [Int: [String: Counts]]`。以前是 `perModel` 全历史总和 + `perDay` 只有成本，
 那样的话日期区间**只能影响头部三个数字**，「按模型」和「Token」还是全历史——一个自己跟自己
-矛盾的页面。现在区间对整页生效。代价是磁盘缓存格式升到 v3（v2 会被丢弃重建），
+矛盾的页面。现在区间对整页生效。代价是磁盘缓存格式升到 v3（v2 会被丢弃重建；2026-09-23 为消息去重又升到 v5），
 体量是天数 × 模型数，几千行。
 
 区间按**日历天**回溯，不是活跃天：「最近 7 天」必须是同一个跨度，不然数字会因为两个原因
@@ -264,7 +265,8 @@ SwiftPM 给**可执行**目标生成的 `Bundle.module` 按两条路径找资源
 | 重置在 5 分钟内 | 2 分钟 |
 | 其余 | 5 分钟（AI Usage 出厂默认也是 5 分钟） |
 
-另一半是事件驱动：一个回合落地后 25 秒问一次，去抖 90 秒（`Store.scheduleSettle`）。
+另一半是事件驱动：一个回合落地后 25 秒问一次，去抖 90 秒（`Store.scheduleSettle`）。钩子事件本身
+2026-09-23 起由 `DirectoryWatch` 盯 spool 目录即时读取，10 秒一次的定时器只是兜底和时钟。
 心跳负责不让数字发霉，事件负责让它在真的发生了什么的时候到达。**正因为有后者，前者才敢慢。**
 
 **但这套推理是我们的，不是读者的**（1.1.6）。计量网络、电池供电的笔记本上，「就是每十五分钟一次」
@@ -289,7 +291,7 @@ SwiftPM 给**可执行**目标生成的 `Bundle.module` 按两条路径找资源
 ## 怎么跑
 
 ```bash
-swift test --scratch-path "$TMPDIR/pweaibar-spm"   # 185 个
+swift test --scratch-path "$TMPDIR/pweaibar-spm"   # 208 个
 ./scripts/build-app.sh          # 组装、签名，并跑 --selfcheck 闸门
 ```
 
@@ -313,8 +315,8 @@ scratch path 默认指到 `$TMPDIR/pweaibar-spm`；手跑 `swift test` 时自己
 | `PWEBAR_DEBUG=1` | 每次菜单栏重绘打一行。判断「是不是画得太频繁」，这个计数器比 profiler 快得多（机制九） |
 
 **注意**：`--panel`、`--stress`、`--probe` 会各起一个完整的 `Store`，也就是**一次真实的网络请求**，
-并且会覆写共享的 `~/Library/Caches/PWE AI Bar/history.json`。两个写者会互相覆盖，别在 app 运行时
-连着跑它们来分析历史。这是已知问题，还没修。
+并且会写共享的 `~/Library/Caches/PWE AI Bar/history.json`。2026-09-23 起写之前先合并，不再互相覆盖，
+但它们的读数仍会进同一份历史。
 
 ### 发版（在另一台机器上做）
 
@@ -338,6 +340,88 @@ Team ID `2SQV3H5MH9`，产物在 `dist/`。签名和打包都在 `$TMPDIR` 里�
 带着它的 bundle，先清再签是个会间歇性输掉的竞态。
 
 站点不在这个仓库里，`release.sh` 不碰它：`cd '../PWE Loan Bar' && ./site/deploy.sh`。
+
+---
+
+## 2026-09-23 这一轮：参照 Javis603/token-monitor 做的修复（未发版）
+
+对照了 token-monitor（Electron + tokscale，31 个客户端、27 家额度来源）之后，挑出的是**本项目自己的错和慢**，
+不是去追它的功能数量。按严重程度：
+
+**会让奖杯页数字出错的三条**
+
+1. **Claude 日志按行计数，不按消息计数。** Claude Code 把一条回复按内容块（thinking / text / 每个 tool_use）
+   写成多行，每行重复同一个 `message.id` 和同一份 `usage`；恢复的会话还会把旧消息带进新文件。以前每行都算一个回合，
+   回合数、token 和等效成本都会被放大。现在 `Transcript.digest` 以 `message.id + requestId` 去重（ccusage 用的同一对键）：
+   同一遍解析里的多行取各字段最大值（流式中途写下的行 `output_tokens` 不完整），跨文件、跨增量解析用 `claims`
+   （消息键 → 计入它的文件）挡住重复。没有 `message.id` 的行照旧逐行计。磁盘缓存升到 **v5**，旧缓存丢弃重建。
+   - 键是 52 位 FNV-1a（`Transcript.messageKey`），要进 JSON 缓存，`hashValue` 每次启动换种子不能用。
+   - **代价**：被复制进新文件的旧消息只记在先被读到的那个文件上。原文件被 Claude Code 清理掉之后，这些回合会从总数里消失——
+     和原来「原文件删了它的回合就没了」是同一种丢失，只是换了个文件承担。
+2. **价格表只认完全相同的模型名。** 快照 id 带日期（`claude-haiku-4-5-20251001`）、Vertex 用 `@`、上下文变体带 `[1m]`、
+   3.x 代把家族名放在版本号后面（`claude-3-5-haiku-…`），以前全部按 0 计。`Pricing.canonical` 只剥掉**不可能改变模型**的装饰；
+   **故意不做前缀匹配**——`claude-opus-5` 是 `claude-opus-5-5` 的前缀，价格却不同，前缀匹配会把新模型悄悄算成旧价。
+   桶也按规范名归并，奖杯页不会同一个模型出两行。表里补了 **`claude-opus-5-5`：$4 / $20，缓存读 $0.20（0.05×）**。
+3. **「移除钩子」按钮不存在。** cask 的注释一直说「设置 ▸ 会话事件可以移除」，代码里只有安装。现在有
+   `HookProvider.uninstall`：和安装同样的护栏（软链接拒绝、先备份原字节、写之前原文件变了就放弃），
+   只删 `install` 加进去的三条，清空了的 matcher 和事件一并删掉，用户自己的钩子原样保留。设置页多了「移除」按钮。
+
+**慢的地方**
+
+4. **每轮都列一遍两棵日志树。** 活跃时每 20 秒 `enumerator` + 每个文件一次 `stat`。现在 `TreeWatcher` 用 FSEvents
+   收集变化的路径，下一轮只 `stat` 这些文件；什么都没变就直接复用上一轮合并好的桶。**它从不需要是对的才安全**：
+   流没起来、内核丢了事件、根目录被移动、不在 macOS 上，一律返回 `.unknown`，退回原来的全量列举；另外每 15 分钟
+   无条件全量一次，兜住启动后才出现的目录。日志根目录解析了软链接——FSEvents 报的是真实路径，
+   `~/.claude` 如果是 dotfiles 仓库链进来的，不解析就会同一个文件两个键、算两遍。
+5. **ISO8601 解析每行新建两个格式化器。** 冷扫的热点。改成两个静态实例（`ISO8601DateFormatter` 文档说明线程安全）。
+   界面里的 `HH:mm` 也统一到 `Forecast.clock`，用 `autoupdatingCurrent` 的时区——一个活到进程结束的格式化器
+   否则会一直用创建时的时区。
+6. **钩子事件每秒列一次目录。** 现在 `DirectoryWatch`（kqueue）盯着 spool 目录，事件一落地就读；
+   定时器降为 10 秒一次的兜底（目录要等第一个事件才出现，以及基于时钟的提醒要有节拍）。注入了读取器的测试
+   没有 spool 可盯，仍是轮询。读的途中又来的变化会在读完后补读一次，不会丢到下一拍。
+7. **Codex app-server 失败后每轮都重启。** 退避以前只在「从没成功过」时生效；成功一次之后，服务一旦开始失败，
+   每轮 20 秒就重新拉起一个进程、每次最多等 12 秒。现在每次失败都计数，等待 1 → 2 → 4 → … 最多 15 分钟，失败期间继续显示
+   上一次的读数（照旧标成陈旧）。交换过程里也不再每 50 ms 把整个输出缓冲区重新解析一遍，只解析新到的完整行；
+   末尾没有换行的最后一个回复也算回复。
+8. **429 没有 `Retry-After` 时永远等 5 分钟。** 现在连续被拒按 5 / 10 / 20 / 40 分钟加倍（`quotaRateLimitStreak`，
+   跨启动保留，成功一次清零）；服务器给了 `Retry-After` 就照它的。
+
+**小问题**
+
+9. **倒计时不走。** 面板和菜单栏的倒计时只在快照到达时重算，闲着的时候十五分钟才一次。`Store.clock` 每分钟发布一次，
+   面板因此重绘，菜单栏也跟着 `onSnapshot` 走一遍（`PaintedState` 照旧挡掉没变的重绘）。
+10. **钩子依赖 `/usr/bin/python3`。** 没装 Command Line Tools 的 Mac 上那是个弹安装框的桩，钩子静默什么都不记。
+    脚本现在先用 `xcode-select -p`（不弹框）确认有真的 Python，没有就走纯 shell：把 `session_id` / `cwd` / `message`
+    作为 JSON 字符串原样（连转义）搬进记录，不解码；超过 4096 字符的字段留空而不是截断（截断可能切断一个转义）。
+    非 JSON 对象的输入不算事件，和 Python 路径一致。`PWEBAR_NO_PYTHON=1` 可以强制走这条路径。
+11. **Bark 推送收不到内容。** 设置里写着「ntfy / Bark URL」，但发的是纯文本 POST，Bark 要 JSON。现在 `api.day.app`
+    或路径以 `/bark` 开头的地址发 JSON（`title` / `body` / `group`，紧急的加 `level: timeSensitive`），其余照旧。
+    只接受 http(s)。**自建 Bark 如果路径不带 `/bark`，仍会按 ntfy 发**——识别是启发式的。
+12. **按天分桶用的是今天的时区偏移。** 夏令时切换或出差之后历史会错一天。现在每个回合用它自己那天的偏移，
+    日标签按 UTC 格式化（天号本身就是本地日期），时区标识进了缓存戳，换时区会整体重建。
+13. **上下文百分比会被子代理的回合抢走。** `isSidechain` 的回合仍计入总数，但不再当「最新回合」。
+14. **周窗口的采样环太小。** 50 个样本、每分钟一个，只覆盖 50 分钟，而周窗口的测速跨度最长 42 小时，所以几乎总是退回
+    整窗平均。现在最小间隔按窗口长度的千分之一放宽（周窗口约 10 分钟），上限 300 个（五小时窗口约 4.6 小时、周窗口约 50 小时）。
+15. **history.json 双写者**（原「已知风险」里那条）。`History.flush` 写之前先读回磁盘上的版本合并：按时间取并集，
+    同一时刻以自己的为准，最后一次读数下跌（=重置）之前的都丢掉，不把两个窗口拼在一起。
+16. **登录时启动的开关只反映意图。** 注册失败（不在 /Applications 里跑、或在系统设置里被移除）时开关仍显示「开」。
+    现在注册之后、以及设置页出现时，都按 `SMAppService.mainApp.status` 回写开关；等待用户批准算「开」。
+
+**刻意没做的**：`Transcript.lastRateLimit()` 和 `ClaudeProvider.init(fallback:)` 仍然没接上。它读的 `quotaLimits` 字段
+在这一轮里没有真实日志可以核对，接上等于让一个没验证过的数字出现在额度行里。要接的话先在本机日志里确认字段形状。
+
+**新增 CI**：`.github/workflows/ci.yml`，macOS 15 上跑 loccheck（并要求 `en.lproj` 没有漂移）、钩子脚本与打包副本一致、
+`swift build`、`swift test`。以前只有发版机跑过测试。
+
+**怎么验证的**：这一轮是在 Linux 云端容器里写的，没有 Mac。
+- 纯逻辑的部分（Transcript、Pricing、History、HookProvider、Codex 两个文件、Forecast、LineScanner、TreeWatcher 的状态机）
+  在 Linux 的 Swift 6.0 上编译，并跑了 `TranscriptTests`、`HookTests`、`HistoryTests`、`ForecastTests`、
+  `CodexUsageTests`、`CodexAppServerTests`、`TrophyRangeTests`，72 个全过。钩子脚本两条路径都用真实输入跑过。
+- **只在 macOS 上才编译的部分没有本地验证过**：`TreeWatcher` 的 FSEvents 调用、`DirectoryWatch`、`Store`、`Prefs`、
+  `Notifier`、`SettingsView`、`ClaudeProvider` 的改动，以及 `PushAndBackoffTests`。它们靠 CI 的第一次运行来证明；
+  **FSEvents 与 kqueue 在真机上是否按预期触发，CI 也证明不了**，发版前在本机开着 app 干活、看奖杯页和等待提醒是否及时。
+- 去重依赖的日志形状（一条消息多行、每行带 `message.id` 和 `requestId`）来自 ccusage 等工具的公开做法，这一轮**没有拿本机真实
+  日志核对**。发版前在本机比一下改前改后的回合数：应该明显下降，且不应该出现某一天变成 0。
 
 ---
 
@@ -391,7 +475,9 @@ Team ID `2SQV3H5MH9`，产物在 `dist/`。签名和打包都在 `$TMPDIR` 里�
   `Count`、`claudeRotationBlockedUntil`、`sharedKeychainOptIn`、`keychainRefused`，都不再读取，留着无害。
 - **`offActor` 的超时会把一次慢成功报成失败**（定时器 15 秒、人按刷新 75 秒）。超时算一次读取失败，进入机制一的退避，
   所以一次慢的 securityd 可能让额度停 15 分钟；按「刷新」立刻重试。
-- **history.json 双写者**（见上）。修法是 History 写之前先读回来合并，或者自检子命令改用独立缓存目录。
+- **~~history.json 双写者~~ —— 2026-09-23 修**：写之前读回合并，见「这一轮」第 15 条。
+- **FSEvents / kqueue 两个监听器没在真机上跑过**（2026-09-23）。都是「失败就退回老路径」的设计，最坏是和以前一样慢，
+  但如果它们**报少了**（该报的没报），奖杯页会最多晚 15 分钟、等待提醒最多晚 10 秒。
 - **周窗口上的区间带只有约 11pt 宽**。七天的横轴上本来就该窄，信息由尺寸线和结论句承担，不打算改。
 - `.fallsShort` 的大数字取自 `enduranceLow`、缺口取自 `enduranceHigh`，两者相加不等于 trip。
   两个数回答两个问题且都是下界，图上针与红线画在不同位置分得开，不打算改。
@@ -406,11 +492,13 @@ Sources/PWEAIBar/
                Model Prefs Pricing Readout Probe(自检) Channel Notifier TokenEditor
                Resources(唯一的资源访问器,机制七)
   Providers/   Claude{Provider,CredentialStore,UsageClient,UsageMapper} Credentials
-               Codex{Provider,AppServer} Extra{Source,Providers} Hook Transcript LineScanner
+               Codex{Provider,AppServer} Extra{Source,Providers} Hook(含 DirectoryWatch)
+               Transcript LineScanner TreeWatcher(FSEvents,2026-09-23)
   App/         PanelView EnduranceView SettingsView StatusIcon(含 PaintedState,机制九)
                UsageChart TrophyView ProviderMark{,View} NotchWindow
                WindowSizing(NSWindow.setContentHeight,机制八)
   Brand/       Theme WingGauge BrandMark        Resources/  字体、图标、pricing.json
+.github/workflows/ci.yml        macOS 上的 loccheck + build + test（2026-09-23）
 docs/
   HANDOFF.md                    这份
   FORECAST_ENGINE_SPEC_2026-09-06.md            预报引擎规格（§9 是对抗审查结论）

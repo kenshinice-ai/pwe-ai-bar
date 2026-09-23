@@ -1,0 +1,38 @@
+name: CI
+
+# The same gates release.sh runs locally, on every push: the string tables are complete, the app
+# builds, and the tests pass. Until this existed the only machine that ever ran them was the one
+# cutting the release, so a change could sit broken on a branch until release day.
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: String tables (loccheck)
+        run: |
+          swiftc -O Tools/loccheck/main.swift -o "$RUNNER_TEMP/loccheck"
+          "$RUNNER_TEMP/loccheck" .
+          # loccheck regenerates en.lproj; a diff means the committed table is out of date.
+          git diff --exit-code -- Sources/PWEAIBar/en.lproj
+
+      - name: Hook script matches its bundled copy
+        run: cmp hooks/pwe-ai-bar-hook.sh Sources/PWEAIBar/Resources/pwe-ai-bar-hook.sh
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
