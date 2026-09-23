@@ -59,7 +59,6 @@ struct UsageChart: View {
 
     private func label(_ d: Date?) -> String {
         guard let d else { return "" }
-        let f = DateFormatter(); f.dateFormat = "HH:mm"
-        return f.string(from: d)
+        return Forecast.clock(d)
     }
 }

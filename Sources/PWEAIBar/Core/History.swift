@@ -20,12 +20,18 @@ actor History {
         let percent: Double
     }
 
-    /// Fifty samples spans a five-hour window at one every six minutes, which is finer than the
-    /// refresh cadence ever gets when idle. Past that the oldest go first.
-    private static let cap = 50
-    /// Two readings a minute apart are the same reading. Recording both wastes the ring on a
-    /// stretch of time where nothing happened.
-    private static let quiet: TimeInterval = 55
+    /// Past this the oldest go first. It was fifty, which at a sample a minute is fifty minutes —
+    /// fine for a five-hour window and nowhere near the weekly one, whose pace is measured over
+    /// up to 42 hours: the weekly forecast found no history that old and fell back to the
+    /// whole-window average nearly every time. With `quiet` scaled to the window, 300 covers
+    /// about 4.6 hours of a five-hour window and about 50 hours of a weekly one.
+    static let cap = 300
+    /// Two readings this close together are the same reading unless the figure moved. A minute
+    /// for short windows; a thousandth of the window for long ones, so a week is sampled every
+    /// ten minutes rather than every one.
+    static func quiet(_ w: QuotaWindow) -> TimeInterval {
+        max(55, (w.windowLength ?? 0) / 1000)
+    }
 
     private let url: URL
     private let now: () -> Date
@@ -92,7 +98,7 @@ actor History {
             if let last = ring.last {
                 // Replaying a cached reading is not a new observation, however long ago the
                 // last one was recorded. Only a genuinely newer observation earns a sample.
-                if date.timeIntervalSince(last.at) >= Self.quiet || abs(percent - last.percent) >= 0.5 {
+                if date.timeIntervalSince(last.at) >= Self.quiet(window) || abs(percent - last.percent) >= 0.5 {
                     ring.append(Sample(at: window.observedAt, percent: percent))
                 }
             } else {
@@ -112,9 +118,16 @@ actor History {
     private func autosave() { flush() }
 
     /// Throttled, and only ever from `observe`'s caller. This is a cache of a cache.
+    ///
+    /// Merged with what is on disk before it is written. The diagnostic subcommands run their
+    /// own `History` against the same file while the app is running, and a plain overwrite let
+    /// whichever process saved last erase the other's samples.
     func flush(force: Bool = false) {
         guard dirty else { return }
         if !force, let savedAt, now().timeIntervalSince(savedAt) < 300 { return }
+        for (key, theirs) in Self.read(url, now: now()) {
+            samples[key] = Self.merge(samples[key] ?? [], theirs)
+        }
         let payload = samples.mapValues { ring in
             ring.map { ["at": $0.at.timeIntervalSince1970, "percent": $0.percent] }
         }
@@ -130,11 +143,27 @@ actor History {
     private func load() {
         guard !loaded else { return }
         loaded = true
+        for (key, ring) in Self.read(url, now: now()) { samples[key] = ring }
+    }
+
+    /// Both records of one window, as one. A sample time in both is ours. Anything before the
+    /// last point where the figure fell is dropped, by the same rule `observe` uses: a fall is a
+    /// reset, and splicing the window before it onto the one after would report a pace that
+    /// never happened.
+    static func merge(_ ours: [Sample], _ theirs: [Sample]) -> [Sample] {
+        let times = Set(ours.map(\.at))
+        let all = (ours + theirs.filter { !times.contains($0.at) }).sorted { $0.at < $1.at }
+        var start = 0
+        for i in all.indices.dropFirst() where all[i].percent < all[i - 1].percent - 0.5 { start = i }
+        return Array(all[start...].suffix(cap))
+    }
+
+    private static func read(_ url: URL, now date: Date) -> [String: [Sample]] {
         guard let data = try? Data(contentsOf: url),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               root["version"] as? Int == 1,
-              let windows = root["windows"] as? [String: [[String: Any]]] else { return }
-        let date = now()
+              let windows = root["windows"] as? [String: [[String: Any]]] else { return [:] }
+        var out: [String: [Sample]] = [:]
         for (key, rows) in windows {
             let ring = rows.compactMap { row -> Sample? in
                 guard let at = row["at"] as? Double, at.isFinite,
@@ -145,7 +174,8 @@ actor History {
                 guard stamp <= date, date.timeIntervalSince(stamp) < 8 * 86400 else { return nil }
                 return Sample(at: stamp, percent: percent)
             }.sorted { $0.at < $1.at }
-            if !ring.isEmpty { samples[key] = Array(ring.suffix(Self.cap)) }
+            if !ring.isEmpty { out[key] = Array(ring.suffix(Self.cap)) }
         }
+        return out
     }
 }

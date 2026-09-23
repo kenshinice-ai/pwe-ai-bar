@@ -32,6 +32,8 @@ actor CodexProvider {
     /// life of the value it failed to replace and the panel went on showing it as current.
     private var liveAt: Date?
     private var attemptedAt: Date?
+    /// Attempts that have failed in a row. Each one doubles the wait before the next.
+    private var failures = 0
     private(set) var plan: String?
     private(set) var resetCredits = 0
 
@@ -74,11 +76,25 @@ actor CodexProvider {
         // Back off from *attempting*, separately from how long a success stays good. A machine
         // without Codex should not spawn a process it does not have on every refresh; a machine
         // whose last attempt failed should not have that failure make its old figure look newer.
-        if let attemptedAt, now().timeIntervalSince(attemptedAt) < 60, live == nil { return nil }
+        //
+        // This used to apply only while nothing had ever succeeded. After one success, a server
+        // that had started failing was spawned again on every sweep past the TTL — every twenty
+        // seconds while you work, each attempt allowed twelve of them. Now every failure counts,
+        // and the wait doubles from a minute up to fifteen.
+        if let attemptedAt, failures > 0,
+           now().timeIntervalSince(attemptedAt) < Self.backoff(failures) { return live }
         attemptedAt = now()
-        guard let fresh = await server.read(), !fresh.windows.isEmpty else { return live }
+        guard let fresh = await server.read(), !fresh.windows.isEmpty else {
+            failures += 1
+            return live
+        }
+        failures = 0
         live = fresh; liveAt = now()
         return fresh
+    }
+
+    static func backoff(_ failures: Int) -> TimeInterval {
+        min(60 * pow(2, Double(max(failures, 1) - 1)), 900)
     }
 
     private func ttl(_ reading: CodexAppServer.Reading) -> TimeInterval {

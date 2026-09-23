@@ -410,10 +410,18 @@ struct Forecast: Equatable {
         parts(seconds).map(\.text).joined(separator: " ")
     }
 
-    static func clock(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "HH:mm"
-        return f.string(from: date)
-    }
+    /// One formatter for every "HH:mm" the interface prints, rather than a new one per call.
+    /// Autoupdating, because a formatter kept for the life of the process would otherwise keep
+    /// the time zone it was made in — the wrong reset time for someone who has just landed.
+    private static let hhmm: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .autoupdatingCurrent
+        f.timeZone = .autoupdatingCurrent
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    static func clock(_ date: Date) -> String { hhmm.string(from: date) }
 
     static func resetLabel(_ reset: Date?, trip: TimeInterval) -> String {
         guard let reset else { return "" }

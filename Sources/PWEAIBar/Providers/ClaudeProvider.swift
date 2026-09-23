@@ -394,10 +394,17 @@ actor ClaudeProvider {
 
     private func checkHTTP(_ response: HTTPURLResponse) throws {
         if response.statusCode == 429 {
-            let until = Self.retryDate(response.value(forHTTPHeaderField: "Retry-After"), now: now())
+            // Refusals in a row, kept across launches like the deadline itself. Without it a
+            // 429 with no Retry-After waited five minutes, asked, was refused, and waited five
+            // minutes again — all day, at the one endpoint that punishes asking.
+            let streak = defaults.integer(forKey: "quotaRateLimitStreak")
+            let until = Self.retryDate(response.value(forHTTPHeaderField: "Retry-After"), now: now(),
+                                       streak: streak)
+            defaults.set(streak + 1, forKey: "quotaRateLimitStreak")
             retryAfter = until
             throw Blocker.rateLimited(until)
         }
+        if (200..<300).contains(response.statusCode) { defaults.removeObject(forKey: "quotaRateLimitStreak") }
         if response.statusCode == 401 { throw Blocker.unauthorized }
         if response.statusCode == 403 { throw Blocker.forbidden }
         if response.statusCode >= 500 { throw Blocker.network }
@@ -511,7 +518,10 @@ actor ClaudeProvider {
         return "claude-code/2.1.69"
     }()
 
-    nonisolated static func retryDate(_ header: String?, now: Date) -> Date {
+    /// When to ask again after a 429. The server's own `Retry-After` wins whenever it gives one;
+    /// without it the wait doubles with each refusal in a row — 5, 10, 20, then 40 minutes, and
+    /// no further — rather than knocking every five minutes on a door that keeps saying no.
+    nonisolated static func retryDate(_ header: String?, now: Date, streak: Int = 0) -> Date {
         if let value = header?.trimmingCharacters(in: .whitespacesAndNewlines) {
             if !value.isEmpty, value.allSatisfy({ $0.isASCII && $0.isNumber }), let secs = Double(value), secs.isFinite {
                 return now.addingTimeInterval(max(1, secs))
@@ -522,6 +532,6 @@ actor ClaudeProvider {
                 if let date = f.date(from: value) { return max(date, now.addingTimeInterval(1)) }
             }
         }
-        return now.addingTimeInterval(300)
+        return now.addingTimeInterval(300 * pow(2, Double(min(max(streak, 0), 3))))
     }
 }

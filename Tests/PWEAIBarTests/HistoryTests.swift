@@ -84,13 +84,15 @@ final class HistoryTests: XCTestCase {
         var clock = origin
         let history = History(url: url, now: { clock })
 
-        for step in 1...80 {
-            clock.addTimeInterval(60)
+        // Each step outlasts the quiet interval for a 100-hour window (360 s), so every one is
+        // a new sample whether or not the figure moved — enough of them to overflow the ring.
+        for step in 1...(History.cap + 30) {
+            clock.addTimeInterval(400)
             _ = await history.observe([window(min(99, Double(step)), at: clock,
                                               resetIn: 80 * 3600, length: 100 * 3600)])
         }
         let capped = await history.observe([window(99, at: clock, resetIn: 80 * 3600, length: 100 * 3600)])
-        XCTAssertLessThanOrEqual(capped.first?.samples.count ?? 999, 50, "the ring is bounded")
+        XCTAssertEqual(capped.first?.samples.count, History.cap, "the ring is bounded")
         await history.flush(force: true)
 
         let reloaded = History(url: url, now: { clock })
@@ -307,4 +309,46 @@ final class HistoryTests: XCTestCase {
         XCTAssertEqual(old.thinness, .readingTooOld)
     }
 
+    /// A weekly window's pace is measured over up to 42 hours. Sampled every minute into a
+    /// ring of fifty, it never had more than the last fifty minutes to measure it with.
+    func testALongWindowIsSampledSparselyEnoughToCoverItsHorizon() async throws {
+        let space = try TestSpace()
+        var clock = origin
+        let history = History(url: space.root.appendingPathComponent("h.json"), now: { clock })
+        let week: TimeInterval = 7 * 86400
+        var out: [QuotaWindow] = []
+        for step in 0..<(48 * 60) {                          // 48 hours of one-minute sweeps
+            clock = origin.addingTimeInterval(Double(step) * 60)
+            out = await history.observe([window(10, at: clock, resetIn: 6 * 86400, length: week)])
+        }
+        let ring = try XCTUnwrap(out.first?.samples)
+        XCTAssertLessThanOrEqual(ring.count, History.cap)
+        let span = ring.last!.at.timeIntervalSince(ring.first!.at)
+        XCTAssertGreaterThan(span, 42 * 3600, "the ring reaches back past the forecast horizon")
+    }
+
+    /// The diagnostic subcommands write the same file as the running app. Saving merges rather
+    /// than overwrites, so neither erases the other.
+    func testSavingMergesWithWhatAnotherProcessWrote() async throws {
+        let space = try TestSpace()
+        let url = space.root.appendingPathComponent("h.json")
+        var clock = origin
+        let other = History(url: url, now: { clock })
+        _ = await other.observe([window(10, at: clock)])
+        await other.flush(force: true)
+
+        let app = History(url: url, now: { clock })
+        clock.addTimeInterval(600)
+        _ = await app.observe([window(12, at: clock)])   // loads the other's sample, adds one
+        await app.flush(force: true)
+
+        // The other process keeps going and saves last; the app's sample must survive it.
+        clock.addTimeInterval(600)
+        _ = await other.observe([window(14, at: clock)])
+        await other.flush(force: true)
+
+        let reloaded = History(url: url, now: { clock })
+        let out = await reloaded.observe([window(14, at: clock)])
+        XCTAssertEqual(out.first?.samples.map(\.percent), [10, 12, 14])
+    }
 }

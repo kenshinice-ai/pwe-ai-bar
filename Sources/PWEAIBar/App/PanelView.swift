@@ -279,10 +279,7 @@ struct PanelView: View {
             : String(format: L("panel.waiting.provider", "%@ is waiting on your reply"), e.provider.name))
     }
 
-    private func clock(_ d: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "HH:mm"
-        return f.string(from: d)
-    }
+    private func clock(_ d: Date) -> String { Forecast.clock(d) }
 
     private func span(_ seconds: TimeInterval) -> String {
         let s = max(0, Int(seconds))
@@ -884,8 +881,7 @@ struct PanelView: View {
         if s < 60 { return L("reset.underMinuteShort", "Under a minute") }
         if s < 3600 { return String(format: L("reset.minThen", "resets in %d min"), s / 60) }
         if s < 86400 {
-            let f = DateFormatter(); f.dateFormat = "HH:mm"
-            return String(format: L("reset.at", "%@ reset"), f.string(from: at))
+            return String(format: L("reset.at", "%@ reset"), Forecast.clock(at))
         }
         return String(format: L("reset.inDays", "resets in %@d"), "\(s / 86400)")
     }
@@ -897,8 +893,7 @@ struct PanelView: View {
         if s < 60 { return L("compact.underMin", "<1m") }
         if s < 3600 { return String(format: L("compact.min", "%dm"), s / 60) }
         if s < 86400 {
-            let f = DateFormatter(); f.dateFormat = "HH:mm"
-            return f.string(from: at)
+            return Forecast.clock(at)
         }
         return String(format: L("compact.day", "%dd"), s / 86400)
     }

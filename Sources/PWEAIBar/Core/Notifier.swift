@@ -138,17 +138,39 @@ final class Notifier: NSObject, ObservableObject, UNUserNotificationCenterDelega
         }
     }
 
-    /// A plain POST to whatever endpoint the user configured — ntfy, Bark, a webhook. No account
-    /// of ours, no service in the middle, and nothing is sent unless they typed a URL in.
+    /// A POST to whatever endpoint the user configured — ntfy, Bark, a webhook. No account of
+    /// ours, no service in the middle, and nothing is sent unless they typed a URL in.
     private func push(_ a: RuleEngine.Alert) {
-        guard let url = URL(string: Prefs.shared.pushURL) else { return }
+        guard let r = Self.pushRequest(Prefs.shared.pushURL, title: a.title, body: a.body,
+                                       urgent: a.urgent) else { return }
+        URLSession.shared.dataTask(with: r).resume()
+    }
+
+    /// The request for one alert. ntfy (and any plain webhook) takes the text as the body with
+    /// the title in a header. Bark does not: a text body with no JSON arrives as an empty push,
+    /// so the settings field that says "ntfy / Bark URL" silently did half of what it said. Bark
+    /// gets its own JSON — recognised by its public host, or a `/bark` path on a self-hosted one.
+    nonisolated static func pushRequest(_ raw: String, title: String, body: String,
+                                        urgent: Bool) -> URLRequest? {
+        guard let url = URL(string: raw.trimmingCharacters(in: .whitespaces)),
+              let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http",
+              let host = url.host?.lowercased() else { return nil }
         var r = URLRequest(url: url)
         r.httpMethod = "POST"
-        r.setValue("PWE AI Bar", forHTTPHeaderField: "X-Title")
-        r.setValue(a.urgent ? "high" : "default", forHTTPHeaderField: "X-Priority")
-        r.httpBody = "\(a.title) — \(a.body)".data(using: .utf8)
         r.timeoutInterval = 10
-        URLSession.shared.dataTask(with: r).resume()
+        let bark = host == "api.day.app" || host.hasSuffix(".day.app")
+            || url.path.lowercased().hasPrefix("/bark")
+        if bark {
+            r.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+            var payload: [String: Any] = ["title": title, "body": body, "group": "PWE AI Bar"]
+            if urgent { payload["level"] = "timeSensitive" }
+            r.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        } else {
+            r.setValue("PWE AI Bar", forHTTPHeaderField: "X-Title")
+            r.setValue(urgent ? "high" : "default", forHTTPHeaderField: "X-Priority")
+            r.httpBody = "\(title) — \(body)".data(using: .utf8)
+        }
+        return r
     }
 
     nonisolated func userNotificationCenter(_ c: UNUserNotificationCenter,

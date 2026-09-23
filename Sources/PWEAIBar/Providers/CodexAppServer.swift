@@ -136,10 +136,24 @@ actor CodexAppServer {
         }
         let deadline = Date().addingTimeInterval(12)
         var replies: [[String: Any]] = []
+        // Only what arrived since the last look, and only up to its last complete line. Re-parsing
+        // the whole buffer every 50 ms decoded the same notifications hundreds of times over.
+        var parsed = 0
         while Date() < deadline {
             Thread.sleep(forTimeInterval: 0.05)
-            replies = parse(sink.bytes)
-            if replies.contains(where: { ($0["id"] as? NSNumber)?.intValue == 2 }) { break }
+            let bytes = sink.bytes
+            guard bytes.count > parsed else { continue }
+            if let newline = bytes[parsed...].lastIndex(of: 10) {
+                let fresh = parse(bytes.subdata(in: parsed..<newline))
+                parsed = newline + 1
+                replies += fresh
+                if fresh.contains(where: { ($0["id"] as? NSNumber)?.intValue == 2 }) { break }
+            }
+            // A last reply printed without its newline is still a reply.
+            if bytes.count > parsed {
+                let tail = parse(bytes.subdata(in: parsed..<bytes.count))
+                if tail.contains(where: { ($0["id"] as? NSNumber)?.intValue == 2 }) { replies += tail; break }
+            }
         }
         sink.stop()
         try? input.fileHandleForWriting.close()
