@@ -18,21 +18,39 @@ actor Transcript {
 
     static let shared = Transcript()
 
+    /// Symlinks resolved, because FSEvents reports real paths: a `~/.claude` linked in from a
+    /// dotfiles repository would otherwise put the same file in the cache under two names, and
+    /// count it twice.
     private static let root = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".claude/projects")
+        .appendingPathComponent(".claude/projects").resolvingSymlinksInPath()
 
     /// Codex writes its own rollout logs, and until 1.4.0 nothing read them for usage: the Codex
     /// provider opens the same files but only ever looks at `rate_limits`, which is the quota bar
     /// and nothing else. So every turn spent in gpt-6-astra, gpt-5.6-sol or gpt-5.6-luna was
     /// invisible — not merely unpriced, absent: no model row, no turns, no tokens.
     private static let codexRoot = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".codex/sessions")
+        .appendingPathComponent(".codex/sessions").resolvingSymlinksInPath()
 
     /// The two logs are different formats, so each needs its own reducer; everything downstream
     /// works on the buckets they both produce.
     private enum Source: CaseIterable {
         case claude, codex
         var root: URL { self == .claude ? Transcript.root : Transcript.codexRoot }
+
+        /// Which tree a reported path belongs to, if it is a log the listing would also find.
+        /// Hidden components are refused for the same reason the listing skips them: a path
+        /// one side counts and the other drops would flip in and out of the totals.
+        static func of(_ path: String) -> Source? {
+            guard path.hasSuffix(".jsonl") else { return nil }
+            for source in allCases {
+                let prefix = source.root.path + "/"
+                guard path.hasPrefix(prefix) else { continue }
+                let relative = path.dropFirst(prefix.count)
+                if relative.split(separator: "/").contains(where: { $0.hasPrefix(".") }) { return nil }
+                return source
+            }
+            return nil
+        }
     }
 
     /// One file's contribution, already reduced. Keys are absolute — a day number and an hour
@@ -86,9 +104,19 @@ actor Transcript {
         /// here run to hundreds of megabytes with a handful of context lines in them, so carrying
         /// the map is a few entries per file and re-reading to find it is not an option.
         var models: [String: String] = [:]
+        /// Claude only: the messages this file was the one to count, as `messageKey` hashes.
+        /// Kept so they can be handed back when the file is re-read or goes away.
+        var keys: [Int] = []
     }
 
     private var cache: [String: FileCache] = [:]
+    /// Message key → the file that counted it. See `digest` for why a message can turn up more
+    /// than once, and in more than one file.
+    private var claims: [Int: String] = [:]
+    /// The last sweep's merged buckets, reused when nothing has changed since.
+    private var total: Digest?
+    private var lastFullScan = Date.distantPast
+    private var watcher: TreeWatcher?
     private var loadedFromDisk = false
     private var lastSaved = Date.distantPast
     /// Prices are baked into the digest, so a price change has to invalidate it.
@@ -114,87 +142,148 @@ actor Transcript {
         // was written every launch and loaded on none of them.
         let stamp = Self.stamp(pricing)
         if !pricingStamp.isEmpty, stamp != pricingStamp {
-            cache.removeAll()              // prices changed mid-run; stored costs are stale
+            cache.removeAll()              // prices or the time zone changed; stored buckets are stale
+            claims.removeAll(); total = nil
             loadedFromDisk = true
         }
         pricingStamp = stamp
         loadDisk()
 
-        let fm = FileManager.default
-        var seen = Set<String>()
-        var total = Digest()
+        if watcher == nil { watcher = TreeWatcher(paths: Source.allCases.map(\.root.path)) }
+        let change = watcher?.drain() ?? .unknown
+        // A full listing now and then whatever the watcher says: it is the one thing that
+        // notices a tree created after launch, and it bounds the cost of anything missed.
+        let due = Date().timeIntervalSince(lastFullScan) > 900
         var changed = false
 
-        for source in Source.allCases {
-            guard let e = fm.enumerator(at: source.root,
-                                        includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
-                                        options: [.skipsHiddenFiles]) else { continue }
-            for case let url as URL in e where url.pathExtension == "jsonl" {
-              autoreleasepool {
-                let key = url.path
-                seen.insert(key)
-                let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
-                let modified = rv?.contentModificationDate ?? .distantPast
-                let size = rv?.fileSize ?? 0
-
-                if let hit = cache[key], hit.modified == modified, hit.size == size {
-                    total.merge(hit.digest)
-                    return
-                }
-
-                /// One file, from an offset, with whatever the last pass learned about it.
-                func read(from offset: Int, carrying models: [String: String])
-                    -> (Digest, Int, [String: String]) {
-                    switch source {
-                    case .claude:
-                        let (d, end) = Self.digest(url, from: offset, pricing: pricing)
-                        return (d, end, [:])
-                    case .codex:
-                        var known = models
-                        let (d, end) = Self.codexDigest(url, from: offset, pricing: pricing,
-                                                        models: &known)
-                        return (d, end, known)
+        switch change {
+        case .quiet where total != nil && !due:
+            break
+        case .files(let paths) where total != nil && !due:
+            for path in paths {
+                guard let source = Source.of(path) else { continue }
+                if update(URL(fileURLWithPath: path), source: source, pricing: pricing) { changed = true }
+            }
+        default:
+            let fm = FileManager.default
+            var seen = Set<String>()
+            for source in Source.allCases {
+                guard let e = fm.enumerator(at: source.root,
+                                            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+                                            options: [.skipsHiddenFiles]) else { continue }
+                for case let url as URL in e where url.pathExtension == "jsonl" {
+                    autoreleasepool {
+                        seen.insert(url.path)
+                        if update(url, source: source, pricing: pricing) { changed = true }
                     }
                 }
-
-                // Appended to, and the part already read has not moved: parse only the tail.
-                // A rewrite or truncation falls through to a full re-read, because the offset
-                // we hold no longer means anything.
-                if let hit = cache[key], size >= hit.parsedUpTo, hit.parsedUpTo > 0 {
-                    var digest = hit.digest
-                    let (fresh, end, models) = read(from: hit.parsedUpTo, carrying: hit.models)
-                    digest.merge(fresh)
-                    cache[key] = FileCache(modified: modified, size: size,
-                                           parsedUpTo: end, digest: digest, models: models)
-                    total.merge(digest)
-                    changed = true
-                    return
-                }
-
-                let (digest, end, models) = read(from: 0, carrying: [:])
-                cache[key] = FileCache(modified: modified, size: size,
-                                       parsedUpTo: end, digest: digest, models: models)
-                total.merge(digest)
-                changed = true
-              }
             }
+            for key in cache.keys where !seen.contains(key) {
+                forget(key)
+                changed = true
+            }
+            lastFullScan = Date()
         }
-        for key in cache.keys where !seen.contains(key) {
-            cache.removeValue(forKey: key)
-            changed = true
+
+        if changed || total == nil {
+            var merged = Digest()
+            for entry in cache.values { merged.merge(entry.digest) }
+            total = merged
         }
         if changed { saveDiskThrottled() }
 
-        return Self.assemble(total, pricing: pricing, range: range, subscription: subscription)
+        return Self.assemble(total ?? Digest(), pricing: pricing, range: range, subscription: subscription)
+    }
+
+    /// Brings one file's cached buckets up to date. Returns whether anything changed.
+    private func update(_ url: URL, source: Source, pricing: Pricing) -> Bool {
+        let key = url.path
+        guard let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey,
+                                                         .isRegularFileKey]),
+              rv.isRegularFile == true else {
+            // Gone, or never a file. Only news if we were holding something for it.
+            guard cache[key] != nil else { return false }
+            forget(key)
+            return true
+        }
+        let modified = rv.contentModificationDate ?? .distantPast
+        let size = rv.fileSize ?? 0
+
+        if let hit = cache[key], hit.modified == modified, hit.size == size { return false }
+
+        /// One file, from an offset, with whatever the last pass learned about it.
+        func read(from offset: Int, carrying models: [String: String])
+            -> (Digest, Int, [String: String], [Int]) {
+            switch source {
+            case .claude:
+                let (d, end, keys) = Self.digest(url, from: offset, pricing: pricing,
+                                                 counted: { claims[$0] != nil })
+                return (d, end, [:], keys)
+            case .codex:
+                var known = models
+                let (d, end) = Self.codexDigest(url, from: offset, pricing: pricing, models: &known)
+                return (d, end, known, [])
+            }
+        }
+
+        // Appended to, and the part already read has not moved: parse only the tail.
+        // A rewrite or truncation falls through to a full re-read, because the offset
+        // we hold no longer means anything.
+        if let hit = cache[key], size >= hit.parsedUpTo, hit.parsedUpTo > 0 {
+            var digest = hit.digest
+            let (fresh, end, models, keys) = read(from: hit.parsedUpTo, carrying: hit.models)
+            digest.merge(fresh)
+            for k in keys { claims[k] = key }
+            cache[key] = FileCache(modified: modified, size: size, parsedUpTo: end,
+                                   digest: digest, models: models, keys: hit.keys + keys)
+            return true
+        }
+
+        forget(key)
+        let (digest, end, models, keys) = read(from: 0, carrying: [:])
+        for k in keys { claims[k] = key }
+        cache[key] = FileCache(modified: modified, size: size, parsedUpTo: end,
+                               digest: digest, models: models, keys: keys)
+        return true
+    }
+
+    /// Drops a file and hands back the messages it had counted.
+    private func forget(_ key: String) {
+        for k in cache[key]?.keys ?? [] where claims[k] == key { claims.removeValue(forKey: k) }
+        cache.removeValue(forKey: key)
     }
 
     // MARK: Parsing
 
     /// Reduces one file (or the tail of one) straight into buckets. Returns the offset just past
-    /// the last complete line.
-    private static func digest(_ url: URL, from offset: Int, pricing: Pricing) -> (Digest, Int) {
-        var d = Digest()
-        let zone = Double(TimeZone.current.secondsFromGMT())
+    /// the last complete line, and the keys of the messages this pass counted.
+    ///
+    /// **One message, many lines.** Claude Code writes an assistant reply as one line per content
+    /// block — thinking, text, each tool call — and every one of them repeats the message's id and
+    /// its `usage`. Counting lines counted a three-block reply three times: its turns, its tokens
+    /// and, through them, the trophy's headline figure. A resumed or forked session also carries
+    /// earlier messages into a new file. So a message is identified by `message.id` plus the
+    /// line's `requestId` (the pair ccusage uses for the same reason), counted once, and
+    /// `counted` says which keys some file has already been credited with.
+    ///
+    /// Within a pass the lines of one message are folded into the largest figure each field
+    /// reached rather than the first: a line written while the reply was still streaming can
+    /// carry a partial `output_tokens`. A message split across two passes keeps the first pass's
+    /// figures — the rarer error, and never an overcount.
+    static func digest(_ url: URL, from offset: Int, pricing: Pricing,
+                       counted: (Int) -> Bool = { _ in false }) -> (Digest, Int, [Int]) {
+        struct Turn {
+            var at: Date, model: String, sidechain: Bool
+            var input: Int, output: Int, cacheWrite: Int, cacheRead: Int
+            mutating func fold(_ o: Turn) {
+                input = max(input, o.input); output = max(output, o.output)
+                cacheWrite = max(cacheWrite, o.cacheWrite); cacheRead = max(cacheRead, o.cacheRead)
+                if o.at > at { at = o.at }
+            }
+        }
+        var keyed: [Int: Turn] = [:]
+        var order: [Int] = []
+        var anonymous: [Turn] = []
 
         let end = LineScanner.scan(url, marker: "\"usage\"", from: offset) { line in
             guard let o = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
@@ -206,27 +295,56 @@ actor Transcript {
                   let at = ISO8601DateFormatter.parse(ts)
             else { return }
 
-            let input = u["input_tokens"] as? Int ?? 0
-            let output = u["output_tokens"] as? Int ?? 0
-            let cacheWrite = u["cache_creation_input_tokens"] as? Int ?? 0
-            let cacheRead = u["cache_read_input_tokens"] as? Int ?? 0
+            let turn = Turn(at: at, model: model, sidechain: o["isSidechain"] as? Bool ?? false,
+                            input: u["input_tokens"] as? Int ?? 0,
+                            output: u["output_tokens"] as? Int ?? 0,
+                            cacheWrite: u["cache_creation_input_tokens"] as? Int ?? 0,
+                            cacheRead: u["cache_read_input_tokens"] as? Int ?? 0)
+            // A line with no message id cannot be matched to anything, so it is counted as the
+            // turn it says it is — the behaviour every line had before.
+            guard let id = msg["id"] as? String, !id.isEmpty else { anonymous.append(turn); return }
+            let key = messageKey(id: id, request: o["requestId"] as? String)
+            if keyed[key] != nil { keyed[key]!.fold(turn); return }
+            guard !counted(key) else { return }
+            keyed[key] = turn
+            order.append(key)
+        }
 
-            let cost = pricing.cost(model: model, input: input, output: output,
-                                    cacheWrite: cacheWrite, cacheRead: cacheRead)
+        var d = Digest()
+        let zone = TimeZone.current
+        for turn in anonymous + order.compactMap({ keyed[$0] }) {
+            let model = pricing.canonical(turn.model)
+            let cost = pricing.cost(model: model, input: turn.input, output: turn.output,
+                                    cacheWrite: turn.cacheWrite, cacheRead: turn.cacheRead)
             // Integer arithmetic, not Calendar and DateFormatter: calling either once per turn
             // cost most of a five-second sweep, and neither does anything here that an offset
-            // and a division cannot.
-            let local = at.timeIntervalSince1970 + zone
+            // and a division cannot. The offset is the one in force *on that date*, not today's,
+            // so a summer turn stays on its own day after the clocks go back.
+            let local = turn.at.timeIntervalSince1970 + Double(zone.secondsFromGMT(for: turn.at))
             d.add(day: Int(floor(local / 86400)), model: model,
-                  Counts(turns: 1, input: input, output: output,
-                         cacheWrite: cacheWrite, cacheRead: cacheRead, usd: cost))
+                  Counts(turns: 1, input: turn.input, output: turn.output,
+                         cacheWrite: turn.cacheWrite, cacheRead: turn.cacheRead, usd: cost))
             d.perHour[Int(floor(local / 3600)), default: 0] += cost
 
-            if d.latest == nil || at > d.latest!.at {
-                d.latest = (at, model, input + cacheWrite + cacheRead)
+            // A subagent's turn is not the conversation in front of you: its context is its own,
+            // and letting it win "newest turn" measured the wrong window.
+            if !turn.sidechain, d.latest == nil || turn.at > d.latest!.at {
+                d.latest = (turn.at, model, turn.input + turn.cacheWrite + turn.cacheRead)
             }
         }
-        return (d, end)
+        return (d, end, order)
+    }
+
+    /// A stable 52-bit FNV-1a of the message's identity. Stable because it is stored in the disk
+    /// cache (`hashValue` is re-seeded every launch); 52 bits because the cache is JSON, whose
+    /// numbers are doubles, and a collision among a few hundred thousand messages is still a
+    /// one-in-many-billions event.
+    static func messageKey(id: String, request: String?) -> Int {
+        var h: UInt64 = 0xcbf2_9ce4_8422_2325
+        for b in id.utf8 { h ^= UInt64(b); h = h &* 0x0000_0100_0000_01b3 }
+        h ^= 0x7c; h = h &* 0x0000_0100_0000_01b3
+        for b in (request ?? "").utf8 { h ^= UInt64(b); h = h &* 0x0000_0100_0000_01b3 }
+        return Int(h & 0x000f_ffff_ffff_ffff)
     }
 
     /// Reduces one Codex rollout into the same buckets.
@@ -249,7 +367,7 @@ actor Transcript {
     static func codexDigest(_ url: URL, from offset: Int, pricing: Pricing,
                                     models: inout [String: String]) -> (Digest, Int) {
         var d = Digest()
-        let zone = Double(TimeZone.current.secondsFromGMT())
+        let zone = TimeZone.current
         var known = models
 
         let end = LineScanner.scan(url, marker: "\"type\":\"t", from: offset) { line in
@@ -286,7 +404,7 @@ actor Transcript {
             // there isn't one.
             let cost = pricing.cost(model: model, input: input, output: output,
                                     cacheWrite: cacheWrite, cacheRead: cachedIn)
-            let local = at.timeIntervalSince1970 + zone
+            let local = at.timeIntervalSince1970 + Double(zone.secondsFromGMT(for: at))
             d.add(day: Int(floor(local / 86400)), model: model,
                   Counts(turns: 1, input: input, output: output,
                          cacheWrite: cacheWrite, cacheRead: cachedIn, usd: cost))
@@ -334,9 +452,10 @@ actor Transcript {
         t.days = perDay.count
         t.range = range
 
-        let dayFmt = DateFormatter(); dayFmt.dateFormat = "yyyy-MM-dd"
+        // A day number is already a local calendar date counted from 1970-01-01, so it is
+        // labelled in UTC: no offset to apply, and none to get wrong across a DST change.
         t.byDay = perDay.keys.sorted().map { day in
-            (dayFmt.string(from: Date(timeIntervalSince1970: Double(day) * 86400 - zone)),
+            (Self.dayLabel.string(from: Date(timeIntervalSince1970: Double(day) * 86400)),
              perDay[day] ?? 0)
         }
         // Empty hours keep their slot: a gap is information, and closing it up would make a
@@ -358,6 +477,14 @@ actor Transcript {
         return Result(trophy: t, context: ctx, lastTurnAt: d.latest?.at)
     }
 
+    private static let dayLabel: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
     private static func contextWindow(for model: String) -> Double {
         if let s = ProcessInfo.processInfo.environment["CLAUDE_CONTEXT_WINDOW"],
            let v = Double(s) { return v }
@@ -365,6 +492,10 @@ actor Transcript {
     }
 
     // MARK: Disk cache
+
+    /// 5: messages de-duplicated, days bucketed by the offset on the day. A v4 file counted
+    /// every content block as a turn, so it is thrown away rather than migrated.
+    private static let cacheVersion = 5
 
     private static var diskCache: URL {
         // `.first` rather than `[0]`: the array is never empty in practice, but a cache path is
@@ -383,6 +514,8 @@ actor Transcript {
             let r = p.models[k]!
             return "\(k):\(r.input)/\(r.output)/\(r.cacheWriteMultiple)/\(r.cacheReadMultiple)"
         }.joined(separator: "|") + "|sub:\(p.subscriptionMonthlyUSD)"
+            // Buckets are local days, so a new time zone re-buckets everything.
+            + "|tz:\(TimeZone.current.identifier)"
     }
 
     private func loadDisk() {
@@ -390,7 +523,7 @@ actor Transcript {
         loadedFromDisk = true
         guard let data = try? Data(contentsOf: Self.diskCache),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              root["version"] as? Int == 4,
+              root["version"] as? Int == Self.cacheVersion,
               root["pricing"] as? String == pricingStamp,
               let files = root["files"] as? [String: [String: Any]] else { return }
 
@@ -414,9 +547,11 @@ actor Transcript {
                let ctx = l["ctx"] as? Int {
                 d.latest = (Date(timeIntervalSince1970: at), model, ctx)
             }
+            let keys = (entry["k"] as? [NSNumber] ?? []).map(\.intValue)
+            for k in keys { claims[k] = path }
             cache[path] = FileCache(modified: Date(timeIntervalSince1970: modified),
                                     size: size, parsedUpTo: entry["p"] as? Int ?? 0, digest: d,
-                                    models: entry["models"] as? [String: String] ?? [:])
+                                    models: entry["models"] as? [String: String] ?? [:], keys: keys)
         }
     }
 
@@ -431,6 +566,7 @@ actor Transcript {
             var e: [String: Any] = ["m": entry.modified.timeIntervalSince1970,
                                     "s": entry.size, "p": entry.parsedUpTo]
             if !entry.models.isEmpty { e["models"] = entry.models }
+            if !entry.keys.isEmpty { e["k"] = entry.keys }
             e["daymodels"] = Dictionary(uniqueKeysWithValues: entry.digest.perDayModel.map {
                 (String($0.key), $0.value.mapValues {
                     [Double($0.turns), Double($0.input), Double($0.output),
@@ -443,7 +579,7 @@ actor Transcript {
             }
             files[path] = e
         }
-        let root: [String: Any] = ["version": 4, "pricing": pricingStamp, "files": files]
+        let root: [String: Any] = ["version": Self.cacheVersion, "pricing": pricingStamp, "files": files]
         guard let data = try? JSONSerialization.data(withJSONObject: root) else { return }
         try? data.write(to: Self.diskCache, options: .atomic)
     }
@@ -491,12 +627,21 @@ actor Transcript {
 }
 
 extension ISO8601DateFormatter {
+    /// Created once. This runs for every logged turn on a cold scan, and building two formatters
+    /// per call — what it used to do — cost more than the parse. ISO8601DateFormatter is
+    /// documented as thread-safe, so sharing them across the actors that call this is fine.
+    private static let fractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let whole: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
     static func parse(_ s: String) -> Date? {
-        let a = ISO8601DateFormatter()
-        a.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = a.date(from: s) { return d }
-        let b = ISO8601DateFormatter()
-        b.formatOptions = [.withInternetDateTime]
-        return b.date(from: s)
+        fractional.date(from: s) ?? whole.date(from: s)
     }
 }

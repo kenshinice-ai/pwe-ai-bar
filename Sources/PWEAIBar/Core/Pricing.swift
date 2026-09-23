@@ -75,6 +75,7 @@ struct Pricing: Codable {
     /// likely to be in a transcript rather than mirroring the whole table twice.
     static let fallback = Pricing(
         models: [
+            "claude-opus-5-5":   .init(input: 4,  output: 20, cacheReadMultiple: 0.05),
             "claude-opus-5":     .init(input: 5,  output: 25),
             "claude-opus-4-8":   .init(input: 5,  output: 25),
             "claude-fable-5":    .init(input: 10, output: 50),
@@ -141,10 +142,47 @@ struct Pricing: Codable {
         return .fallback
     }
 
+    /// The table's own name for a model id as a log spells it, or the id unchanged when nothing
+    /// in the table is the same model.
+    ///
+    /// Logs do not always use the bare alias the table is keyed on. Snapshot ids carry a date
+    /// (`claude-haiku-4-5-20251001`), Vertex writes it after an `@`, a context variant can
+    /// trail as `[1m]`, and the 3.x generation put the family after the version
+    /// (`claude-3-5-haiku-20241022`). An exact lookup priced every one of those at nothing.
+    ///
+    /// Deliberately **not** a prefix match. Versions here are dash-appended, so the longest key
+    /// a name starts with is routinely a different model: `claude-opus-5` is a prefix of
+    /// `claude-opus-5-5`, which costs less, and `claude-opus-4` of every later Opus 4, which cost
+    /// a third as much. Only decorations that cannot change the model are removed.
+    func canonical(_ model: String) -> String {
+        if models[model] != nil { return model }
+        var base = model
+        if base.hasSuffix("]"), let open = base.lastIndex(of: "[") { base = String(base[..<open]) }
+        // A trailing -YYYYMMDD or @YYYYMMDD. Checked by hand rather than by regular expression:
+        // this runs once per logged turn on a cold scan.
+        let utf8 = Array(base.utf8)
+        if utf8.count > 9 {
+            let sep = utf8[utf8.count - 9]
+            if (sep == UInt8(ascii: "-") || sep == UInt8(ascii: "@")),
+               utf8[(utf8.count - 8)...].allSatisfy({ $0 >= 48 && $0 <= 57 }) {
+                base = String(decoding: utf8[..<(utf8.count - 9)], as: UTF8.self)
+            }
+        }
+        if models[base] != nil { return base }
+        // claude-3-5-haiku → claude-haiku-3-5
+        let parts = base.split(separator: "-", omittingEmptySubsequences: false)
+        if parts.count == 4, parts[0] == "claude", parts[1].allSatisfy(\.isNumber),
+           parts[2].allSatisfy(\.isNumber), ["haiku", "sonnet", "opus"].contains(parts[3]) {
+            let swapped = "claude-\(parts[3])-\(parts[1])-\(parts[2])"
+            if models[swapped] != nil { return swapped }
+        }
+        return model
+    }
+
     /// What one turn would have cost at list price. Unknown models cost nothing rather than
     /// guessing — a wrong number in the trophy is worse than a missing one.
     func cost(model: String, input: Int, output: Int, cacheWrite: Int, cacheRead: Int) -> Double {
-        guard let r = models[model] else { return 0 }
+        guard let r = models[model] ?? models[canonical(model)] else { return 0 }
         return (Double(input) * r.input
               + Double(output) * r.output
               + Double(cacheWrite) * r.input * r.cacheWriteMultiple
