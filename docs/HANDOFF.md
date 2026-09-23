@@ -417,9 +417,8 @@ Team ID `2SQV3H5MH9`，产物在 `dist/`。签名和打包都在 `$TMPDIR` 里�
 - 纯逻辑的部分（Transcript、Pricing、History、HookProvider、Codex 两个文件、Forecast、LineScanner、TreeWatcher 的状态机）
   在 Linux 的 Swift 6.0 上编译，并跑了 `TranscriptTests`、`HookTests`、`HistoryTests`、`ForecastTests`、
   `CodexUsageTests`、`CodexAppServerTests`、`TrophyRangeTests`，72 个全过。钩子脚本两条路径都用真实输入跑过。
-- **只在 macOS 上才编译的部分没有本地验证过**：`TreeWatcher` 的 FSEvents 调用、`DirectoryWatch`、`Store`、`Prefs`、
-  `Notifier`、`SettingsView`、`ClaudeProvider` 的改动，以及 `PushAndBackoffTests`。它们靠 CI 的第一次运行来证明；
-  **FSEvents 与 kqueue 在真机上是否按预期触发，CI 也证明不了**，发版前在本机开着 app 干活、看奖杯页和等待提醒是否及时。
+- **CI（macOS 15）上 208 个测试全过**，包括只在 macOS 上编译的那些改动。但 **FSEvents 与 kqueue 在真机上是否按预期触发，
+  CI 证明不了**。发版前在本机开着 app 干活，看奖杯页和等待提醒是否及时——清单见 `MAC_HANDOFF_2026-09-23.md`。
 - 去重依赖的日志形状（一条消息多行、每行带 `message.id` 和 `requestId`）来自 ccusage 等工具的公开做法，这一轮**没有拿本机真实
   日志核对**。发版前在本机比一下改前改后的回合数：应该明显下降，且不应该出现某一天变成 0。
 

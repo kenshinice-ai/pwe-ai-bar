@@ -3,37 +3,28 @@
 分支 `claude/token-monitor-optimization-iitxj3`，基于 `main` 的 1.5.0，**未发版**。
 改了什么、为什么改，见 `HANDOFF.md` 的「2026-09-23 这一轮」。这份只讲**到了 Mac 上要做什么**。
 
-这一轮是在 Linux 云端容器里写的，**没有在 macOS 上编译过**。纯逻辑部分在 Linux 的 Swift 6.0 上
-编译过，并跑过 72 个测试，全过。AppKit / FSEvents / kqueue / SMAppService 相关的改动只被读过、没被编译过。
-推送时 CI（`.github/workflows/ci.yml`，macOS 15）还在跑，结果没看到。
+**CI 已绿**（2026-09-23，`macos-15`，提交 `7be03ad`）：loccheck、钩子脚本一致、`swift build`、`swift test`
+**208 个全过**。FSEvents / kqueue / SMAppService / `nonisolated` 这些改动都在 macOS 上编译过了。
+第一次 CI 失败在 `QuotaTests.swift:239/242` 和 `ForecastFuzzTests.swift:32`——1.5.0 就有的数组字面量，CI 的
+Swift（Xcode 16）推不出 `[TimeInterval?]`，本机的 6.4 推得出——已写明类型。
 
----
-
-## 1. 先让它编译、测试通过
+**所以到了 Mac 上不用修编译，要做的是下面的真机核对。** 测试和 CI 证明不了监听器在真机上会不会触发，
+也证明不了去重的前提和本机真实日志是否相符。
 
 ```bash
 git fetch origin && git checkout claude/token-monitor-optimization-iitxj3
-swift build --scratch-path "$TMPDIR/pweaibar-spm"
-swift test  --scratch-path "$TMPDIR/pweaibar-spm"     # 应为 208 个
-swiftc -O Tools/loccheck/main.swift -o /tmp/loccheck && /tmp/loccheck .
+swift test --scratch-path "$TMPDIR/pweaibar-spm"     # 208 个，应与 CI 一致
+./scripts/build-app.sh
 ```
 
-先看一眼 GitHub Actions 上这个分支的 CI；它失败的话，日志里就是下面这张表里的某一处。
-
-### 最可能编译不过的地方（按风险从高到低）
-
-| 位置 | 为什么有风险 | 如果报错 |
-|---|---|---|
-| `Providers/TreeWatcher.swift:49-66` | FSEvents 的 C 回调与常量类型全凭记忆写的。`FSEventStreamCreate` 的返回值当成 `FSEventStreamRef?` 用了 `guard let`，`kFSEventStreamEventIdSinceNow` 用 `FSEventStreamEventId(...)` 包了一层，`rawPaths` 走 `Unmanaged<CFArray>.fromOpaque` | 返回值若不是可选，去掉 `guard let` 改成 `let`。常量若导入成 `Int` 且为 -1，改用 `FSEventStreamEventId(bitPattern:)` 或直接写 `0xFFFFFFFFFFFFFFFF`，**这一处会在运行时崩，不会在编译时报**，务必跑一次 app |
-| `Providers/HookProvider.swift:304-311`（`DirectoryWatch`） | `open(_, O_EVTONLY)`、`makeFileSystemObjectSource`、`source.data.isDisjoint(with:)` | 按编译器提示改签名，逻辑不用动 |
-| `Core/Prefs.swift:228-231`（`syncLoginItem`） | `SMAppService.Status` 的 `.requiresApproval` | 不认的话，只比较 `.enabled` |
-| `Core/Notifier.swift:153` | 在 `@MainActor` 类里写了 `nonisolated static func` | 编译器不接受就去掉 `nonisolated`，测试改成 `@MainActor` |
-| `Providers/Transcript.swift:220` | actor 方法里把读 `claims` 的非逃逸闭包传给静态函数；Swift 6.0 的 Swift 5 模式下没问题，更新的编译器若报隔离错误 | 先把 `claims` 拷成局部 `let known = claims`，再传 `{ known[$0] != nil }`。同一遍里新增的键 `digest` 自己会挡住，所以结果不变 |
-| `App/SettingsView.swift:230` | `switchRow(...).onAppear { prefs.syncLoginItem() }` | 挪到整个 `content` 的 `.onAppear` 上 |
+**运行时才会暴露的一处**：`Providers/TreeWatcher.swift:65` 的 `FSEventStreamEventId(kFSEventStreamEventIdSinceNow)`。
+这个常量如果导入成值为 -1 的 `Int`，转换会在**运行时**崩溃，编译不会报。CI 只构造过 `paths: []` 的
+watcher，走不到这一行。第一次启动 app 就能看出来；崩了的话，改成 `FSEventStreamEventId(bitPattern: Int64(-1))`
+或 `0xFFFFFFFFFFFFFFFF`。
 
 ---
 
-## 2. 编译通过之后，在真机上看
+## 1. 在真机上看
 
 以下这些，测试和 CI 都证明不了：
 
@@ -61,7 +52,7 @@ swiftc -O Tools/loccheck/main.swift -o /tmp/loccheck && /tmp/loccheck .
 
 ---
 
-## 3. 不对劲时怎么退
+## 2. 不对劲时怎么退
 
 每一条都能单独撤，彼此之间没有硬依赖：
 
@@ -70,14 +61,14 @@ swiftc -O Tools/loccheck/main.swift -o /tmp/loccheck && /tmp/loccheck .
 - 去重出问题：`digest` 的 `counted:` 传 `{ _ in false }`，同时把 `messageKey` 改成对每行都返回不同的值，
   就退回按行计数。缓存版本号记得再加一。
 - 四个提交之间可以分开 revert：`3ba07ab` 计数 / 定价 / FSEvents，`4b448d4` 钩子 / spool / 倒计时 / 登录项，
-  `bc2069b` 退避 / 历史 / Bark / 格式化器，`5b1852d` CI 与文档。
+  `bc2069b` 退避 / 历史 / Bark / 格式化器，`5b1852d` CI 与文档，`7be03ad` 两处测试字面量。
 
 ---
 
-## 4. 刻意没做、留给你判断的
+## 3. 刻意没做、留给你判断的
 
 - `Transcript.lastRateLimit()` 与 `ClaudeProvider.init(fallback:)` 仍然没接上。本机日志里要是真有 `quotaLimits.resetsAt`，
   可以把它接成「额度端点读不到时的重置时间」；这一轮没有真实日志可以核对，所以没接。
 - 自建 Bark 如果路径不以 `/bark` 开头，仍会按 ntfy 的格式发送。要不要在设置里加一个显式的「类型」选项，由你决定。
-- CI 用的是 `macos-15`。本机是 Swift 6.4，CI 的 Xcode 16 可能是 Swift 6.0 或 6.1。代码如果用到了更新的语言特性，
-  CI 会先挂在 `swift build` 上；那种情况下把 runner 换成有更新 Xcode 的镜像，别去改代码。
+- CI 用的是 `macos-15`，Swift 比本机的 6.4 旧。以后如果在代码里用了更新的语言特性，CI 会先挂在
+  `swift build` 上；那时把 runner 换成带更新 Xcode 的镜像，不要为了迁就 CI 去改代码。
