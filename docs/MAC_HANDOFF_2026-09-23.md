@@ -16,7 +16,7 @@
 
 ```bash
 git fetch origin && git checkout claude/token-monitor-optimization-iitxj3
-swift test --scratch-path "$TMPDIR/pweaibar-spm"     # 208 个，应与 CI 一致
+swift test --scratch-path "$TMPDIR/pweaibar-spm"     # 212 个，应与 CI 一致
 ./scripts/build-app.sh
 ```
 
