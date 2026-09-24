@@ -322,7 +322,15 @@ scratch path 默认指到 `$TMPDIR/pweaibar-spm`；手跑 `swift test` 时自己
 ### 发版（在另一台机器上做）
 
 Developer ID 私钥只在发版机上，本机 `build-app.sh` 出来的是 ad-hoc 签名，Gatekeeper 在别的机器
-上一律拒绝。发版机上：
+上一律拒绝。
+
+**发版机是 MacBook Pro（用户 `llmacbookpro`）。** 2026-09-24 在 Mac Studio（`llmacstudio`）上试发 1.6.0，
+预检第一步就停了：钥匙串里只有 `Apple Development: Li Liu (RJT6A98M8B)`，没有 Developer ID Application，
+也没有 `PWE_NOTARY` 公证凭据。仓库经 iCloud 同步过去了，**私钥和凭据不会**。要让 Mac Studio 也能发，
+得从 MacBook Pro 导出 Developer ID 证书连私钥（`.p12`）再导入，并在这边 `notarytool store-credentials`
+一次 —— 两步都只能 Lee 做。
+
+发版机上：
 
 ```bash
 scripts/release.sh 1.0.1          # 全流程，见下
