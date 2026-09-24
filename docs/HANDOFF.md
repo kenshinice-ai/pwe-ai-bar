@@ -2,7 +2,12 @@
 
 最后更新 2026-09-24。`main` 上是 1.5.0 加上 `claude/token-monitor-optimization-iitxj3` 那一轮修复
 （2026-09-24 快进合并，**仍未发版**，见下面「2026-09-23 这一轮」；本机核对结果在
-`MAC_HANDOFF_2026-09-23.md` 末尾）。约 10,800 行 Swift，212 个测试。经过两轮云端深度审阅
+`MAC_HANDOFF_2026-09-23.md` 末尾）。约 10,800 行 Swift，212 个测试。
+
+**下一步：在 MacBook Pro 上发 1.6.0**（只有那台能签名，见「发版」），发之前或发之后立刻过一遍
+`MAC_HANDOFF_2026-09-23.md` 里只能在界面上核对的四条。远端现在只剩 `main` 和
+`review/claude-credential-path`（PR #1「续期并写回」，09-24 带着理由关闭，分支留作记录）；合并过的三个分支已删，
+恢复方式和整个产品族的现状见 `../HANDOFF.md`（即 `07 TOOLS/HANDOFF.md`）。经过两轮云端深度审阅
 （55 + 48 个 agent），提出的十二条全部落地。
 
 macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。看八家 AI 编码工具的额度；
