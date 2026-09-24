@@ -1,11 +1,13 @@
 # PWE AI Bar — 接手说明
 
-最后更新 2026-09-24。`main` 上是 1.5.0 加上 `claude/token-monitor-optimization-iitxj3` 那一轮修复
-（2026-09-24 快进合并，**仍未发版**，见下面「2026-09-23 这一轮」；本机核对结果在
-`MAC_HANDOFF_2026-09-23.md` 末尾）。约 10,800 行 Swift，212 个测试。
+最后更新 2026-09-24。**1.6.0 已发布**（2026-09-24，MacBook Pro）：1.5.0 加上
+`claude/token-monitor-optimization-iitxj3` 那一轮修复，见下面「2026-09-23 这一轮」；本机核对结果在
+`MAC_HANDOFF_2026-09-23.md` 末尾。约 10,800 行 Swift，212 个测试（发版那次全过）。
+DMG 与 app 都是 `source=Notarized Developer ID`；GitHub 上发出去的字节回下载核对过
+（`49119d1c…bb32`），pwestudio.site 上的那份也是同一个校验和；cask 已更新；更新端点对 `aibar` 答 1.6.0。
 
-**下一步：在 MacBook Pro 上发 1.6.0**（只有那台能签名，见「发版」），发之前或发之后立刻过一遍
-`MAC_HANDOFF_2026-09-23.md` 里只能在界面上核对的四条。远端现在只剩 `main` 和
+**下一步：** `MAC_HANDOFF_2026-09-23.md` 里只能在界面上核对的四条（第 3、4、6、7 条）还没人过 ——
+等待提醒约 1 秒、设置里「移除」钩子、倒计时每分钟走、登录项开关跟随系统设置。远端现在只剩 `main` 和
 `review/claude-credential-path`（PR #1「续期并写回」，09-24 带着理由关闭，分支留作记录）；合并过的三个分支已删，
 恢复方式和整个产品族的现状见 `../HANDOFF.md`（即 `07 TOOLS/HANDOFF.md`）。经过两轮云端深度审阅
 （55 + 48 个 agent），提出的十二条全部落地。
