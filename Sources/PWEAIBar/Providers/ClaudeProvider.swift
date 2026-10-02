@@ -75,7 +75,9 @@ actor ClaudeProvider {
         var isExpired: Bool { if case .expired = self { return true }; return false }
 
         /// The two states nothing here can end: the login has run out, or it could not be read.
-        /// Both lift when Claude Code next writes its login, and that write is what to watch for.
+        /// A write by Claude Code lifts the first and usually the second, so that write is what to
+        /// watch for. A read refused because the keychain was locked lifts on unlock instead, which
+        /// moves no stamp; that one still waits out the backoff, or for somebody to press Refresh.
         var waitsOnClaudeCode: Bool { isExpired || self == .keychainRefused }
     }
     enum TokenUpdate: Equatable {

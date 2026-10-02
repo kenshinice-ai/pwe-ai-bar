@@ -55,9 +55,18 @@ enum StatusIcon {
         // still there, visibly not live. Since 1.6.1 an expired login keeps its last reading, so
         // this is what the bar looks like every morning until Claude Code is opened — and at full
         // strength an eight-hour-old figure would be claiming to be this minute's.
+        //
+        // Not a window that is confirmed spent. That is a fact until its reset, however long ago it
+        // was read, and it is the one thing on this bar that must not look uncertain.
         func ink(_ w: QuotaWindow) -> NSColor {
             let colour = tint(w.band, dark)
-            return w.isStale ? colour.withAlphaComponent(0.55) : colour
+            return w.isStale && !w.confirmedExhausted ? colour.withAlphaComponent(0.55) : colour
+        }
+        // A window that has rolled over since it was last read has a word where its figure was, and
+        // the panel has room for the word. The bar does not: "unconfirmed / 42%" every morning is
+        // eleven letters of prose in a strip that drops whole providers when it runs out of width.
+        func figure(_ w: QuotaWindow) -> String {
+            w.isStale && w.percent == nil && !w.confirmedExhausted ? "—" : Readout.text(w, remaining: remaining)
         }
 
         // An event outranks every measurement. Someone is waiting on you; the numbers can wait.
@@ -74,7 +83,7 @@ enum StatusIcon {
             case .compact:
                 for p in providers(snap, prefs) {
                     segments.append(Segment(text: "", colour: tint(p.band, dark), mark: p.provider))
-                    segments.append(Segment(text: Readout.text(p, remaining: remaining), colour: ink(p)))
+                    segments.append(Segment(text: figure(p), colour: ink(p)))
                 }
             case .full:
                 for p in providers(snap, prefs) {
@@ -89,13 +98,13 @@ enum StatusIcon {
                     }
                     if p.provider == .claude,
                        let five = snap.window(.session), let week = snap.window(.week) {
-                        segments.append(Segment(text: Readout.text(five, remaining: remaining), colour: ink(five)))
+                        segments.append(Segment(text: figure(five), colour: ink(five)))
                         segments += clock(five)
                         segments.append(Segment(text: "/", colour: label.withAlphaComponent(0.45)))
-                        segments.append(Segment(text: Readout.text(week, remaining: remaining), colour: ink(week)))
+                        segments.append(Segment(text: figure(week), colour: ink(week)))
                         segments += clock(week)
                     } else {
-                        segments.append(Segment(text: Readout.text(p, remaining: remaining), colour: ink(p)))
+                        segments.append(Segment(text: figure(p), colour: ink(p)))
                         segments += clock(p)
                     }
                 }

@@ -588,9 +588,10 @@ struct PanelView: View {
             // A row with no figure and no reset to count down to has a word instead — "unconfirmed"
             // — and the figure column was measured against "100%". It arrived as "unconfir…", in
             // the one state where the word is the whole message. That row's reset column is empty
-            // by definition, so the word takes both; the right edge does not move.
+            // by definition, so the word takes both; the right edge does not move. Only a word,
+            // though: a bare dash stays in the figure column, under the figures above it.
             let reset = shortReset(w)
-            let wordOnly = w.percent == nil && reset == nil
+            let wordOnly = w.percent == nil && reset == nil && w.note != nil
             Text(Readout.panelText(w, remaining: prefs.showRemaining)).font(Theme.figures(11.5, 600))
                 .foregroundStyle(Theme.health(w.band, dark: isDark))
                 .lineLimit(1).minimumScaleFactor(0.8)

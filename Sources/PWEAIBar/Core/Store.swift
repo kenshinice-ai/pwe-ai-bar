@@ -312,7 +312,8 @@ final class Store: ObservableObject {
         loginCheckInFlight = true
         Task { @MainActor in
             defer { loginCheckInFlight = false }
-            if await claude.loginMoved() { refresh(forceClaude: true) }
+            // Claude alone: nothing else changed, and a full sweep would walk the log trees first.
+            if await claude.loginMoved() { refreshClaudeOnly() }
         }
     }
 
