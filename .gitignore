@@ -10,3 +10,6 @@ dist/
 # that gets caught loudly. `scripts/release.sh` refuses to release while any file whose name
 # matches the conflict shape *and* has a same-named sibling is tracked, which is precise, and
 # it says which files. That is the check; this is the note saying why there is no glob.
+
+# Claude Code per-machine settings (auto-memory group wiring)
+**/.claude/settings.local.json
