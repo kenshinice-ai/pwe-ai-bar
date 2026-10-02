@@ -2,7 +2,7 @@
 
 最后更新 2026-10-02。**1.6.0 已发布**（2026-09-24，MacBook Pro）：1.5.0 加上
 `claude/token-monitor-optimization-iitxj3` 那一轮修复，见下面「2026-09-23 这一轮」；本机核对结果在
-`MAC_HANDOFF_2026-09-23.md` 末尾。约 10,800 行 Swift，212 个测试（发版那次全过）。
+`MAC_HANDOFF_2026-09-23.md` 末尾。约 10,900 行 Swift，217 个测试（212 个是发 1.6.0 那次全过的；10-02 加了 5 个）。
 DMG 与 app 都是 `source=Notarized Developer ID`；GitHub 上发出去的字节回下载核对过
 （`49119d1c…bb32`），pwestudio.site 上的那份也是同一个校验和；cask 已更新；更新端点对 `aibar` 答 1.6.0。
 
@@ -20,7 +20,7 @@ macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。
 ## 等 Lee
 
 - **[动手] 在界面上过一遍四条核对项** — `MAC_HANDOFF_2026-09-23.md` 第 3、4、6、7 条:等待提醒约 1 秒出现、设置里「移除」钩子、倒计时每分钟走、登录项开关跟随系统设置;本机已装 1.6.0,约十分钟 · 不过的话 1.6.0 改的这四处只有测试背书,没人在界面上见过 · 自 2026-09-24
-- **[决定] 文档 26 的 A 和 B 要不要开工** — 推荐做:A 约 10 行(过期时保留最后一次读数并标明多旧),B 半天(受阻时盯住钥匙串记录的修改时间,1.46 ms、不弹框);不把续期加回来 · 不定的话每天早上令牌过期后菜单栏仍是空的、仍要点一次 · 自 2026-09-17
+- **[决定] 发 AI Bar 1.6.1** — 推荐发:`./scripts/release.sh 1.6.1`,再 `cd '../PWE Loan Bar' && ./site/deploy.sh`(记得先改 `_release.js`,不改部署会停) · 不发的话文档 26 的 A 和 B 只在仓库里,每天早上令牌过期后已装的 1.6.0 菜单栏仍是空的、仍要点一次 · 自 2026-10-02
 
 ---
 
@@ -98,6 +98,24 @@ Claude Code 用 `security` 工具创建这条记录，所以记录的分区列�
 「Claude Code 的登录已于 … 过期 —— 打开 Claude Code 即可恢复」，旁边一个「打开 Claude Code」按钮
 （`ClaudeLogin.openClaudeCode()`，在终端里运行 `claude`）。Claude Code 续期并写回之后，下一次读取
 （修改时间变了，所以立刻）就恢复，不需要再按任何东西。
+
+**2026-10-02 补上了这句话里没兑现的两处（文档 26 的 A 和 B，已提交、未发版）：**
+
+- **过期不再清空读数。** 令牌寿命 8 小时，一晚上不用，早上必定过期 —— 以前这时面板和菜单栏的数字全部消失。
+  过期的意思是「现在问不到」，不是「刚才的答案错了」，所以 `fetch` 的 catch 不再对 `.expired` 清 `cache`：
+  读数留着、标 `isStale`（`History.observe` 和 `canNotify` 本来就挡 stale，所以不污染预测样本、不发假警报），
+  重置时间已过的窗口照旧变成「待确认」。菜单栏里陈旧的数字降到 0.55 透明度。会清空的仍是「这个答案可能属于别人」
+  的那几种：`.unauthorized`、`.forbidden`、`.notLoggedIn`、`.notInstalled`、`.credentialsChanged`。
+- **「立刻」以前并不立刻。** 修改时间只在一次扫描里被读到，而过期的前提正是几小时没人干活，那时扫描已经慢到 900 秒
+  —— 所以实际是「打开 Claude Code 之后最多等一刻钟，或者按一次刷新」。现在 `blocker.waitsOnClaudeCode`
+  （`.expired` / `.keychainRefused`）期间，`Store.watchLogin` 每 10 秒（事件计时器那一拍）问一次
+  `ClaudeProvider.loginMoved()`：只读记录的**属性**（实测中位 1.46 ms，不可能弹框），变了才触发一次普通的定时器读取。
+  **它不运行 `security` 工具，退避机制一条没动。** 修改时间读不到（nil）不算变化，否则就成了按时间表跑工具。
+
+守着这两处的测试：`testAnExpiredLoginKeepsItsLastReadingMarkedStale`、`testALoginTheServerRejectsStillClearsTheReading`、
+`testLoginMovedIsTrueOnlyWhileBlockedAndOnlyAfterAWrite`、`testAnUnknownStampIsNotAMove`、
+`LoginWatchTests.testAnExpiredLoginRecoversOnceClaudeCodeWritesItWithNobodyAsking`。前后两条撤掉改动后都失败过（10-02 验过）。
+`--stress` 多了一帧 `stress-expired-*.png`：过期、读数保留的早晨 —— 这个状态开发时永远看不到，因为开发会让登录一直是新的。
 
 现在的形状（`ClaudeProvider.probe`）：
 
