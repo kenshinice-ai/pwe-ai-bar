@@ -54,6 +54,7 @@ final class Store: ObservableObject {
     private var lastMinute = 0
     private var eventsInFlight = false
     private var eventsAgain = false
+    private var loginCheckInFlight = false
     private var deliveries = Set<String>()
     private var retryDelivery: [String: Date] = [:]
 
@@ -139,6 +140,7 @@ final class Store: ObservableObject {
                 self.watchSpool()
                 self.pollEvents()
                 self.tick()
+                self.watchLogin()
             }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -271,9 +273,11 @@ final class Store: ObservableObject {
         Task { await updateClaude(force: true, asked: asked) }
     }
 
-    /// Only used by `--stress`, which needs a snapshot that real data will never produce.
-    func injectForTesting(_ s: Snapshot) {
+    /// Only used by `--stress`, which needs a snapshot that real data will never produce — and,
+    /// for the states the panel explains rather than measures, the reason alongside it.
+    func injectForTesting(_ s: Snapshot, blocker: ClaudeProvider.Blocker = .none) {
         snapshot = s
+        self.blocker = blocker
         stop()
     }
 
@@ -291,6 +295,24 @@ final class Store: ObservableObject {
         guard spoolWatch == nil, let spool else { return }
         spoolWatch = DirectoryWatch(spool) { [weak self] in
             Task { @MainActor in self?.pollEvents() }
+        }
+    }
+
+    /// While Claude's quota waits on Claude Code — its login expired, or could not be read — ask
+    /// whether Claude Code has written that login since, and read the moment it has.
+    ///
+    /// Without this the recovery waited for the next sweep, and a login expires after eight idle
+    /// hours, which is exactly when the sweep has slowed to every fifteen minutes. So the quota
+    /// came back a quarter of an hour after Claude Code was opened, or at once if somebody pressed
+    /// Refresh — and pressing Refresh is what everybody did. Nothing here runs the security tool:
+    /// the question is an attribute query, and the read it triggers is the ordinary timer's read,
+    /// with the timer's patience and the same record of failures behind it.
+    private func watchLogin() {
+        guard blocker.waitsOnClaudeCode, !loginCheckInFlight, tracks().claude else { return }
+        loginCheckInFlight = true
+        Task { @MainActor in
+            defer { loginCheckInFlight = false }
+            if await claude.loginMoved() { refresh(forceClaude: true) }
         }
     }
 

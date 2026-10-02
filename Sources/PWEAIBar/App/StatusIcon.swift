@@ -51,6 +51,14 @@ enum StatusIcon {
         let font = Theme.nsNumber(11.5, 500)
 
         var segments: [Segment] = []
+        // A figure that was read a while ago is drawn at the strength of the countdowns beside it:
+        // still there, visibly not live. Since 1.6.1 an expired login keeps its last reading, so
+        // this is what the bar looks like every morning until Claude Code is opened — and at full
+        // strength an eight-hour-old figure would be claiming to be this minute's.
+        func ink(_ w: QuotaWindow) -> NSColor {
+            let colour = tint(w.band, dark)
+            return w.isStale ? colour.withAlphaComponent(0.55) : colour
+        }
 
         // An event outranks every measurement. Someone is waiting on you; the numbers can wait.
         if let a = snap.attention {
@@ -66,7 +74,7 @@ enum StatusIcon {
             case .compact:
                 for p in providers(snap, prefs) {
                     segments.append(Segment(text: "", colour: tint(p.band, dark), mark: p.provider))
-                    segments.append(Segment(text: Readout.text(p, remaining: remaining), colour: tint(p.band, dark)))
+                    segments.append(Segment(text: Readout.text(p, remaining: remaining), colour: ink(p)))
                 }
             case .full:
                 for p in providers(snap, prefs) {
@@ -81,13 +89,13 @@ enum StatusIcon {
                     }
                     if p.provider == .claude,
                        let five = snap.window(.session), let week = snap.window(.week) {
-                        segments.append(Segment(text: Readout.text(five, remaining: remaining), colour: tint(five.band, dark)))
+                        segments.append(Segment(text: Readout.text(five, remaining: remaining), colour: ink(five)))
                         segments += clock(five)
                         segments.append(Segment(text: "/", colour: label.withAlphaComponent(0.45)))
-                        segments.append(Segment(text: Readout.text(week, remaining: remaining), colour: tint(week.band, dark)))
+                        segments.append(Segment(text: Readout.text(week, remaining: remaining), colour: ink(week)))
                         segments += clock(week)
                     } else {
-                        segments.append(Segment(text: Readout.text(p, remaining: remaining), colour: tint(p.band, dark)))
+                        segments.append(Segment(text: Readout.text(p, remaining: remaining), colour: ink(p)))
                         segments += clock(p)
                     }
                 }

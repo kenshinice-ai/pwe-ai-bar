@@ -73,6 +73,10 @@ actor ClaudeProvider {
         }
 
         var isExpired: Bool { if case .expired = self { return true }; return false }
+
+        /// The two states nothing here can end: the login has run out, or it could not be read.
+        /// Both lift when Claude Code next writes its login, and that write is what to watch for.
+        var waitsOnClaudeCode: Bool { isExpired || self == .keychainRefused }
     }
     enum TokenUpdate: Equatable {
         case saved(Blocker), cleared, failed(Int32)
@@ -108,6 +112,9 @@ actor ClaudeProvider {
     private var task: (work: Task<Reading, Never>, asked: Bool)?
     /// The last read of Claude Code's login, with the record's stamp when it was taken.
     private var lastRead: (tokens: [Credentials.Token], stamp: Date, at: Date)?
+    /// The record's stamp as the most recent read attempt found it, whether or not that read
+    /// succeeded. `loginMoved` compares against it.
+    private var seenStamp: Date?
     private var rejected: [String: Blocker] = [:]
     private var retryNetworkAt: Date?
     private(set) var details = Details()
@@ -172,6 +179,7 @@ actor ClaudeProvider {
             return try await offActor { access.own().map { [$0] } ?? [] }
         }
         let stamp = try await offActor(access.stamp)
+        seenStamp = stamp
         if !asked, !fresh, let last = lastRead, last.stamp == stamp,
            now().timeIntervalSince(last.at) < Self.rereadAfter {
             return last.tokens
@@ -290,6 +298,18 @@ actor ClaudeProvider {
         return result
     }
 
+    /// Whether Claude Code has written its login since the read that left this blocked.
+    ///
+    /// An attribute query: it cannot ask anything and takes a millisecond or two, so it can be
+    /// asked every few seconds — unlike the sweep that would otherwise notice, which has slowed
+    /// to a quarter of an hour by the time a login has had eight idle hours to expire. An unknown
+    /// stamp is not a change; guessing that it is would run the security tool on a timer.
+    func loginMoved() async -> Bool {
+        guard blocker.waitsOnClaudeCode, !defaults.bool(forKey: "claudeManualTokenSelected"),
+              let stamp = try? await offActor(access.stamp) else { return false }
+        return stamp != seenStamp
+    }
+
     private func fetch(force: Bool, asked: Bool, version: Int, reloads: Int = 1) async -> Reading {
         do {
             let tokens = try await candidates(asked: asked)
@@ -334,7 +354,14 @@ actor ClaudeProvider {
             let failure = classify(error)
             blocker = failure
             switch failure {
-            case .unauthorized, .forbidden, .expired, .notLoggedIn, .notInstalled, .credentialsChanged:
+            // Not `.expired`. An expired login means the question cannot be asked again, not that
+            // the last answer was wrong: it is the same login for the same account, one renewal
+            // short. A token lasts eight hours, so every morning after a night away this emptied
+            // the panel and the menu bar of figures that were still the best anyone had. They stay,
+            // marked stale — which already keeps them out of the pace samples and the alerts — and
+            // a window whose reset has passed loses its figure in `staleReading`. The cases that do
+            // clear are the ones where the reading may belong to somebody else.
+            case .unauthorized, .forbidden, .notLoggedIn, .notInstalled, .credentialsChanged:
                 cache = []; details.spend = nil; details.plan = nil; details.tier = nil
                 details.lastSuccessAt = nil
             case .network, .invalidResponse:

@@ -411,6 +411,36 @@ enum Probe {
                                     onOpen: { _ in })),
                   width: Theme.panelWidth, dark: dark, to: dir + "/stress-pace-\(tag).png")
         }
+        // The morning after: Claude Code's login expired overnight and the last reading is kept.
+        // The weekly figure is nine hours old and says so; the session window has reset since, so
+        // it has no figure to repeat. This is the state 1.6.1 changed from an empty panel, and the
+        // one nobody sees while developing, because developing keeps the login fresh.
+        var morning = snap
+        let read = Date().addingTimeInterval(-9 * 3600)
+        morning.windows = [
+            QuotaWindow(id: "session", provider: .claude, channel: .session,
+                        title: "五小时窗口", percent: nil, severity: .normal,
+                        resetsAt: Date().addingTimeInterval(-5 * 3600),
+                        note: L("note.unconfirmed", "unconfirmed"), observedAt: read, isStale: true,
+                        windowLength: 5 * 3600),
+            QuotaWindow(id: "weekly_all", provider: .claude, channel: .week,
+                        title: "周窗口", percent: 58, severity: .normal,
+                        resetsAt: Date().addingTimeInterval(3 * 86400), observedAt: read, isStale: true),
+        ]
+        morning.stale = true
+        morning.events = []
+        morning.claudeDetails.lastSuccessAt = read
+        morning.claudeDetails.source = .claudeKeychain
+        let expired = Store()
+        expired.injectForTesting(morning, blocker: .expired(Date().addingTimeInterval(-3600)))
+        for dark in [true, false] {
+            shoot(AnyView(PanelView(store: expired, onTrophy: {}, onSettings: {}, onOpen: { _ in })),
+                  width: Theme.panelWidth, dark: dark,
+                  to: dir + "/stress-expired-\(dark ? "dark" : "light").png")
+        }
+        let stale = StatusIcon.render(morning, mode: .full, dark: true, prefs: .shared)
+        write(stale, to: dir + "/stress-icon-expired-dark.png")
+
         for mode in MenuBarMode.allCases {
             let image = StatusIcon.render(snap, mode: mode, dark: true, prefs: .shared)
             write(image, to: dir + "/stress-icon-\(mode.rawValue)-dark.png")

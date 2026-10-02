@@ -204,6 +204,93 @@ final class ClaudeUsageTests: XCTestCase {
         let count = await http.count; XCTAssertEqual(count, 1)
     }
 
+    /// An expired login cannot be asked again; it does not make the last answer wrong. A token
+    /// lasts eight hours, so this is every morning after a night away — and until 1.6.1 it emptied
+    /// the panel and the menu bar. The reading stays, marked stale, and a window whose own reset
+    /// has passed loses its figure rather than repeating one from a window that no longer exists.
+    func testAnExpiredLoginKeepsItsLastReadingMarkedStale() async throws {
+        let space = try TestSpace(); let record = KeychainRecord(auth())
+        let http = HTTPStub([(200, quota, [:])])
+        var clock = date
+        let provider = ClaudeProvider(defaults: space.defaults, access: record.access(), now: { clock },
+                                      request: { try await http.send($0) })
+        let first = await provider.windows()
+        XCTAssertFalse(first.stale); XCTAssertEqual(first.windows.count, 2)
+
+        clock.addTimeInterval(2 * 3600)                 // past the token's expiry, and the session's reset
+        let reading = await provider.windows()
+        let blocker = await provider.blocker
+        XCTAssertTrue(blocker.isExpired)
+        XCTAssertTrue(reading.stale)
+        XCTAssertEqual(reading.windows.count, 2, "the reading is kept")
+        XCTAssertTrue(reading.windows.allSatisfy(\.isStale))
+        let week = try XCTUnwrap(reading.windows.first { $0.percent != nil })
+        XCTAssertEqual(week.percent, 18.2, "the weekly window still has the figure it last read")
+        XCTAssertFalse(week.canNotify(at: clock), "a stale figure never raises an alert")
+        XCTAssertEqual(reading.windows.filter { $0.percent == nil }.count, 1,
+                       "the session window reset an hour ago, so its old figure describes nothing")
+        let details = await provider.details
+        XCTAssertEqual(details.lastSuccessAt, date, "and the panel can still say when it was read")
+        let count = await http.count
+        XCTAssertEqual(count, 1, "nothing was asked with an expired login")
+    }
+
+    /// The cases that do clear are the ones where the reading may be somebody else's.
+    func testALoginTheServerRejectsStillClearsTheReading() async throws {
+        let space = try TestSpace(); let record = KeychainRecord(auth())
+        let http = HTTPStub([(200, quota, [:]), (401, "{}", [:])])
+        var clock = date
+        let provider = ClaudeProvider(defaults: space.defaults, access: record.access(), now: { clock },
+                                      request: { try await http.send($0) })
+        _ = await provider.windows()
+        clock.addTimeInterval(600)
+        let reading = await provider.windows(force: true)
+        let blocker = await provider.blocker
+        XCTAssertEqual(blocker, .unauthorized)
+        XCTAssertTrue(reading.windows.isEmpty)
+    }
+
+    /// The question a timer may ask every few seconds: has Claude Code written its login since the
+    /// read that left this blocked? It is an attribute query, so asking never runs the tool.
+    func testLoginMovedIsTrueOnlyWhileBlockedAndOnlyAfterAWrite() async throws {
+        let space = try TestSpace()
+        let record = KeychainRecord(auth(expiry: date.timeIntervalSince1970 - 60))
+        let http = HTTPStub([(200, quota, [:])])
+        let provider = ClaudeProvider(defaults: space.defaults, access: record.access(), now: { self.date },
+                                      request: { try await http.send($0) })
+        var moved = await provider.loginMoved()
+        XCTAssertFalse(moved, "nothing is blocked before anything has been read")
+
+        _ = await provider.windows()
+        let reads = record.reads.count
+        moved = await provider.loginMoved()
+        XCTAssertFalse(moved, "expired, and the record is as that read found it")
+
+        record.value = auth("renewed", expiry: date.timeIntervalSince1970 + 8 * 3600)
+        record.stamp = record.stamp.addingTimeInterval(60)
+        moved = await provider.loginMoved()
+        XCTAssertTrue(moved, "Claude Code wrote it")
+        XCTAssertEqual(record.reads.count, reads, "asking is not reading: the tool did not run")
+
+        let reading = await provider.windows(force: true)
+        XCTAssertEqual(reading.windows.first?.percent, 7.4)
+        record.stamp = record.stamp.addingTimeInterval(60)
+        moved = await provider.loginMoved()
+        XCTAssertFalse(moved, "with quota flowing there is nothing to watch for")
+    }
+
+    /// A stamp nobody can read is not a change. Treating it as one would run the tool on a timer.
+    func testAnUnknownStampIsNotAMove() async throws {
+        let space = try TestSpace(); let memory = ClaudeMemory()
+        memory.put("/synthetic/auth.json", auth(expiry: date.timeIntervalSince1970 - 60))
+        let provider = ClaudeProvider(defaults: space.defaults, access: memory.access, now: { self.date },
+                                      request: { _ in throw URLError(.notConnectedToInternet) })
+        _ = await provider.windows()
+        let blocker = await provider.blocker; XCTAssertTrue(blocker.isExpired)
+        let moved = await provider.loginMoved()
+        XCTAssertFalse(moved)
+    }
+
     /// A 401 used to be the cue to renew. Now it is the cue to look again: Claude Code may have
     /// renewed while the request was out, and then the new token is already in the record.
     func testA401ReReadsTheLoginInsteadOfRenewingIt() async throws {
@@ -682,5 +769,53 @@ final class ClaudeCodePresenceTests: XCTestCase {
         let fn = try XCTUnwrap(source.range(of: "static func claudeCodePresent"))
         let body = source[fn.lowerBound..<(source.index(fn.lowerBound, offsetBy: 800, limitedBy: source.endIndex) ?? source.endIndex)]
         XCTAssertFalse(body.contains("Subprocess"), "runs off-main during detection; no subprocess there")
+    }
+}
+
+/// The whole of what 1.6.1 is for: a login that expired overnight comes back when Claude Code is
+/// next used, and nobody presses anything.
+final class LoginWatchTests: XCTestCase {
+    private func auth(_ value: String, expiry: Double) -> String {
+        """
+        {"account":{"uuid":"A"},"claudeAiOauth":{"accessToken":"\(value)","refreshToken":"r-\(value)",
+          "expiresAt":\(expiry * 1000),"scopes":["user:profile"],"subscriptionType":"pro"}}
+        """
+    }
+
+    @MainActor func testAnExpiredLoginRecoversOnceClaudeCodeWritesItWithNobodyAsking() async throws {
+        let space = try TestSpace()
+        let now = Date().timeIntervalSince1970
+        let record = KeychainRecord(auth("old", expiry: now - 60))
+        let http = HTTPStub([(200, #"{"five_hour":{"utilization":7.4}}"#, [:])])
+        let provider = ClaudeProvider(defaults: space.defaults, access: record.access(),
+                                      request: { try await http.send($0) })
+        // Two hours idle, so the sweep that would otherwise notice is fifteen minutes away: within
+        // this test the only thing that can bring the quota back is the watch.
+        let store = Store(claude: provider,
+                          rules: RuleEngine(defaults: space.defaults, away: { false }, remaining: { true }),
+                          readEvents: { [] },
+                          readLocal: { _, _ in .init(trophy: Trophy(), context: nil, lastTurnAt: nil) },
+                          readCodex: { ([], nil) }, deliver: { _, _ in false },
+                          tracks: { (true, false) }, tracksExtra: { _ in false }, observe: { $0 },
+                          eventInterval: 0.05, lastActivity: Date().addingTimeInterval(-7200))
+        store.start(observeSystem: false)
+        defer { store.stop() }
+        for _ in 0..<100 where !store.blocker.isExpired { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertTrue(store.blocker.isExpired)
+
+        // Left alone, it stays put: no request, and the tool is not run again.
+        let reads = record.reads.count
+        try await Task.sleep(nanoseconds: 400_000_000)
+        XCTAssertTrue(store.blocker.isExpired)
+        XCTAssertEqual(record.reads.count, reads, "an unchanged record is watched, not re-read")
+        var count = await http.count; XCTAssertEqual(count, 0)
+
+        // Claude Code is used once: it renews its login and writes it back.
+        record.value = auth("renewed", expiry: now + 8 * 3600)
+        record.stamp = record.stamp.addingTimeInterval(60)
+        for _ in 0..<150 where store.blocker != .none { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertEqual(store.blocker, .none)
+        XCTAssertEqual(store.snapshot.windows(of: .claude).first?.percent, 7.4)
+        count = await http.count; XCTAssertEqual(count, 1)
     }
 }

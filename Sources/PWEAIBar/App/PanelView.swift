@@ -585,13 +585,21 @@ struct PanelView: View {
                 .lineLimit(1).truncationMode(.tail)
                 .frame(width: Loc.isCJK ? 66 : 92, alignment: .leading)
             track(w).frame(maxWidth: .infinity)
+            // A row with no figure and no reset to count down to has a word instead — "unconfirmed"
+            // — and the figure column was measured against "100%". It arrived as "unconfir…", in
+            // the one state where the word is the whole message. That row's reset column is empty
+            // by definition, so the word takes both; the right edge does not move.
+            let reset = shortReset(w)
+            let wordOnly = w.percent == nil && reset == nil
             Text(Readout.panelText(w, remaining: prefs.showRemaining)).font(Theme.figures(11.5, 600))
                 .foregroundStyle(Theme.health(w.band, dark: isDark))
                 .lineLimit(1).minimumScaleFactor(0.8)
-                .frame(width: 52, alignment: .trailing)
-            Text(shortReset(w) ?? "").font(Theme.sans(10))
-                .foregroundStyle(Theme.text2)
-                .frame(width: 46, alignment: .trailing)
+                .frame(width: wordOnly ? 52 + Theme.s2 + 46 : 52, alignment: .trailing)
+            if !wordOnly {
+                Text(reset ?? "").font(Theme.sans(10))
+                    .foregroundStyle(Theme.text2)
+                    .frame(width: 46, alignment: .trailing)
+            }
         }
     }
 
