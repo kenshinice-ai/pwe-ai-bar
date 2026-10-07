@@ -20,7 +20,9 @@ macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。
 
 ## 等 Lee
 
-- **[决定] `blocker.unreadable` 要不要按改写稿改** — 现文（Sources/PWEAIBar/en.lproj/Localizable.strings:38）把结果写在前、动作塞在破折号后；改写稿在 `~/Documents/ClaudeCode/ste-lite/reports/M20.md` 第 6 项：先写动作（打开 Claude Code；macOS 询问就选 Always Allow），再写不做的后果和原因 · 推荐：操作提示按改写稿改；英文改调用点 Sources/PWEAIBar/Providers/ClaudeProvider.swift:43-45（en.lproj 由 `Tools/loccheck` 生成），中文 zh-Hans.lproj/Localizable.strings:290 同步，改前跑 `--panel` 看三句放不放得下，并核实「额度不更新」对 `.keychainRefused` 是否准确 · 不定则提示保持现状 · 自 2026-10-07
+没有。
+
+
 
 ---
 
