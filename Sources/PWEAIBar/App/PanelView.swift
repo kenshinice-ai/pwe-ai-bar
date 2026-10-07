@@ -135,7 +135,7 @@ struct PanelView: View {
                 // app needs you to press.
                 if !stageCarriesTheFix, let cta = claudeCallToAction {
                     rule
-                    ctaRow(cta)
+                    ctaRow(cta).padding(.horizontal, Theme.s3)
                 }
             } else {
                 ForEach(activeProviders, id: \.self) { p in
