@@ -287,7 +287,7 @@
 "settings.updates.later" = "以后";
 "settings.updates.now" = "现在检查";
 "settings.updates.note" = "每天向 pwestudio.site 问一次有没有更新的版本。它只发三样东西:这是 PWE AI Bar、它是哪个版本、运行在哪个 macOS 上。不发账号、不发令牌、不发用量,也不发任何能认出这台机器的东西。";
-"blocker.unreadable" = "读不到 Claude Code 的登录 —— 打开 Claude Code；如果 macOS 询问，选「始终允许」";
+"blocker.unreadable" = "打开 Claude Code。如果 macOS 询问，选「始终允许」。在此之前 Claude 的额度不会更新：PWE AI Bar 读不到 Claude Code 的登录。";
 "blocker.expired.open" = "Claude Code 的登录已过期 —— 打开 Claude Code 即可恢复";
 "blocker.expired.openDated" = "Claude Code 的登录已于 %@ 过期 —— 打开 Claude Code 即可恢复";
 "empty.unreadable" = "读不到 Claude Code 的登录";

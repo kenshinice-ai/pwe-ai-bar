@@ -35,7 +35,7 @@
 "blocker.ok" = "Verified — the quota connection is working";
 "blocker.rateLimited" = "Rate limited — retrying on the server's schedule";
 "blocker.unauthorized" = "The credential is no longer valid — sign in to Claude Code again or replace the manual token";
-"blocker.unreadable" = "Claude Code's login could not be read — open Claude Code, and if macOS asks, choose Always Allow";
+"blocker.unreadable" = "Open Claude Code. If macOS asks for access, choose Always Allow. Until then, the Claude quota does not update: PWE AI Bar cannot read Claude Code's login.";
 "channel.context" = "Context";
 "channel.other" = "Other";
 "channel.session" = "5-hour";

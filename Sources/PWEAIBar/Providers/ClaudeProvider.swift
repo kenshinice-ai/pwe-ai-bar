@@ -41,8 +41,9 @@ actor ClaudeProvider {
                 // that no longer exists. What can stop the read is a question macOS put to the
                 // tool, and Claude Code meets the same question when it next reads its login.
                 return L("blocker.unreadable",
-                         "Claude Code's login could not be read — open Claude Code, and if macOS asks, "
-                         + "choose Always Allow")
+                         "Open Claude Code. If macOS asks for access, choose Always Allow. "
+                         + "Until then, the Claude quota does not update: PWE AI Bar cannot read "
+                         + "Claude Code's login.")
             case .expired(let at):
                 // The remedy is whatever renews the login, and that is Claude Code, not this app.
                 // The old sentence said to sign in again, which rebuilt a login that only needed

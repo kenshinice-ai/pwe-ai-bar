@@ -371,7 +371,7 @@ final class ClaudeUsageTests: XCTestCase {
         _ = await p.windows()
         var blocker = await p.blocker
         XCTAssertEqual(blocker, .keychainRefused)
-        XCTAssertTrue(blocker.message.contains("open Claude Code"), blocker.message)
+        XCTAssertTrue(blocker.message.hasPrefix("Open Claude Code."), "the action comes first: \(blocker.message)")
         XCTAssertEqual(record.reads, [ClaudeCredentialStore.timerPatience], "a timer's read is a short one")
 
         for _ in 0..<5 { clock.addTimeInterval(20); _ = await p.windows(force: true) }
