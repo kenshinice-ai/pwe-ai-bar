@@ -20,7 +20,6 @@ macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。
 
 ## 等 Lee
 
-- **[决定] 提交信息用什么语言** — 本文「约定」一节第一条写文档和提交信息用中文；上级 `PARADISE PRODUCTION/CLAUDE.md:5` 和全局约定要英文，2026-09-24 起的提交都是英文 · 推荐：把那一条改成「文档用中文，提交信息和代码注释用英文」· 不定则下个会话照那一条写中文提交，和上级冲突 · 自 2026-10-07
 - **[决定] `blocker.unreadable` 要不要按改写稿改** — 现文（Sources/PWEAIBar/en.lproj/Localizable.strings:38）把结果写在前、动作塞在破折号后；改写稿在 `~/Documents/ClaudeCode/ste-lite/reports/M20.md` 第 6 项：先写动作（打开 Claude Code；macOS 询问就选 Always Allow），再写不做的后果和原因 · 推荐：操作提示按改写稿改；英文改调用点 Sources/PWEAIBar/Providers/ClaudeProvider.swift:43-45（en.lproj 由 `Tools/loccheck` 生成），中文 zh-Hans.lproj/Localizable.strings:290 同步，改前跑 `--panel` 看三句放不放得下，并核实「额度不更新」对 `.keychainRefused` 是否准确 · 不定则提示保持现状 · 自 2026-10-07
 
 ---
@@ -566,7 +565,7 @@ docs/
 
 ## 约定
 
-- **文档和提交信息用中文，代码注释用英文。** 注释解释「为什么」和「上一版为什么错」，不解释「做了什么」。
+- **文档用中文，提交信息和代码注释用英文。** 注释解释「为什么」和「上一版为什么错」，不解释「做了什么」。
 - 面板里不用缩写；菜单栏里才靠剪影省地方。**菜单栏静态，不做动画。**
 - 品牌色：navy `#0E1729`、amber `#F5B335`（**只用于深底**）、deep amber `#A16207`（**只用于浅底**）、
   paper `#F7F5F2`、ink `#0C0A09`。**字体是系统字体**(1.2.0 起;Inter 没有汉字,双语界面里它
