@@ -1,0 +1,16 @@
+{
+ "comment": "Edit decision list for the tutorial. Every take is a still the app drew (tools/stills.sh), so every step holds one frame for as long as its narration needs. Points are that take's own points. 'tag' picks which of the script's lines sits under the picture: real data from this Mac, or sample states.",
+ "paths": {},
+ "steps": [
+  {"id": "title", "kind": "title", "cues": [["c01", 0.4]], "fit": true, "tail": 0.35},
+  {"id": "enter", "take": "panel", "in": 1.0, "out": 1.0, "phone": "in", "tag": "real", "cues": [["c02", 0.25]], "fit": true, "tail": 0.3},
+  {"id": "hero", "take": "panel", "in": 1.0, "out": 1.0, "tag": "real", "spot": [16, 78, 308, 128], "cues": [["c03", 0.2]], "fit": true, "tail": 0.4},
+  {"id": "makes", "take": "makes", "in": 1.0, "out": 1.0, "tag": "sample", "cues": [["c04", 0.25]], "fit": true, "tail": 0.45},
+  {"id": "close", "take": "close", "in": 1.0, "out": 1.0, "tag": "sample", "cues": [["c05", 0.25]], "fit": true, "tail": 0.45},
+  {"id": "short", "take": "short", "in": 1.0, "out": 1.0, "tag": "sample", "cues": [["c06", 0.25]], "fit": true, "tail": 0.45},
+  {"id": "sources", "take": "panel", "in": 1.0, "out": 1.0, "tag": "real", "spot": [8, 212, 324, 212], "cues": [["c07", 0.25]], "fit": true, "tail": 0.4},
+  {"id": "cost", "take": "cost", "in": 1.0, "out": 1.0, "tag": "real", "cues": [["c08", 0.25]], "fit": true, "tail": 0.6},
+  {"id": "alerts", "take": "settings", "in": 1.0, "out": 1.0, "tag": "app", "spot": [0, 268, 380, 250], "cues": [["c09", 0.25]], "fit": true, "tail": 0.5},
+  {"id": "end", "kind": "end", "cues": [["c10", 0.7]], "fit": true, "tail": 2.4}
+ ]
+}

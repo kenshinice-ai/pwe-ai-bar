@@ -1,0 +1,11 @@
+{
+  "lang": "zh",
+  "main": "makes-zh",
+  "takes": {
+    "makes": "makes-zh",
+    "close": "close-zh",
+    "short": "short-zh"
+  },
+  "sample_tag": "示例状态,由 app 自己的渲染器绘制",
+  "cues": []
+}

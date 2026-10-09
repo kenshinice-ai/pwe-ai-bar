@@ -13,3 +13,6 @@ dist/
 
 # Claude Code per-machine settings (auto-memory group wiring)
 **/.claude/settings.local.json
+
+# Film: stills, narration and renders live outside the repo (a link to ~/Movies/PWE Films).
+Video/tutorial/build

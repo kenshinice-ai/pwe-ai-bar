@@ -1,0 +1,142 @@
+{
+  "lang": "en",
+  "takes": {
+    "panel": "panel-en",
+    "makes": "makes-en",
+    "close": "close-en",
+    "short": "short-en",
+    "cost": "cost-en",
+    "settings": "settings-en"
+  },
+  "title": [
+    "Do you make it",
+    "to the reset?"
+  ],
+  "tags": {
+    "real": "Real usage on this Mac, drawn by the app",
+    "sample": "Sample states, drawn by the app's own renderer",
+    "app": "The app's own settings, drawn by the app"
+  },
+  "end": {
+    "headline": "PWE AI Bar",
+    "with_cues": {
+      "c10": [
+        "Free, and the source is public"
+      ]
+    },
+    "foot": [
+      "macOS 13 or later · Apple Silicon",
+      "English and Chinese",
+      "",
+      "pwestudio.site/aibar"
+    ]
+  },
+  "cues": [
+    {
+      "id": "c01",
+      "parts": [
+        {
+          "say": "your AI coding quota, in the menu bar",
+          "show": "Your AI coding quota, in the menu bar"
+        }
+      ]
+    },
+    {
+      "id": "c02",
+      "parts": [
+        {
+          "say": "every other meter tells you how much is gone",
+          "show": "Other meters tell you how much is gone"
+        },
+        {
+          "say": "this one tells you whether you make it to the reset",
+          "show": "This one: do you make it to the reset?"
+        }
+      ]
+    },
+    {
+      "id": "c03",
+      "parts": [
+        {
+          "say": "the large number is how long you last, at the pace you are actually working",
+          "show": "How long you last, at your actual pace"
+        },
+        {
+          "say": "the sentence beside it is the verdict",
+          "show": "Beside it, the verdict"
+        }
+      ]
+    },
+    {
+      "id": "c04",
+      "parts": [
+        {
+          "say": "you make it, and it tells you what you will have left",
+          "show": "Makes it, and what you will have left"
+        }
+      ]
+    },
+    {
+      "id": "c05",
+      "parts": [
+        {
+          "say": "too close to call, and it tells you so, instead of picking a side",
+          "show": "Too close to call: it says so"
+        }
+      ]
+    },
+    {
+      "id": "c06",
+      "parts": [
+        {
+          "say": "falls short, and it names the gap",
+          "show": "Falls short, and it names the gap"
+        }
+      ]
+    },
+    {
+      "id": "c07",
+      "parts": [
+        {
+          "say": "Claude Code and Codex are read from their real endpoints",
+          "show": "Claude Code and Codex, from real endpoints"
+        },
+        {
+          "say": "your sign in is only read, never renewed",
+          "show": "Your login is read, never renewed"
+        }
+      ]
+    },
+    {
+      "id": "c08",
+      "parts": [
+        {
+          "say": "it also adds up what the work would have cost at list price",
+          "show": "What the work would cost at list price"
+        }
+      ]
+    },
+    {
+      "id": "c09",
+      "parts": [
+        {
+          "say": "and it comes to find you",
+          "show": "And it comes to find you"
+        },
+        {
+          "say": "when the quota resets, or when Claude is waiting on you",
+          "show": "Quota reset, or Claude waiting on you"
+        }
+      ]
+    },
+    {
+      "id": "c10",
+      "parts": [
+        {
+          "say": "free, and the source is public",
+          "show": "Free, and the source is public"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,120 @@
+{
+  "label": "PWE AI BAR",
+  "icon": "Sources/PWEAIBar/Resources/AppIcon512.png",
+  "icon_round": true,
+  "main": "panel-en",
+  "takes": {
+    "panel-en": {
+      "size": [
+        680,
+        1270
+      ],
+      "points": 340,
+      "radius": 24,
+      "max_scale": 1.1
+    },
+    "makes-en": {
+      "size": [
+        680,
+        220
+      ],
+      "points": 340,
+      "radius": 18,
+      "max_scale": 1.38,
+      "align": "middle"
+    },
+    "close-en": {
+      "size": [
+        680,
+        220
+      ],
+      "points": 340,
+      "radius": 18,
+      "max_scale": 1.38,
+      "align": "middle"
+    },
+    "short-en": {
+      "size": [
+        680,
+        220
+      ],
+      "points": 340,
+      "radius": 18,
+      "max_scale": 1.38,
+      "align": "middle"
+    },
+    "cost-en": {
+      "size": [
+        920,
+        1622
+      ],
+      "points": 460,
+      "radius": 24
+    },
+    "settings-en": {
+      "size": [
+        760,
+        1340
+      ],
+      "points": 380,
+      "radius": 24,
+      "max_scale": 1.1
+    },
+    "panel-zh": {
+      "size": [
+        680,
+        1272
+      ],
+      "points": 340,
+      "radius": 24,
+      "max_scale": 1.1
+    },
+    "makes-zh": {
+      "size": [
+        680,
+        220
+      ],
+      "points": 340,
+      "radius": 18,
+      "max_scale": 1.38,
+      "align": "middle"
+    },
+    "close-zh": {
+      "size": [
+        680,
+        220
+      ],
+      "points": 340,
+      "radius": 18,
+      "max_scale": 1.38,
+      "align": "middle"
+    },
+    "short-zh": {
+      "size": [
+        680,
+        220
+      ],
+      "points": 340,
+      "radius": 18,
+      "max_scale": 1.38,
+      "align": "middle"
+    },
+    "cost-zh": {
+      "size": [
+        920,
+        1638
+      ],
+      "points": 460,
+      "radius": 24
+    },
+    "settings-zh": {
+      "size": [
+        760,
+        1342
+      ],
+      "points": 380,
+      "radius": 24,
+      "max_scale": 1.1
+    }
+  }
+}

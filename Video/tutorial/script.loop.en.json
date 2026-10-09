@@ -1,0 +1,11 @@
+{
+  "lang": "en",
+  "main": "makes-en",
+  "takes": {
+    "makes": "makes-en",
+    "close": "close-en",
+    "short": "short-en"
+  },
+  "sample_tag": "Sample states, drawn by the app's own renderer",
+  "cues": []
+}

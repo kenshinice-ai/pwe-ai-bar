@@ -1,0 +1,10 @@
+{
+ "comment": "The silent page loop: the three verdicts in turn, each a sample state the app drew. It ends on the frame it starts on. Render with: python3 tools/build.py script.loop.en.json --edit loop.json --layout loop --silent --name loop-en",
+ "paths": {},
+ "steps": [
+  {"id": "l-makes", "take": "makes", "in": 1.0, "out": 1.0, "dur": 2.4},
+  {"id": "l-close", "take": "close", "in": 1.0, "out": 1.0, "dur": 2.8, "dissolve": 0.4},
+  {"id": "l-short", "take": "short", "in": 1.0, "out": 1.0, "dur": 2.8, "dissolve": 0.4},
+  {"id": "l-back", "take": "makes", "in": 1.0, "out": 1.0, "dur": 0.5, "dissolve": 0.4}
+ ]
+}
