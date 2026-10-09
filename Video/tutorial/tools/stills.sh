@@ -28,5 +28,6 @@ take panel panel-full-dark.png
 take makes endurance-comfortable-dark.png
 take close endurance-tooclose-dark.png
 take short endurance-short-dark.png
+take gap endurance-measured-dark.png      # the falling-short state the product page describes; the page loop uses it
 take cost trophy-dark.png
 take settings settings-dark.png

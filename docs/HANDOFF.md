@@ -20,8 +20,7 @@ macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。
 
 ## 等 Lee
 
-- **[动手] 打开一次 Claude Code，让登录续上** — 教程片里真实面板那一镜要重拍：2026-10-09 19:12 登录过期，面板上没有 Claude 额度，旁白却在讲读取 Claude Code；续上后跑 `Video/tutorial/tools/stills.sh en` 和 `zh-Hans` 再合成，几分钟 · 不做则这一镜对不上旁白 · 自 2026-10-09
-- **[决定] 教程片和页面循环看完后改哪里、发不发** — 成片在 `~/Movies/PWE Films/ai-bar/`（竖版中英各 53–56 秒，循环 8 秒），源文件在 `Video/tutorial/`；推荐先等上一条重拍完再看 · 不定则片子只在本机 · 自 2026-10-09
+没有。
 
 ---
 

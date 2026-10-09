@@ -3,7 +3,7 @@
 A 56-second film of PWE AI Bar, and a silent 8-second loop of its three verdicts for the product page.
 Vertical 1080 × 1920, Chinese and English narration, one edit for both.
 
-Status, 2026-10-09: first cut. Lee has not reviewed it. Not published.
+Status, 2026-10-10: Lee has reviewed the film. The loop is on pwestudio.site/aibar. The film itself has not been posted anywhere.
 
 The pipeline is the one in `07 TOOLS/PWE Loan Bar/Video/tutorial` (its README explains the script
 files, the edit list, the narration tools and the compositor). What is specific to this film:
@@ -22,8 +22,9 @@ own renderers and turns each into a four-second take:
 The line under the picture says which it is, on every frame (`tags` in the script, `tag` on each step).
 
 > ⚠️ Run `tools/stills.sh` only when the panel shows what the film should show. The `panel` take is
-> whatever the app reads at that moment. On 2026-10-09 the Claude Code login had expired at 19:12, so
-> the panel in this cut says so and shows no Claude quota, under narration about reading Claude Code.
+> whatever the app reads at that moment. The first cut was drawn after the Claude Code login had expired,
+> so its panel showed no Claude quota under narration about reading Claude Code. It was drawn again on
+> 2026-10-10, with the login live.
 
 ## What is here
 

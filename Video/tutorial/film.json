@@ -7,7 +7,7 @@
     "panel-en": {
       "size": [
         680,
-        1270
+        1302
       ],
       "points": 340,
       "radius": 24,
@@ -46,7 +46,7 @@
     "cost-en": {
       "size": [
         920,
-        1622
+        1730
       ],
       "points": 460,
       "radius": 24
@@ -63,7 +63,7 @@
     "panel-zh": {
       "size": [
         680,
-        1272
+        1304
       ],
       "points": 340,
       "radius": 24,
@@ -102,7 +102,7 @@
     "cost-zh": {
       "size": [
         920,
-        1638
+        1748
       ],
       "points": 460,
       "radius": 24
@@ -115,6 +115,26 @@
       "points": 380,
       "radius": 24,
       "max_scale": 1.1
+    },
+    "gap-en": {
+      "size": [
+        680,
+        220
+      ],
+      "points": 340,
+      "radius": 18,
+      "max_scale": 1.38,
+      "align": "middle"
+    },
+    "gap-zh": {
+      "size": [
+        680,
+        220
+      ],
+      "points": 340,
+      "radius": 18,
+      "max_scale": 1.38,
+      "align": "middle"
     }
   }
 }
