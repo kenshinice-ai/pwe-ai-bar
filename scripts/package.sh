@@ -102,7 +102,7 @@ SESSION ALERTS
   Settings → 会话事件 → 安装 adds two hooks to Claude Code so
   the app can tell you when Claude is waiting on you.
 
-A Paradise Production
+PWE · 天域出品
 READ
 
 IMAGE="$WORK/image.dmg"

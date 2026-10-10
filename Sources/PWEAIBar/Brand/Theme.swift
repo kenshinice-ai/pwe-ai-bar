@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The Paradise Production palette and faces, exactly as the brand sheet writes them.
+/// The PWE palette and faces, exactly as the brand standard writes them.
 ///
 /// The accent is stored as a **pair**, never a single value: amber `#F5B335` fails WCAG AA on a
 /// light ground, so the sheet forbids it there and requires deep amber `#A16207` instead. Keeping

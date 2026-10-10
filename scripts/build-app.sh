@@ -77,7 +77,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <!-- Menu bar only: no Dock icon, no app switcher entry. -->
   <key>LSUIElement</key><true/>
-  <key>NSHumanReadableCopyright</key><string>A Paradise Production</string>
+  <key>NSHumanReadableCopyright</key><string>© 2026 PWE Group Pty Ltd</string>
 </dict>
 </plist>
 PLIST

@@ -10,7 +10,7 @@ But its real job is to find you at the moment it is your turn.
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1–M5-A16207?style=flat-square)](#install)
 [![License](https://img.shields.io/badge/license-MIT-0E1729?style=flat-square)](LICENSE)
 
-*A PARADISE PRODUCTION · 天域文创出品*
+*PWE · 天域出品*
 
 **English** · [简体中文](README.zh-Hans.md)
 
@@ -228,7 +228,7 @@ and the slogan. Fork it, change it, redistribute it — but a redistributed buil
 wing or use the PWE or Paradise Production names in a way that suggests it is the official release.
 Replace `Sources/PWEAIBar/Brand/` and the application name with your own.
 
-The fourth in PWE Studio's menu-bar family, after Loan Bar, Lumen Bar and MAC MONITOR — all at
+The fourth in PWE Studio's menu-bar family, after Loan Bar, Lumen Bar and Monitor — all at
 [pwestudio.site](https://pwestudio.site).
 
-A Paradise Production · 天域文创出品
+PWE · 天域出品

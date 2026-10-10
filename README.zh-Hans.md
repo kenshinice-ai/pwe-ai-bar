@@ -10,7 +10,7 @@
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1–M5-A16207?style=flat-square)](#装)
 [![许可](https://img.shields.io/badge/许可-MIT-0E1729?style=flat-square)](LICENSE)
 
-*A PARADISE PRODUCTION · 天域文创出品*
+*PWE · 天域出品*
 
 [English](README.md) · **简体中文**
 
@@ -197,7 +197,7 @@ open "build/PWE AI Bar.app"
 Paradise Production 的名字让人以为那是官方版本 —— 把 `Sources/PWEAIBar/Brand/`
 和应用名换成你自己的。
 
-PWE Studio 菜单栏家族的第四位，接在 Loan Bar、Lumen Bar、MAC MONITOR 之后 ——
+PWE Studio 菜单栏家族的第四位，接在 Loan Bar、Lumen Bar、Monitor 之后 ——
 全部在 [pwestudio.site](https://pwestudio.site)。
 
-A Paradise Production · 天域文创出品
+PWE · 天域出品
