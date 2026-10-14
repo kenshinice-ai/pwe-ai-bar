@@ -18,10 +18,14 @@ actor ClaudeProvider {
         var stamp: () -> Date? = { nil }
         /// Whether Claude Code is on this Mac at all. Injectable so a test can state it.
         var claudeCodePresent: () -> Bool = Credentials.claudeCodePresent
+        /// Asks Claude Code to renew its own login; true when it ran and reported success. Nothing
+        /// by default, so no test ever starts the real Claude Code.
+        var renew: () -> Bool = { false }
         static let live = Access(own: Credentials.ownToken,
                                  load: { try ClaudeCredentialStore().load(patient: $0) },
                                  save: { Credentials.storeOwnToken($0) },
-                                 stamp: { ClaudeCredentialStore().stamp() })
+                                 stamp: { ClaudeCredentialStore().stamp() },
+                                 renew: { ClaudeRenewer.live.renew() })
     }
     enum Blocker: Error, Equatable {
         case none, notLoggedIn, notInstalled, keychainRefused, unauthorized, forbidden, network
@@ -313,6 +317,45 @@ actor ClaudeProvider {
         return stamp != seenStamp
     }
 
+    /// Asks Claude Code to renew its login, when the login has expired and a try is due. Returns
+    /// whether the record moved — the only evidence that counts, since Claude Code can report
+    /// success without having renewed anything.
+    ///
+    /// Only for a login that expired, never for one that could not be read: a refusal is a
+    /// keychain question, and starting Claude Code in the background would put it to nobody. Only
+    /// when the last read found a renewable login — what CodexBar ran without, hourly, for people
+    /// whose record held none. And only when the user turned it on (`claudeAutoRenew`); `asked`,
+    /// the panel's button, is a person asking now and needs no setting.
+    ///
+    /// A try that leaves the record where it was waits before the next: a quarter of an hour, then
+    /// doubling to four hours, kept in defaults because a relaunch is not news. Without it a Mac
+    /// signed out of Claude Code would start a process every ten seconds.
+    func renewIfDue(asked: Bool = false) async -> Bool {
+        guard blocker.isExpired, !defaults.bool(forKey: "claudeManualTokenSelected"),
+              asked || defaults.bool(forKey: "claudeAutoRenew"),
+              lastRead?.tokens.contains(where: { $0.refreshToken != nil }) == true else { return false }
+        if !asked, defaults.double(forKey: "claudeRenewAfter") > now().timeIntervalSince1970 { return false }
+        let access = self.access
+        let before = try? await offActor(access.stamp)
+        let ran = (try? await offActor(patience: ClaudeRenewer.patience + 5) { access.renew() }) ?? false
+        let after = try? await offActor(access.stamp)
+        if ran, let after, after != before {
+            clearRenewal()
+            return true
+        }
+        let failures = min(defaults.integer(forKey: "claudeRenewFailures") + 1, 8)
+        defaults.set(failures, forKey: "claudeRenewFailures")
+        let wait = min(15 * 60 * pow(2, Double(failures - 1)), 4 * 3600)
+        defaults.set(now().timeIntervalSince1970 + wait, forKey: "claudeRenewAfter")
+        return false
+    }
+
+    private func clearRenewal() {
+        guard defaults.object(forKey: "claudeRenewFailures") != nil else { return }
+        defaults.removeObject(forKey: "claudeRenewFailures")
+        defaults.removeObject(forKey: "claudeRenewAfter")
+    }
+
     private func fetch(force: Bool, asked: Bool, version: Int, reloads: Int = 1) async -> Reading {
         do {
             let tokens = try await candidates(asked: asked)
@@ -415,6 +458,7 @@ actor ClaudeProvider {
         details.spend = mapped.spend; details.lastSuccessAt = now()
         details.source = token.source
         blocker = .none; retryNetworkAt = nil
+        clearRenewal()
         return (cache, cache.contains(where: \.isStale))
     }
 

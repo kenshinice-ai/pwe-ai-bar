@@ -305,10 +305,19 @@ enum Subprocess {
     /// dismisses that dialog before anyone can reach "Always Allow" — so the grant never
     /// records, and the next read asks again. Give that one a human's patience instead.
     static func run(_ argv: [String], timeout: TimeInterval) -> String? {
+        run(argv, timeout: timeout, directory: nil, environment: nil)
+    }
+
+    /// The same, from a given working directory and with a given environment — for starting Claude
+    /// Code, which reads both (`ClaudeRenewer`).
+    static func run(_ argv: [String], timeout: TimeInterval, directory: URL?,
+                    environment: [String: String]?) -> String? {
         guard let first = argv.first else { return nil }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: first)
         process.arguments = Array(argv.dropFirst())
+        if let directory { process.currentDirectoryURL = directory }
+        if let environment { process.environment = environment }
         process.standardInput = FileHandle.nullDevice
         let stdout = Pipe(), stderr = Pipe()
         process.standardOutput = stdout; process.standardError = stderr

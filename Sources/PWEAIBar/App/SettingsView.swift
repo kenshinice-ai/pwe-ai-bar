@@ -194,6 +194,20 @@ struct SettingsView: View {
                     }
                 }
                 row(L("settings.source", "Quota source")) { quotaSource }
+                row(L("settings.renew", "Expired login")) {
+                    HStack(spacing: 7) {
+                        Text(L("settings.renew.toggle", "Let Claude Code renew it"))
+                            .font(Theme.sans(12)).foregroundStyle(Theme.text)
+                        Spacer(minLength: Theme.s1)
+                        Toggle("", isOn: $prefs.autoRenewClaude)
+                            .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                    }
+                    note(L("settings.renew.note",
+                           "Claude Code's login lasts eight hours, and the desktop app does not renew it. "
+                           + "With this on, an expired login is handed to Claude Code, which runs /usage — "
+                           + "no conversation, no quota used — and writes the renewed login itself. "
+                           + "Off, the quota waits until you next open Claude Code."))
+                }
                 row(L("settings.sessionEvents", "Session events")) {
                     HStack {
                         Text("Claude Code hooks · \(hookState.label)")

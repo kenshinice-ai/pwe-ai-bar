@@ -279,6 +279,100 @@ final class ClaudeUsageTests: XCTestCase {
         XCTAssertFalse(moved, "with quota flowing there is nothing to watch for")
     }
 
+    // MARK: Handing an expired login to Claude Code
+
+    /// A record Claude Code renews when asked: the renewal writes a fresh login and moves the stamp,
+    /// as the real `claude -p /usage` did on 2026-10-14.
+    private func renewing(_ record: KeychainRecord, calls: Counter, renews: Bool = true) -> ClaudeProvider.Access {
+        var access = record.access()
+        access.renew = {
+            calls.bump()
+            if renews {
+                record.value = self.auth("renewed", expiry: self.date.timeIntervalSince1970 + 8 * 3600)
+                record.stamp = record.stamp.addingTimeInterval(60)
+            }
+            return true
+        }
+        return access
+    }
+
+    func testAnExpiredLoginIsHandedToClaudeCodeOnlyWhenTheUserTurnedThatOn() async throws {
+        let space = try TestSpace(); let calls = Counter()
+        let record = KeychainRecord(auth(expiry: date.timeIntervalSince1970 - 60))
+        let http = HTTPStub([(200, quota, [:])])
+        let provider = ClaudeProvider(defaults: space.defaults, access: renewing(record, calls: calls),
+                                      now: { self.date }, request: { try await http.send($0) })
+        _ = await provider.windows()
+        var renewed = await provider.renewIfDue()
+        XCTAssertFalse(renewed); XCTAssertEqual(calls.count, 0, "off until the user turns it on")
+
+        space.defaults.set(true, forKey: "claudeAutoRenew")
+        renewed = await provider.renewIfDue()
+        XCTAssertTrue(renewed); XCTAssertEqual(calls.count, 1)
+        let reading = await provider.windows(force: true)
+        XCTAssertEqual(reading.windows.first?.percent, 7.4)
+        renewed = await provider.renewIfDue()
+        XCTAssertFalse(renewed, "with quota flowing there is nothing to renew")
+        XCTAssertEqual(calls.count, 1)
+    }
+
+    /// A Mac signed out of Claude Code, or one where it cannot be found, must not start a process
+    /// every ten seconds. A try that leaves the record where it was waits; a person does not.
+    func testARenewalThatMovesNothingWaitsBeforeTheNext() async throws {
+        let space = try TestSpace(); let calls = Counter()
+        space.defaults.set(true, forKey: "claudeAutoRenew")
+        let record = KeychainRecord(auth(expiry: date.timeIntervalSince1970 - 60))
+        var clock = date
+        let provider = ClaudeProvider(defaults: space.defaults,
+                                      access: renewing(record, calls: calls, renews: false),
+                                      now: { clock }, request: { _ in throw URLError(.notConnectedToInternet) })
+        _ = await provider.windows()
+        var renewed = await provider.renewIfDue()
+        XCTAssertFalse(renewed, "Claude Code said it succeeded, but the record did not move")
+        renewed = await provider.renewIfDue()
+        XCTAssertEqual(calls.count, 1, "the second try waits")
+        renewed = await provider.renewIfDue(asked: true)
+        XCTAssertEqual(calls.count, 2, "a person asking is not made to wait")
+        clock.addTimeInterval(29 * 60)
+        _ = await provider.renewIfDue()
+        XCTAssertEqual(calls.count, 2, "two failures: half an hour")
+        clock.addTimeInterval(2 * 60)
+        _ = await provider.renewIfDue()
+        XCTAssertEqual(calls.count, 3)
+        XCTAssertFalse(renewed)
+    }
+
+    /// A refusal is a keychain question. Starting Claude Code in the background would put it to
+    /// nobody, so that case still waits for a person.
+    func testALoginThatCouldNotBeReadIsNeverHandedOn() async throws {
+        let space = try TestSpace(); let calls = Counter()
+        space.defaults.set(true, forKey: "claudeAutoRenew")
+        let record = KeychainRecord(auth())
+        record.answers = [nil]
+        let provider = ClaudeProvider(defaults: space.defaults, access: renewing(record, calls: calls),
+                                      now: { self.date }, request: { _ in throw URLError(.notConnectedToInternet) })
+        _ = await provider.windows()
+        let blocker = await provider.blocker
+        XCTAssertEqual(blocker, .keychainRefused)
+        let renewed = await provider.renewIfDue(asked: true)
+        XCTAssertFalse(renewed); XCTAssertEqual(calls.count, 0)
+    }
+
+    /// What CodexBar ran without, hourly (steipete/CodexBar#1844): a record with no renewable
+    /// login in it. Asking Claude Code to renew nothing is how a browser ends up opening.
+    func testARecordWithNothingToRenewIsNeverHandedOn() async throws {
+        let space = try TestSpace(); let calls = Counter()
+        space.defaults.set(true, forKey: "claudeAutoRenew")
+        let bare = #"{"claudeAiOauth":{"accessToken":"a","expiresAt":\#((date.timeIntervalSince1970 - 60) * 1000),"scopes":["user:profile"]}}"#
+        let record = KeychainRecord(bare)
+        let provider = ClaudeProvider(defaults: space.defaults, access: renewing(record, calls: calls),
+                                      now: { self.date }, request: { _ in throw URLError(.notConnectedToInternet) })
+        _ = await provider.windows()
+        let blocker = await provider.blocker; XCTAssertTrue(blocker.isExpired)
+        let renewed = await provider.renewIfDue(asked: true)
+        XCTAssertFalse(renewed); XCTAssertEqual(calls.count, 0)
+    }
+
     /// A stamp nobody can read is not a change. Treating it as one would run the tool on a timer.
     func testAnUnknownStampIsNotAMove() async throws {
         let space = try TestSpace(); let memory = ClaudeMemory()
@@ -772,6 +866,13 @@ final class ClaudeCodePresenceTests: XCTestCase {
     }
 }
 
+/// Thread-safe count of how often a closure ran.
+final class Counter: @unchecked Sendable {
+    private let lock = NSLock(); private var n = 0
+    func bump() { lock.lock(); n += 1; lock.unlock() }
+    var count: Int { lock.lock(); defer { lock.unlock() }; return n }
+}
+
 /// The whole of what 1.6.1 is for: a login that expired overnight comes back when Claude Code is
 /// next used, and nobody presses anything.
 final class LoginWatchTests: XCTestCase {
@@ -817,5 +918,43 @@ final class LoginWatchTests: XCTestCase {
         XCTAssertEqual(store.blocker, .none)
         XCTAssertEqual(store.snapshot.windows(of: .claude).first?.percent, 7.4)
         count = await http.count; XCTAssertEqual(count, 1)
+    }
+}
+
+extension LoginWatchTests {
+    /// 1.6.2: on a Mac where Claude Code is only ever used through the desktop app, nothing renews
+    /// the record. With the setting on, the app hands the expired login to Claude Code and the
+    /// quota comes back with nobody pressing anything.
+    @MainActor func testAnExpiredLoginIsRenewedThroughClaudeCodeWithNobodyAsking() async throws {
+        let space = try TestSpace()
+        space.defaults.set(true, forKey: "claudeAutoRenew")
+        let now = Date().timeIntervalSince1970
+        let record = KeychainRecord(auth("old", expiry: now - 60))
+        let calls = Counter()
+        var access = record.access()
+        access.renew = {
+            calls.bump()
+            record.value = self.auth("renewed", expiry: now + 8 * 3600)
+            record.stamp = record.stamp.addingTimeInterval(60)
+            return true
+        }
+        let http = HTTPStub([(200, #"{"five_hour":{"utilization":7.4}}"#, [:])])
+        let provider = ClaudeProvider(defaults: space.defaults, access: access,
+                                      request: { try await http.send($0) })
+        let store = Store(claude: provider,
+                          rules: RuleEngine(defaults: space.defaults, away: { false }, remaining: { true }),
+                          readEvents: { [] },
+                          readLocal: { _, _ in .init(trophy: Trophy(), context: nil, lastTurnAt: nil) },
+                          readCodex: { ([], nil) }, deliver: { _, _ in false },
+                          tracks: { (true, false) }, tracksExtra: { _ in false }, observe: { $0 },
+                          eventInterval: 0.05, lastActivity: Date().addingTimeInterval(-7200))
+        store.start(observeSystem: false)
+        defer { store.stop() }
+        for _ in 0..<150 where store.snapshot.windows(of: .claude).first?.percent != 7.4 {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(store.blocker, .none)
+        XCTAssertEqual(store.snapshot.windows(of: .claude).first?.percent, 7.4)
+        XCTAssertEqual(calls.count, 1, "renewed once, not on every tick")
     }
 }

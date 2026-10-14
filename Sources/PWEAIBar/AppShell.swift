@@ -153,7 +153,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   usableHeight: { [weak self] in
                       self?.statusItem?.button?.window?.screen?.visibleFrame.height
                   },
-                  onHeight: { [weak self] h in self?.resizePanel(to: h) })
+                  onHeight: { [weak self] h in self?.resizePanel(to: h) },
+                  onOpenClaude: { [weak self] in self?.store.openClaudeCode() })
     }
 
     /// The panel says how tall it wants to be; this is what makes the popover that size.

@@ -20,7 +20,16 @@ enum ClaudeLogin {
             lines: [L("login.signingIn", "PWE AI Bar — signing in to Claude Code."),
                     L("login.signingIn.browser",
                       "A browser window will open. You can close this window when it is done.")],
-            command: command)
+            command: cli + " auth login")
+    }
+
+    /// The Claude Code to run, written for a shell. On a Mac whose only Claude Code is the desktop
+    /// app's, `claude` alone answers `command not found` — which is what this button did on
+    /// 2026-10-14 — so the path the renewer finds is used, quoted, and the bare name only when
+    /// nothing was found.
+    private static var cli: String {
+        guard let path = ClaudeRenewer.locateCLI()?.path else { return "claude" }
+        return "'" + path.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
     }
 
     /// Runs Claude Code, for a login that has expired or could not be read.
@@ -38,7 +47,7 @@ enum ClaudeLogin {
                     L("login.opening.renews",
                       "Using it renews its login, and the quota in the menu bar comes back on its own."),
                     L("login.opening.allow", "If macOS asks about the keychain, choose Always Allow.")],
-            command: "claude")
+            command: cli)
     }
 
     private static func run(named name: String, lines: [String], command: String) -> Bool {

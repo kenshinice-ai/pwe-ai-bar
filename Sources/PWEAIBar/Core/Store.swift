@@ -314,6 +314,20 @@ final class Store: ObservableObject {
             defer { loginCheckInFlight = false }
             // Claude alone: nothing else changed, and a full sweep would walk the log trees first.
             if await claude.loginMoved() { refreshClaudeOnly() }
+            // Nobody renewed it, so ask Claude Code to, if the user said so. The desktop app never
+            // will: it keeps a login of its own, and the record waits for a terminal session.
+            else if await claude.renewIfDue() { refreshClaudeOnly() }
+        }
+    }
+
+    /// The panel's Open Claude Code. An expired login is handed to Claude Code to renew in the
+    /// background, which is what opening it achieved; anything else — a login that could not be
+    /// read, or a renewal that did not move the record — still opens Claude Code in Terminal,
+    /// where a keychain question can be answered or a sign-in finished.
+    func openClaudeCode() {
+        Task { @MainActor in
+            if await claude.renewIfDue(asked: true) { refreshClaudeOnly(asked: true) }
+            else { ClaudeLogin.openClaudeCode() }
         }
     }
 

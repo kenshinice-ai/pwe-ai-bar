@@ -235,6 +235,9 @@
 "settings.readout" = "Percentage basis";
 "settings.readout.note" = "Codex shows what is left; Claude's endpoint gives what is used. One convention, so the same window does not read as two things.";
 "settings.refresh" = "Refresh";
+"settings.renew" = "Expired login";
+"settings.renew.note" = "Claude Code's login lasts eight hours, and the desktop app does not renew it. With this on, an expired login is handed to Claude Code, which runs /usage — no conversation, no quota used — and writes the renewed login itself. Off, the quota waits until you next open Claude Code.";
+"settings.renew.toggle" = "Let Claude Code renew it";
 "settings.sessionEvents" = "Session events";
 "settings.sound" = "Sound";
 "settings.source" = "Quota source";

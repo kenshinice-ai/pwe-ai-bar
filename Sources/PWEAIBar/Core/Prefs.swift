@@ -147,6 +147,10 @@ final class Prefs: ObservableObject {
     @Published var focusProvider: String { didSet { d.set(focusProvider, forKey: "focusProvider") } }
     @Published var sound: Bool       { didSet { d.set(sound, forKey: "sound") } }
     @Published var pushURL: String   { didSet { d.set(pushURL, forKey: "pushURL") } }
+    /// Whether an expired Claude Code login is handed to Claude Code to renew in the background.
+    /// Off until the user turns it on: it starts another program on a schedule. `ClaudeProvider`
+    /// reads the same key, since it lives in an actor that cannot reach this object.
+    @Published var autoRenewClaude: Bool { didSet { d.set(autoRenewClaude, forKey: "claudeAutoRenew") } }
     @Published var launchAtLogin: Bool {
         didSet {
             d.set(launchAtLogin, forKey: "launchAtLogin")
@@ -200,6 +204,7 @@ final class Prefs: ObservableObject {
         sound       = d.object(forKey: "sound")       as? Bool ?? true
         pushURL     = d.string(forKey: "pushURL") ?? ""
         launchAtLogin = d.object(forKey: "launchAtLogin") as? Bool ?? false
+        autoRenewClaude = d.bool(forKey: "claudeAutoRenew")
         updateChecks = d.object(forKey: "updateChecks") as? Bool
     }
 
