@@ -1,6 +1,7 @@
 # PWE AI Bar — 接手说明
 
-最后更新 2026-10-03。**1.6.1 已发布**（2026-10-02）：本机已装，**Lee 10-03 确认界面核对项全部验证过**（见「已验证」）；文档 26 的 A 和 B，发版前过了一次 `/code-review`（九条，修五条）；
+最后更新 2026-10-14。**`main` 上有未发版的「过期时请 Claude Code 续期」（`06e068b`，待发 1.6.2）**，见机制二末尾。
+**1.6.1 已发布**（2026-10-02）：本机已装，**Lee 10-03 确认界面核对项全部验证过**（见「已验证」）；文档 26 的 A 和 B，发版前过了一次 `/code-review`（九条，修五条）；
 校验和 `8ad22252…9126`，站点、cask、更新端点都是 1.6.1。**1.6.0**（2026-09-24，MacBook Pro）：1.5.0 加上
 `claude/token-monitor-optimization-iitxj3` 那一轮修复，见下面「2026-09-23 这一轮」；本机核对结果在
 `MAC_HANDOFF_2026-09-23.md` 末尾。约 10,900 行 Swift，217 个测试（212 个是发 1.6.0 那次全过的；10-02 加了 5 个）。
@@ -20,7 +21,7 @@ macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。
 
 ## 等 Lee
 
-没有。
+- **[决定] 发 AI Bar 1.6.2，并为本机打开「登录过期时 · 让 Claude Code 自己续期」** — 推荐发：Lee 10-14 已授权后台自动续期；不发的话本机仍是 1.6.1，每 8 小时登录过期后仍要点一次 · 自 2026-10-14
 
 ---
 
@@ -117,6 +118,41 @@ Claude Code 用 `security` 工具创建这条记录，所以记录的分区列�
 `testLoginMovedIsTrueOnlyWhileBlockedAndOnlyAfterAWrite`、`testAnUnknownStampIsNotAMove`、
 `LoginWatchTests.testAnExpiredLoginRecoversOnceClaudeCodeWritesItWithNobodyAsking`。前后两条撤掉改动后都失败过（10-02 验过）。
 `--stress` 多了一帧 `stress-expired-*.png`：过期、读数保留的早晨 —— 这个状态开发时永远看不到，因为开发会让登录一直是新的。
+
+**2026-10-14：「用一次 Claude Code 就会续期」只对终端版成立（`06e068b`，未发版）。**
+
+结论：桌面版的 Claude Code 从不续这条登录。它把自己的令牌经环境变量 `CLAUDE_CODE_OAUTH_TOKEN` 交给会话，
+在自己的加密存储里续期。所以只在桌面版里工作时，登录 8 小时后过期，之后就一直过期。
+
+实测（2026-10-14，本机）：
+
+- 登录最后写入 10-12 22:07，到 10-14 18:24 没动过，期间每天在用桌面版。
+- 「打开 Claude Code」按钮的脚本最后写于 10-12 22:07，与登录写入是同一分钟。
+- 本机没有终端版 `claude`，只有桌面版自带的 `~/Library/Application Support/Claude/claude-code/<版本>/<构建>/claude.app/Contents/MacOS/claude`。
+- 用它跑 `claude -p "/usage"`（去掉宿主令牌）：0 轮、0 token、$0、5 秒；登录从 `20261012110750Z` 变成 `20261014072550Z`，是 Claude Code 自己写的。
+- `claude auth status` 不续期（与 09-16 一样）。
+
+做法（`ClaudeRenewer`、`ClaudeProvider.renewIfDue`、`Store.watchLogin`）：
+
+1. 每 10 秒那一拍，如果修改时间没动，就看是否该请 Claude Code 续期。
+2. 四个条件同时成立才跑：登录是 `.expired`；上次读到的登录有 refresh token；设置「登录过期时 · 让 Claude Code 自己续期」已打开（`claudeAutoRenew`，默认关）；不在退避期内。
+3. 命令固定为 `<claude> -p /usage --no-session-persistence --settings {"disableAllHooks":true} --output-format json`，工作目录固定为 `~/Library/Caches/PWE AI Bar`，去掉 `CLAUDE_CODE_*` 和 `ANTHROPIC_*` 环境变量。
+4. 跑完看登录的修改时间：动了才算成功；没动就退避，15 分钟起翻倍，最多 4 小时（`claudeRenewFailures`、`claudeRenewAfter`）。
+5. 面板的「打开 Claude Code」先在后台做同一件事（不看开关、不看退避）；失败才打开终端。终端里跑的是找到的那个 Claude Code，不再是光秃的 `claude`。
+
+**本 app 仍然不续期、不写登录**：写登录的永远是 Claude Code。`ClaudeRenewerTests` 用结构测试盯着渲染器文件里没有钥匙串调用、文件写入或网络请求，并把命令逐字钉死。
+
+> ⚠️ 不要把 `/usage` 换成任何会进模型的提示。换了就会每 8 小时替用户花一次额度。默认关、只跑 `/usage`，是 Lee 授权的前提。
+
+为什么有四个条件：CodexBar 在后台跑 `claude /status`，对登录里只有 `mcpOAuth` 的用户每小时打开一次浏览器（steipete/CodexBar#1844），
+之后改成默认只在用户操作时跑。
+
+守着它的测试：`testAnExpiredLoginIsHandedToClaudeCodeOnlyWhenTheUserTurnedThatOn`、`testARenewalThatMovesNothingWaitsBeforeTheNext`、
+`testALoginThatCouldNotBeReadIsNeverHandedOn`、`testARecordWithNothingToRenewIsNeverHandedOn`、
+`LoginWatchTests.testAnExpiredLoginIsRenewedThroughClaudeCodeWithNobodyAsking`，以及 `ClaudeRenewerTests` 五条。
+开关和后台触发各撤掉一次，对应测试都失败过（10-14 验过）。
+
+未核实：设置页这一行没有亲眼看过渲染，原因是 `--stress` 里「来源」那一节默认折叠。真实的过期登录上还没跑过整条自动流程，原因是要等 1.6.2 装上、登录再过期一次。
 
 现在的形状（`ClaudeProvider.probe`）：
 
