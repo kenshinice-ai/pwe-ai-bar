@@ -23,8 +23,8 @@ macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。
 
 ---
 
-> ⚠️ 工具站在冻结期（2026-10-14 起，Lee 批准），发版时不要改 `PWE Loan Bar/site/public/` 下的页面，也不要跑 `site/deploy.sh`。
-> 照旧改的话，会和「PWE Tools AI 设计」会话的页面重构冲突。发版照常；`/aibar` 的版本号和截图先发消息给那个会话，由它并进重构分支并部署。解冻时它会通知。
+> ⚠️ 改工具站页面前，先读 `pwe-release` 技能「The site」一节（2026-10-14 重构后的规矩）。
+> 不读就手改了页面的公共部分的话，`site/deploy.sh` 会停下。页头页脚由 `site/chrome.py` 生成；链接写成 `/aibar/`；部署后提交 `site/public/` 下被改的文件。
 
 ## 等 Lee
 
