@@ -228,6 +228,10 @@ and the slogan. Fork it, change it, redistribute it — but a redistributed buil
 wing or use the PWE or Paradise Production names in a way that suggests it is the official release.
 Replace `Sources/PWEAIBar/Brand/` and the application name with your own.
 
+PWE AI Bar is free and will stay that way: nothing is locked, and the app never asks. If it has
+earned a place in your menu bar, [pwestudio.site/support](https://pwestudio.site/support) says how
+to give something back — one page for every free PWE tool.
+
 The fourth in PWE Studio's menu-bar family, after Loan Bar, Lumen Bar and Monitor — all at
 [pwestudio.site](https://pwestudio.site).
 

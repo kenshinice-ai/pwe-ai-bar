@@ -197,6 +197,10 @@ open "build/PWE AI Bar.app"
 Paradise Production 的名字让人以为那是官方版本 —— 把 `Sources/PWEAIBar/Brand/`
 和应用名换成你自己的。
 
+PWE AI Bar 免费，而且会一直免费：没有锁住的功能，app 也从不开口要。如果它在你的菜单栏里派上了
+用场，[pwestudio.site/support](https://pwestudio.site/support) 说明了怎么支持我们 —— 所有免费的
+PWE 工具共用这一页。
+
 PWE Studio 菜单栏家族的第四位，接在 Loan Bar、Lumen Bar、Monitor 之后 ——
 全部在 [pwestudio.site](https://pwestudio.site)。
 

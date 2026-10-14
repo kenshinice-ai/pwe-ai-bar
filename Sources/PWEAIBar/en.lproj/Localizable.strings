@@ -246,6 +246,7 @@
 "settings.source.none" = "No usable Claude Code login was found. Use Sign in below.";
 "settings.subscription" = "Subscription price";
 "settings.subscription.note" = "Leave empty to use the table price for the detected plan. The multiple is always computed in USD — the equivalent cost is itself a USD list price, and converting it would need an exchange rate this app has no reliable source for.";
+"settings.support" = "Support PWE…";
 "settings.token.clear" = "Clear";
 "settings.token.field" = "Advanced: paste a token with quota read access";
 "settings.token.none.readOnly" = "Usually unnecessary. The Claude Code login is read automatically — this app only reads it, and never renews or rewrites it. A manual token must pass the quota endpoint; being long-lived does not mean it can read usage.";

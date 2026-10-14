@@ -270,6 +270,13 @@ struct SettingsView: View {
                 .help(L("settings.updates.download", "Download"))
             }
             Spacer()
+            // Free and open, so the two links worth having are the source and the one page that
+            // says how to give something back, shared by every free PWE tool. Only here: nothing
+            // in the panel asks, nothing counts days, nothing is locked.
+            Button { NSWorkspace.shared.open(Self.support) } label: {
+                Text(L("settings.support", "Support PWE…")).font(Theme.sans(11))
+            }
+            .buttonStyle(.link)
             Button { NSWorkspace.shared.open(Self.repository) } label: {
                 Text(verbatim: "GitHub").font(Theme.sans(11))
             }
@@ -337,6 +344,7 @@ struct SettingsView: View {
     }
 
     private static let repository = URL(string: "https://github.com/kenshinice-ai/pwe-ai-bar")!
+    private static let support = URL(string: "https://pwestudio.site/support")!
 
     /// Falls back to a dash rather than to "1.0.0" or an empty string: a wrong version on screen
     /// is worse than an admitted unknown, because this line is the thing being trusted to settle

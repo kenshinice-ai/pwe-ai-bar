@@ -107,6 +107,7 @@
 "settings.alertPlacement" = "提醒落点";
 "settings.noNotch" = "这台机器没有刘海，所以没有那个选项。";
 "settings.source" = "额度数据来源";
+"settings.support" = "支持 PWE…";
 "settings.renew" = "登录过期时";
 "settings.renew.toggle" = "让 Claude Code 自己续期";
 "settings.renew.note" = "Claude Code 的登录 8 小时过期,桌面版不会替它续期。打开后,登录过期时本 app 会请 Claude Code 跑一次 /usage——不开对话、不占额度——由 Claude Code 自己续期并写回登录。关闭时,额度要等你下次打开 Claude Code 才回来。";
