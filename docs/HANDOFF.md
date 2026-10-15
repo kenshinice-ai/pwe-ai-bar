@@ -28,7 +28,7 @@ macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。
 
 ## 等 Lee
 
-- **[动手] 10-15 早上看一眼菜单栏的 Claude 数字是不是实时的** — 本机登录 10-15 02:25 过期，那是 1.6.2 自动续期第一次在真实过期上跑；不是实时的话，按刷新前先记下面板上的时间，再告诉我 · 自 2026-10-14
+没有。
 
 ---
 
@@ -159,7 +159,11 @@ Claude Code 用 `security` 工具创建这条记录，所以记录的分区列�
 `LoginWatchTests.testAnExpiredLoginIsRenewedThroughClaudeCodeWithNobodyAsking`，以及 `ClaudeRenewerTests` 五条。
 开关和后台触发各撤掉一次，对应测试都失败过（10-14 验过）。
 
-未核实：设置页这一行没有亲眼看过渲染，原因是 `--stress` 里「来源」那一节默认折叠。真实的过期登录上还没跑过整条自动流程，原因是要等登录再过期一次（本机 10-15 02:25）。
+**2026-10-16 实测，本机 1.6.3**：登录在 10-14 18:25 之后又被续过，最后一次写入是 10-16 10:41（UTC `20261015234146Z`），新到期 18:41。
+「打开 Claude Code」按钮的脚本仍停在 10-12 22:07，说明这期间没人点过；本机没有终端版 `claude`，所以写回登录的是 AI Bar 请来的 Claude Code。
+`claudeRenewFailures`、`claudeRenewAfter`、`claudeUnreadableCount` 都不存在，即一次续期都没失败过。Lee 10-16 确认菜单栏显示正常。
+
+未核实：设置页「登录过期时」那一行没有亲眼看过渲染，原因是 `--stress` 里「来源」那一节默认折叠。
 
 现在的形状（`ClaudeProvider.probe`）：
 
