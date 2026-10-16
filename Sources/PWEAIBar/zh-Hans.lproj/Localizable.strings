@@ -107,6 +107,13 @@
 "settings.alertPlacement" = "提醒落点";
 "settings.noNotch" = "这台机器没有刘海，所以没有那个选项。";
 "settings.source" = "额度数据来源";
+"trophy.byProject" = "按项目";
+"trophy.homeFolder" = "主文件夹";
+"trophy.unnamedFolder" = "非拉丁字母命名的文件夹";
+"trophy.others" = "其他 %d 个";
+"trophy.project" = "项目 %@";
+"trophy.previous" = "再往前 %@:%@ · %@";
+"trophy.previousNone" = "再往前 %@ 没有用量";
 "settings.support" = "支持 PWE…";
 "settings.renew" = "登录过期时";
 "settings.renew.toggle" = "让 Claude Code 自己续期";

@@ -11,6 +11,10 @@ struct TrophyView: View {
     @ObservedObject var prefs = Prefs.shared
     /// Changing the range changes what has to be re-aggregated, which only the store can do.
     var onRangeChange: (TrophyRange) -> Void = { _ in }
+    /// Project names are folder names, and folder names are often clients' names. Anything drawn
+    /// to be published — the site's screenshots, the film's stills — passes true and gets
+    /// "Project A, B, C"; only the window the user opens shows the real ones.
+    var redactProjects = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Entrance flourish only — nothing sized or valued depends on it.
@@ -34,6 +38,7 @@ struct TrophyView: View {
                 hero
                 VStack(alignment: .leading, spacing: Theme.s4) {
                     byModel
+                    byProject
                     byDay
                     tokens
                 }
@@ -194,6 +199,93 @@ struct TrophyView: View {
                 }
             }
         }
+    }
+
+    /// Where the range went, by the folder each session ran in. Eight rows and the rest in one: on
+    /// the machine this was built on a week spreads over twenty folders with no single one ahead
+    /// (measured 2026-10-16), so five left the remainder larger than any row it summarised.
+    @ViewBuilder private var byProject: some View {
+        let rows = projectRows
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: Theme.s2) {
+                Text(L("trophy.byProject", "By project").uppercased()).brandLabel().foregroundStyle(Theme.text2)
+                let total = max(rows.reduce(0) { $0 + $1.usd }, 0.000_001)
+                GeometryReader { g in
+                    HStack(spacing: 0) {
+                        ForEach(Array(rows.enumerated()), id: \.offset) { i, r in
+                            Rectangle().fill(projectColour(i, other: r.other))
+                                .frame(width: g.size.width * r.usd / total)
+                        }
+                    }
+                }
+                .frame(height: 10).clipShape(Capsule())
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { i, r in
+                        HStack(spacing: Theme.s1 + 1) {
+                            RoundedRectangle(cornerRadius: 2).fill(projectColour(i, other: r.other))
+                                .frame(width: 9, height: 9)
+                            Text(r.name).font(Theme.sans(12))
+                                .foregroundStyle(r.other ? Theme.text2 : Theme.text)
+                                .lineLimit(1).truncationMode(.middle)
+                            Text(String(format: L("trophy.turns", "%@ turns"), grouped(r.turns)))
+                                .font(Theme.figures(11, 400)).foregroundStyle(Theme.text2)
+                            Spacer()
+                            Text(r.usd > 0 ? money(r.usd) : "—")
+                                .font(Theme.figures(12, 500))
+                                .foregroundStyle(r.usd > 0 ? Theme.text : Theme.text2)
+                        }
+                    }
+                }
+                if let line = previousLine {
+                    Text(line).font(Theme.sans(11)).foregroundStyle(Theme.text2)
+                }
+            }
+        }
+    }
+
+    private var projectRows: [(name: String, turns: Int, usd: Double, other: Bool)] {
+        let all = t.byProject
+        // Letters count only the rows that are hidden, so Codex — named, since it is a tool and not
+        // a folder — does not leave a gap between Project D and Project F.
+        var letter = 0
+        var rows: [(name: String, turns: Int, usd: Double, other: Bool)] = []
+        for r in all.prefix(8) {
+            var name = r.name
+            if redactProjects, r.name != "Codex" { name = Self.redacted(letter); letter += 1 }
+            rows.append((name: name, turns: r.turns, usd: r.usd, other: false))
+        }
+        let rest = all.dropFirst(8)
+        if !rest.isEmpty {
+            rows.append((name: String(format: L("trophy.others", "%d others"), rest.count),
+                         turns: rest.reduce(0) { $0 + $1.turns }, usd: rest.reduce(0) { $0 + $1.usd },
+                         other: true))
+        }
+        return rows
+    }
+
+    static func redacted(_ i: Int) -> String {
+        String(format: L("trophy.project", "Project %@"), String(UnicodeScalar(UInt8(65 + i % 26))))
+    }
+
+    /// Navy for the largest, amber fading down the rest, and the leftovers in the quiet grey: the
+    /// order of the bar is the order of the list, and the eye can match them without the swatches.
+    private func projectColour(_ i: Int, other: Bool) -> Color {
+        if other { return Theme.text2.opacity(0.35) }
+        if i == 0 { return modelColour(0) }
+        return Theme.accent.opacity([1, 0.8, 0.65, 0.5, 0.4, 0.32, 0.25][min(i - 1, 6)])
+    }
+
+    /// "The 7 d before: $812 · +24%". Only for a range with a length, and the change only when
+    /// there was something to change from — a percentage of nothing is not a figure.
+    private var previousLine: String? {
+        guard let previous = t.previousUSD, t.range.days != nil else { return nil }
+        guard previous > 0 else {
+            return String(format: L("trophy.previousNone", "Nothing in the %@ before"), t.range.label)
+        }
+        let change = (t.equivalentUSD - previous) / previous * 100
+        let signed = (change >= 0 ? "+" : "−") + String(format: "%.0f%%", abs(change))
+        return String(format: L("trophy.previous", "The %@ before: %@ · %@"), t.range.label,
+                      money(previous), signed)
     }
 
     private var byDay: some View {

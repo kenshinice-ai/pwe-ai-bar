@@ -413,6 +413,11 @@ struct Trophy {
     /// The window these figures cover, carried so the page can say so rather than implying
     /// "all time" for numbers that are not.
     var range: TrophyRange = .all
+    /// Where the range went, one row per project, largest first. A project is the folder a
+    /// session ran in; Codex keeps its logs by date rather than by folder, so it is one row.
+    var byProject: [(name: String, turns: Int, usd: Double)] = []
+    /// The same span immediately before this one, for a range that has a length. Nil for "all".
+    var previousUSD: Double?
     /// Nil when no price is known for the detected plan. The page then shows the equivalent
     /// cost and *no multiple* — a ratio against a price nobody confirmed is worse than none.
     var subscriptionMonthly: Subscription?

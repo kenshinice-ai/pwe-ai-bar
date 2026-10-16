@@ -115,6 +115,12 @@ actor Transcript {
     private var claims: [Int: String] = [:]
     /// The last sweep's merged buckets, reused when nothing has changed since.
     private var total: Digest?
+    /// The same buckets split by project: day → project key → counts. Built in the same pass as
+    /// `total`, from the same per-file digests, so nothing extra is parsed or cached — a log file
+    /// belongs to exactly one project, and its path says which.
+    private var totalProjects: [Int: [String: Counts]] = [:]
+    /// Project key → the name shown. Resolving a key asks the filesystem, so once per launch.
+    private var projectNames: [String: String] = [:]
     private var lastFullScan = Date.distantPast
     private var watcher: TreeWatcher?
     private var loadedFromDisk = false
@@ -187,12 +193,94 @@ actor Transcript {
 
         if changed || total == nil {
             var merged = Digest()
-            for entry in cache.values { merged.merge(entry.digest) }
+            var projects: [Int: [String: Counts]] = [:]
+            for (path, entry) in cache {
+                merged.merge(entry.digest)
+                let project = Self.projectKey(path)
+                for (day, models) in entry.digest.perDayModel {
+                    for (_, counts) in models { projects[day, default: [:]][project, default: Counts()] += counts }
+                }
+            }
             total = merged
+            totalProjects = projects
         }
         if changed { saveDiskThrottled() }
 
-        return Self.assemble(total ?? Digest(), pricing: pricing, range: range, subscription: subscription)
+        var result = Self.assemble(total ?? Digest(), pricing: pricing, range: range,
+                                   subscription: subscription, projects: totalProjects)
+        result.trophy.byProject = result.trophy.byProject.map { row in
+            (name(ofProject: row.name), row.turns, row.usd)
+        }
+        return result
+    }
+
+    private func name(ofProject key: String) -> String {
+        if let known = projectNames[key] { return known }
+        let name = Self.projectName(key)
+        projectNames[key] = name
+        return name
+    }
+
+    // MARK: Projects
+
+    /// The project a log file belongs to. A Claude Code log sits in a folder named after the
+    /// working directory; a worktree's folder is that name plus `--claude-worktrees-<branch>`, and
+    /// is folded into its project, or one project would fill the list with its own branches.
+    static func projectKey(_ path: String, claudeRoot: String = Transcript.root.path) -> String {
+        let prefix = claudeRoot + "/"
+        guard path.hasPrefix(prefix) else { return codexProject }
+        let folder = String(path.dropFirst(prefix.count).split(separator: "/").first ?? "")
+        if let cut = folder.range(of: "--claude-worktrees-") { return String(folder[..<cut.lowerBound]) }
+        return folder
+    }
+
+    /// Codex keeps its logs by date, not by folder, so its turns are one row of their own.
+    static let codexProject = "codex"
+
+    /// What a project key is called on screen: the last component of the directory it stands for.
+    ///
+    /// Claude Code names a project's folder by replacing every character of the working directory
+    /// that is not an ASCII letter or digit with "-", and that cannot be undone by editing the
+    /// string — "PARADISE PRODUCTION" and "PARADISE/PRODUCTION" come out the same. So the filesystem
+    /// is asked: walk down from the root, following the entries whose own spelling, mangled the
+    /// same way, the key continues. A directory that no longer exists falls back to the key with
+    /// the home folder and the iCloud prefix taken off.
+    static func projectName(_ key: String, root: String = "/",
+                            home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> String {
+        if key == codexProject { return "Codex" }
+        // A session started in the home folder would otherwise be labelled with the user's name.
+        if key == mangle(home) { return L("trophy.homeFolder", "Home folder") }
+        if let path = resolve(key, from: root) { return (path as NSString).lastPathComponent }
+        var rest = key
+        for prefix in [mangle(home) + "-", "Library-Mobile-Documents-com-apple-CloudDocs-", "Documents-"]
+        where rest.hasPrefix(prefix) && rest.count > prefix.count {
+            rest = String(rest.dropFirst(prefix.count))
+        }
+        let name = rest.replacingOccurrences(of: "-", with: " ").trimmingCharacters(in: .whitespaces)
+        // A folder named in Chinese mangles to dashes and nothing else, which leaves nothing to show.
+        return name.isEmpty ? L("trophy.unnamedFolder", "Folder with a non-Latin name") : name
+    }
+
+    static func mangle(_ path: String) -> String {
+        String(path.map { $0.isASCII && ($0.isLetter || $0.isNumber) ? $0 : "-" })
+    }
+
+    private static func resolve(_ key: String, from root: String) -> String? {
+        let fm = FileManager.default
+        func walk(_ dir: String, depth: Int) -> String? {
+            if mangle(dir) == key { return dir }
+            guard depth < 16, let children = try? fm.contentsOfDirectory(atPath: dir) else { return nil }
+            for child in children.sorted() {
+                let path = dir == "/" ? "/" + child : dir + "/" + child
+                let spelled = mangle(path)
+                guard key == spelled || key.hasPrefix(spelled + "-") else { continue }
+                var isDirectory: ObjCBool = false
+                guard fm.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else { continue }
+                if let found = walk(path, depth: depth + 1) { return found }
+            }
+            return nil
+        }
+        return walk(root, depth: 0)
     }
 
     /// Brings one file's cached buckets up to date. Returns whether anything changed.
@@ -415,7 +503,8 @@ actor Transcript {
     }
 
     static func assemble(_ d: Digest, pricing: Pricing, range: TrophyRange,
-                                 subscription: Subscription?) -> Result {
+                         subscription: Subscription?,
+                         projects: [Int: [String: Counts]] = [:]) -> Result {
         var t = Trophy()
         let zone = Double(TimeZone.current.secondsFromGMT())
         let today = Int(floor((Date().timeIntervalSince1970 + zone) / 86400))
@@ -451,6 +540,21 @@ actor Transcript {
         // against — a range with two working days in it did not cost you seven days of plan.
         t.days = perDay.count
         t.range = range
+
+        // Same days, same counts, split by where they were spent — so the rows add up to the
+        // headline. Keys come back raw; the actor names them, since naming asks the filesystem.
+        var perProject: [String: Counts] = [:]
+        for day in days {
+            for (project, v) in projects[day] ?? [:] { perProject[project, default: Counts()] += v }
+        }
+        t.byProject = perProject.map { ($0.key, $0.value.turns, $0.value.usd) }
+            .sorted { $0.usd != $1.usd ? $0.usd > $1.usd : $0.name < $1.name }
+        // The span just before, as long as this one: "last 7 days" against the 7 before them.
+        if let back = range.days {
+            let end = today - back, start = end - back
+            t.previousUSD = d.perDayModel.filter { $0.key > start && $0.key <= end }
+                .values.reduce(0) { $0 + $1.values.reduce(0) { $0 + $1.usd } }
+        }
 
         // A day number is already a local calendar date counted from 1970-01-01, so it is
         // labelled in UTC: no offset to apply, and none to get wrong across a DST change.

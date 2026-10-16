@@ -123,7 +123,7 @@ enum Probe {
         // clicks deep, which is exactly why they rot: nobody looks at them while iterating.
         for dark in [true, false] {
             let suffix = dark ? "dark" : "light"
-            shoot(AnyView(TrophyView(trophy: store.snapshot.trophy)),
+            shoot(AnyView(TrophyView(trophy: store.snapshot.trophy, redactProjects: true)),
                   width: 460, dark: dark, to: dir + "/trophy-\(suffix).png")
             shoot(AnyView(SettingsView(installHooks: { false }, saveToken: { _ in .failed(-1) })),
                   width: 380, dark: dark, to: dir + "/settings-\(suffix).png")
@@ -392,7 +392,7 @@ enum Probe {
             shoot(AnyView(PanelView(store: store, onTrophy: {}, onSettings: {},
                                     onOpen: { _ in })),
                   width: Theme.panelWidth, dark: dark, to: dir + "/stress-panel-\(tag).png")
-            shoot(AnyView(TrophyView(trophy: snap.trophy)),
+            shoot(AnyView(TrophyView(trophy: snap.trophy, redactProjects: true)),
                   width: 460, dark: dark, to: dir + "/stress-trophy-\(tag).png")
             // Settings is two clicks deep, which is exactly why it rots — and it is now the
             // one surface every provider has to fit on.
