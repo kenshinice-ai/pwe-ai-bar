@@ -17,6 +17,11 @@ OUT="$ROOT/build/work/stills-$TAG"; mkdir -p "$OUT"
 ID=com.paradiseproduction.pweaibar
 MODE=$(defaults read "$ID" panelMode 2>/dev/null || echo full)
 "$APP" --panel "$OUT" -language "$LANG_ARG" -settings.open.alerts 1 -settings.open.sources 1 -settings.open.general 0 | sed 's/^/  /'
+# The cost page again, over the last seven days, for the by-project take. The range is given on the
+# command line, so the reader's saved range is not touched. Project names come out as "Project A, B, C":
+# every render made for publishing hides them, because folder names are often clients' names.
+mkdir -p "$OUT/week"
+"$APP" --panel "$OUT/week" -language "$LANG_ARG" -trophyRange week >/dev/null
 defaults write "$ID" panelMode "$MODE"
 "$APP" --endurance "$OUT" -language "$LANG_ARG" >/dev/null
 take() {   # take <name> <png> [crop w:h:x:y]
@@ -30,4 +35,8 @@ take close endurance-tooclose-dark.png
 take short endurance-short-dark.png
 take gap endurance-measured-dark.png      # the falling-short state the product page describes; the page loop uses it
 take cost trophy-dark.png
+# Only the by-project section, cropped so it fills the frame: the whole page shrunk to a phone screen
+# left its rows about 18 px tall. The section sits lower in Chinese, so each language has its own crop.
+if [[ "$TAG" == zh ]]; then take projects week/trophy-dark.png 892:482:14:892
+else take projects week/trophy-dark.png 892:482:14:878; fi
 take settings settings-dark.png

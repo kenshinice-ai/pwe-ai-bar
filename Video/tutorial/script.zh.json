@@ -6,7 +6,8 @@
     "close": "close-zh",
     "short": "short-zh",
     "cost": "cost-zh",
-    "settings": "settings-zh"
+    "settings": "settings-zh",
+    "projects": "projects-zh"
   },
   "title": [
     "撑不撑得到",
@@ -15,7 +16,8 @@
   "tags": {
     "real": "本机真实用量,由 app 绘制",
     "sample": "示例状态,由 app 自己的渲染器绘制",
-    "app": "app 自己的设置页,由 app 绘制"
+    "app": "app 自己的设置页,由 app 绘制",
+    "projects": "本机真实用量,项目名已隐去"
   },
   "end": {
     "headline": "PWE AI Bar",
@@ -113,6 +115,15 @@
         {
           "say": "它还会算出,这些工作按标价值多少钱",
           "show": "按标价,这些工作值多少"
+        }
+      ]
+    },
+    {
+      "id": "c11",
+      "parts": [
+        {
+          "say": "最近七天花在了哪些项目上,也一笔一笔列出来",
+          "show": "最近 7 天,花在了哪些项目上"
         }
       ]
     },

@@ -6,7 +6,8 @@
     "close": "close-en",
     "short": "short-en",
     "cost": "cost-en",
-    "settings": "settings-en"
+    "settings": "settings-en",
+    "projects": "projects-en"
   },
   "title": [
     "Do you make it",
@@ -15,7 +16,8 @@
   "tags": {
     "real": "Real usage on this Mac, drawn by the app",
     "sample": "Sample states, drawn by the app's own renderer",
-    "app": "The app's own settings, drawn by the app"
+    "app": "The app's own settings, drawn by the app",
+    "projects": "Real usage on this Mac, project names hidden"
   },
   "end": {
     "headline": "PWE AI Bar",
@@ -113,6 +115,15 @@
         {
           "say": "it also adds up what the work would have cost at list price",
           "show": "What the work would cost at list price"
+        }
+      ]
+    },
+    {
+      "id": "c11",
+      "parts": [
+        {
+          "say": "and where the last seven days went, project by project",
+          "show": "The last 7 days, project by project"
         }
       ]
     },

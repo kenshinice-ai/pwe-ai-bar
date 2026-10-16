@@ -3,7 +3,9 @@
 A 56-second film of PWE AI Bar, and a silent 8-second loop of its three verdicts for the product page.
 Vertical 1080 × 1920, Chinese and English narration, one edit for both.
 
-Status, 2026-10-10: Lee has reviewed the film. The loop is on pwestudio.site/aibar. The film itself has not been posted anywhere.
+Status, 2026-10-16: rebuilt for 1.6.5 with a `projects` take — the trophy page's by-project section,
+cropped, project names hidden — after the cost take. Not yet reviewed by Lee and not posted anywhere.
+The page loop is unchanged. (2026-10-10: Lee reviewed the first cut; it was never posted.)
 
 The pipeline is the one in `07 TOOLS/PWE Loan Bar/Video/tutorial` (its README explains the script
 files, the edit list, the narration tools and the compositor). What is specific to this film:
@@ -17,6 +19,7 @@ own renderers and turns each into a four-second take:
 | Take | Drawn by | From |
 |---|---|---|
 | `panel`, `cost`, `settings` | `--panel` | This Mac's real data at that moment. Lee agreed to his real usage being shown (2026-10-09). |
+| `projects` | `--panel -trophyRange week` | The same real data over seven days, cropped to the by-project section. Project names render as "Project A, B, C": folder names are often clients' names. |
 | `makes`, `close`, `short` | `--endurance` | Sample figures. The app itself prints that they are synthetic. |
 
 The line under the picture says which it is, on every frame (`tags` in the script, `tag` on each step).
