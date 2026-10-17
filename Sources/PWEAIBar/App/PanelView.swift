@@ -431,6 +431,11 @@ struct PanelView: View {
                         .font(Theme.sans(10.5)).foregroundStyle(Theme.text2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                ForEach(claudeBalanceLines, id: \.text) { line in
+                    Text(line.text).font(Theme.sans(10.5))
+                        .foregroundStyle(line.soon ? Theme.health(.warm, dark: isDark) : Theme.text2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             if p == .codex {
                 ForEach(codexExtraLines, id: \.text) { line in
@@ -843,7 +848,7 @@ struct PanelView: View {
     /// "turn this on" row lives, and hiding it would hide the only way forward.
     private var activeProviders: [Provider] {
         Provider.allCases.filter {
-            !rows(for: $0).isEmpty || snap.connections[$0] != nil || ($0 == .claude && snap.claudeDetails.spend != nil)
+            !rows(for: $0).isEmpty || snap.connections[$0] != nil || ($0 == .claude && (snap.claudeDetails.spend != nil || !claudeBalanceLines.isEmpty))
                 || ($0 == .claude && claudeCallToAction != nil)
         }
     }
@@ -888,6 +893,38 @@ struct PanelView: View {
         return String(format: L("reset.inDaysToGo", "%d d to go"), s / 86400)
     }
 
+    /// Claude's prepaid balance while there is one, and a promotional credit inside it that lapses
+    /// within ten days — when Claude Code itself starts mentioning it. Amber, like Codex's resets:
+    /// it is lost by doing nothing.
+    private var claudeBalanceLines: [(text: String, soon: Bool)] {
+        guard let balance = snap.claudeDetails.balance else { return [] }
+        var lines: [(text: String, soon: Bool)] = []
+        if balance.amount > 0 {
+            lines.append((String(format: L("panel.prepaid", "Prepaid balance %@"),
+                                 Self.money(balance.amount, balance.currency)), false))
+        }
+        if let lapse = balance.nextLapse(after: Date()), lapse.expiresAt.timeIntervalSinceNow < 10 * 86400 {
+            lines.append((String(format: L("panel.prepaid.lapse", "%@ of promotional credit expires %@"),
+                                 Self.money(lapse.amount, lapse.currency), Self.day(lapse.expiresAt)), true))
+        }
+        return lines
+    }
+
+    static func money(_ amount: Decimal, _ currency: String) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.locale = Locale(identifier: Loc.isCJK ? "zh_Hans_CN" : "en")
+        f.currencyCode = currency
+        return f.string(from: NSDecimalNumber(decimal: amount)) ?? "\(currency) \(amount)"
+    }
+
+    static func day(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: Loc.isCJK ? "zh_Hans_CN" : "en")
+        f.setLocalizedDateFormatFromTemplate("MMMd")
+        return f.string(from: date)
+    }
+
     /// Codex's free resets and bought credits, each only while there is one. A reset that lapses
     /// within a week turns amber: it is the one thing here that is lost by doing nothing.
     private var codexExtraLines: [(text: String, soon: Bool)] {
@@ -898,12 +935,9 @@ struct PanelView: View {
             var text = count == 1 ? L("codex.reset.one", "1 free reset")
                                   : String(format: L("codex.reset.many", "%d free resets"), count)
             if let soonest {
-                let f = DateFormatter()
-                f.locale = Locale(identifier: Loc.isCJK ? "zh_Hans_CN" : "en")
-                f.setLocalizedDateFormatFromTemplate("MMMd")
                 text += String(format: count == 1 ? L("codex.reset.expires", " · expires %@")
                                                   : L("codex.reset.firstExpires", " · first expires %@"),
-                               f.string(from: soonest))
+                               Self.day(soonest))
             }
             lines.append((text, soonest.map { $0.timeIntervalSinceNow < 7 * 86400 } ?? false))
         }

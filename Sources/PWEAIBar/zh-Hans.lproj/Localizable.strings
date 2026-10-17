@@ -51,6 +51,8 @@
 "panel.refreshing" = "更新中…";
 "panel.refresh" = "刷新";
 "panel.refresh.a11y" = "刷新 Claude 额度";
+"panel.prepaid" = "预付余额 %@";
+"panel.prepaid.lapse" = "其中 %@ 赠送额度 %@过期";
 "panel.extraSpend" = "额外消费 $%@";
 "panel.extraSpend.limit" = " / 本期上限 $%@";
 "panel.extraSpend.noLimit" = "（未提供上限）";
@@ -264,6 +266,7 @@
 "probe.state" = "状态";
 "probe.source" = "来源";
 "probe.windows" = "有效窗口：%d，旧读数：%@";
+"probe.balance" = "预付余额";
 "probe.everSucceeded" = "成功获取";
 "trophy.unpriced" = "—  这个模型没有公开定价，所以在这里按零计";
 "settings.group.sources" = "数据来源";

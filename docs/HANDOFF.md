@@ -1,6 +1,7 @@
 # PWE AI Bar — 接手说明
 
-最后更新 2026-10-18。**1.6.6 已发布**（2026-10-18）：Codex 一节显示免费重置次数和 credits 余额，见「Codex 的免费重置和 credits」。
+最后更新 2026-10-18。**1.6.7**（2026-10-18）：Claude 一节显示预付余额，见「Claude 的预付余额」。
+**1.6.6 已发布**（2026-10-18）：Codex 一节显示免费重置次数和 credits 余额，见「Codex 的免费重置和 credits」。
 校验和 `0616a2da…34cc`，站点、cask、更新端点都是 1.6.6，本机经 `brew upgrade` 装好。第一次走新的发版脚本：app 本身也钉上公证票据
 （本机 `stapler validate` 已通过），ship-check 通过，摘要在 GitHub release 正文里。第一次尝试推送时 DNS 断了，没有发出去；
 那次的 DMG 和另一会话的打包共用了 `$TMPDIR` 里的固定目录，所以撤掉本地的 Release 提交和标签，从头重建后才发布。
@@ -69,19 +70,32 @@ macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。
 
 > ⚠️ 不要加「用掉重置」的按钮。用不用、什么时候用，是用户在 Codex 里的决定。本 app 只读不写，这一条和 Claude 登录只读是同一个原则。
 
-Claude 这边也有，同一个登录就能读（2026-10-18 从 Claude Code 2.1.299 里找到，并对 Lee 的账户各读了一次；本 app 还没接）。
-10-18 之前这里写的「预付余额要网页登录才读得到」是错的。
-
-- 预付余额：`GET /api/oauth/organizations/{org}/prepaid/credits`，头带 `x-organization-uuid`；org 在 `~/.claude.json` 的 `oauthAccount.organizationUuid`。
-  回 `amount`（分）、`currency`、`promo_tranches`（每笔有 `remaining_amount_minor_units`、`expires_at`）、`auto_reload_settings`。
-  Lee 的账户实测：A$0.00，没有赠送额度。Claude Code 只在 `promo_tranches` 快过期时提醒。
-- 免费重置：`GET /api/oauth/usage?cedar_ember=1&skip_spend=1` 多一个 `cedar_ember` 对象（`grants`、`next_grant_id`、`eligible`）。
-  实测 `eligible: false`，`ineligible_reason: "surface"`，`grants: []`。未核实：可能只对 Claude Code 客户端发，本 app 问不出来。
-- 同一个回复里还有 `iguana_necktie`：`limit_dollars: 250`、`used_dollars: 56.65`，2026-11-05 重置。
-  Claude Code 里没有这个名字，不知道是什么额度，问清楚之前不显示。
-- `extra_usage` 实测为 `null`：Lee 的账户没开额外用量。
-
 测试：`QuotaTests` 两条（实测回复的形状；余额只在大于 0 时显示）。
+
+## Claude 的预付余额（2026-10-18，随 1.6.7 发布）
+
+同一个登录就能读。端点是 2026-10-18 从 Claude Code 2.1.299 里找到的（`api_prepaid_balance_fetch`）。
+1.6.6 的交接里写过「预付余额要网页登录才读得到」，那句是错的。
+
+- 请求：`GET /api/oauth/organizations/{org}/prepaid/credits`，令牌同额度端点，头带 `x-organization-uuid`（`ClaudeUsageClient.prepaid`）。
+- org：取 `~/.claude.json` 的 `oauthAccount.organizationUuid`，只取这一个字段（`ClaudeCredentialStore.organization`）。登录本身不带 org。
+- 回复：`balance.money`（`amount_minor` + `exponent`）优先，旧字段 `amount` 是分。`promo_tranches` 每笔有剩余额和 `expires_at`（`ClaudeBalance.map`）。
+- 时机：额度读成功之后问，最多半小时一次。失败只保留上次的值，不影响额度状态（`ClaudeProvider.refreshBalance`）。
+- 手动令牌不问：org 来自 Claude Code 的账户文件，手动令牌可能是另一个账户。
+- 显示：余额大于 0 时一行「预付余额 AU$x」。赠送额度 10 天内过期时一行琥珀色「其中 AU$x 赠送额度 某日过期」，和 Claude Code 自己提醒的时间一样。
+- 诊断：`--credentials` 总会打一行「预付余额」，0 也打。面板在 0 时不显示，这一行用来区分「是 0」和「没读到」。
+- 2026-10-18 实测 Lee 的账户：AU$0.00，没有赠送额度。
+
+> ⚠️ 不要往 `ClaudeUsageClient` 里加会改东西的请求。那会让本 app 能动用户的账单。原因：Claude Code 同一组接口里还有购买（`contracts/prepaid/credits` POST）和自动充值设置；测试 `testNothingCanWriteOrRenewClaudeCodesLogin` 只许两个 URL、不许设 `httpMethod`。
+
+没接的两样：
+
+- Claude 的免费重置：`/api/oauth/usage?cedar_ember=1&skip_spend=1` 多一个 `cedar_ember` 对象。
+  实测 `eligible: false`、`ineligible_reason: "surface"`、`grants: []`。未核实：可能只对 Claude Code 客户端发，本 app 不冒充它去问。
+- `iguana_necktie`：同一个额度回复里的美元额度，实测 `limit_dollars: 250`、`used_dollars: 56.65`，2026-11-05 重置。
+  Claude Code 里没有这个名字，不知道是什么额度。Lee 没说是什么之前不显示。
+
+测试：`BalanceTests` 七条（实测回复、指数和旧字段、最先过期的赠送额度、请求的路径和头、半小时一次、失败不影响额度、没有 org 或手动令牌不问）。
 
 ---
 

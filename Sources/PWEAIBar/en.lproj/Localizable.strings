@@ -147,6 +147,8 @@
 "panel.footerTrophy" = "%d d · %@ equivalent ›";
 "panel.goLook" = "Take a look ›";
 "panel.last24h" = "Last 24 hours";
+"panel.prepaid" = "Prepaid balance %@";
+"panel.prepaid.lapse" = "%@ of promotional credit expires %@";
 "panel.readNever" = "no successful read yet";
 "panel.readOk" = "read %@";
 "panel.readout.a11y" = "Percentage basis, currently %@";
@@ -175,6 +177,7 @@
 "place.menubar" = "Menu bar";
 "place.notch" = "Notch";
 "pricing.subscription" = "Subscription";
+"probe.balance" = "Prepaid balance";
 "probe.credConfig" = "credential configuration";
 "probe.everSucceeded" = "Ever read successfully";
 "probe.keychainNote" = "Keychain access is macOS's decision; this command does not test whether it is granted.";

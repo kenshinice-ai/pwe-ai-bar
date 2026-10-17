@@ -134,6 +134,17 @@ struct ClaudeCredentialStore {
         throw Failure.ambiguous
     }
 
+    /// The organisation of the account Claude Code is signed in to. The login record does not carry
+    /// it; Claude Code keeps it with the rest of its account state in `~/.claude.json`. Only this
+    /// one field is taken from that file.
+    static func organization(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> String? {
+        guard let data = try? Data(contentsOf: home.appendingPathComponent(".claude.json")),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let id = (root["oauthAccount"] as? [String: Any])?["organizationUuid"] as? String,
+              UUID(uuidString: id) != nil else { return nil }
+        return id.lowercased()
+    }
+
     static func decode(_ text: String, source: Credentials.Source, origin: Origin? = nil) -> Credentials.Token? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let bytes = Data(trimmed.utf8)

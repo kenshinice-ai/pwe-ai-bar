@@ -44,6 +44,60 @@ struct ClaudeSpend: Equatable {
     let limitUSD: Decimal?
 }
 
+/// Money bought ahead for Claude: the organisation's prepaid balance, and the promotional credits
+/// inside it that lapse on a date. Read from `prepaid/credits`, which Claude Code asks with the
+/// same login (2.1.299, `api_prepaid_balance_fetch`).
+///
+/// Measured 2026-10-18 on this Mac's account: `amount` 0, `currency` "AUD", `balance.money`
+/// `{amount_minor: 0, exponent: 2}`, no promotional credits.
+struct ClaudeBalance: Equatable {
+    struct Promo: Equatable {
+        let amount: Decimal
+        let currency: String
+        let expiresAt: Date
+    }
+    let amount: Decimal
+    let currency: String
+    let promos: [Promo]
+
+    /// The promotional credit that lapses first and is still worth something at `now`.
+    func nextLapse(after now: Date) -> Promo? {
+        promos.filter { $0.expiresAt > now && $0.amount > 0 }.min { $0.expiresAt < $1.expiresAt }
+    }
+
+    /// `balance.money` says its own exponent; `amount` is the older flat field, in cents. Nil for a
+    /// reply that is neither — Claude Code reads a missing `amount` as "not supported here".
+    static func map(_ root: [String: Any]) -> ClaudeBalance? {
+        let money = (root["balance"] as? [String: Any])?["money"] as? [String: Any]
+        guard let currency = ClaudeValue.text(money?["currency"]) ?? ClaudeValue.text(root["currency"]),
+              currency.count == 3 else { return nil }
+        let amount: Decimal?
+        if let minor = ClaudeValue.number(money?["amount_minor"]) {
+            amount = units(minor, exponent: ClaudeValue.number(money?["exponent"]) ?? 2)
+        } else {
+            amount = ClaudeValue.number(root["amount"]).flatMap { units($0, exponent: 2) }
+        }
+        guard let amount, amount >= 0 else { return nil }
+        let promos: [Promo] = ((root["promo_tranches"] as? [[String: Any]]) ?? []).compactMap { tranche in
+            guard let minor = ClaudeValue.number(tranche["remaining_amount_minor_units"]),
+                  let value = units(minor, exponent: 2), value > 0,
+                  let expires = ClaudeValue.date(tranche["expires_at"]) else { return nil }
+            return Promo(amount: value, currency: ClaudeValue.text(tranche["currency"]) ?? currency,
+                         expiresAt: expires)
+        }
+        return ClaudeBalance(amount: amount, currency: currency.uppercased(), promos: promos)
+    }
+
+    /// Minor units are whole numbers; anything else is not a figure to put in front of anyone.
+    private static func units(_ minor: Double, exponent: Double) -> Decimal? {
+        guard minor == minor.rounded(), abs(minor) < 1e15, (0...4).contains(exponent),
+              exponent == exponent.rounded() else { return nil }
+        var value = Decimal(Int64(minor))
+        for _ in 0..<Int(exponent) { value /= 10 }
+        return value
+    }
+}
+
 enum ClaudeUsageMapper {
     enum Failure: Error { case invalidResponse, conflictingWindows }
     struct Result {

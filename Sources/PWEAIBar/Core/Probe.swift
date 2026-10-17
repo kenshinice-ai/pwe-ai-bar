@@ -194,6 +194,10 @@ enum Probe {
                      reading.stale ? L("probe.yes", "yes") : L("probe.no", "no")))
         print(L("probe.everSucceeded", "Ever read successfully") + ": "
               + (details.lastSuccessAt != nil ? L("probe.yes", "yes") : L("probe.no", "no")))
+        // Printed even at zero: the panel says nothing then, and this is how to tell a zero
+        // balance from one that could not be read.
+        print(L("probe.balance", "Prepaid balance") + ": "
+              + (details.balance.map { PanelView.money($0.amount, $0.currency) } ?? "—"))
         let f = DateFormatter(); f.dateFormat = "MM-dd HH:mm:ss"
         let store = ClaudeCredentialStore()
         print(L("probe.loginWritten", "Login last written") + ": "
@@ -362,6 +366,17 @@ enum Probe {
                         observedAt: Date().addingTimeInterval(-9 * 86400)),
         ]
         snap.contextPercent = 99.7
+        // Every line the Claude and Codex sections can add under their rows, all at once: extra
+        // spend with a cap, a prepaid balance with a promotional credit about to lapse, and two
+        // Codex resets of which the first lapses within the week.
+        // Decimals from strings, as the mapper makes them: a Double literal prints 1234.5599999….
+        snap.claudeDetails.spend = ClaudeSpend(usedUSD: Decimal(string: "1234.56")!, limitUSD: 5000)
+        snap.claudeDetails.balance = ClaudeBalance(
+            amount: Decimal(string: "1234.5")!, currency: "AUD",
+            promos: [.init(amount: 25, currency: "AUD", expiresAt: Date().addingTimeInterval(3 * 86400))])
+        snap.codexExtras.resets = 2
+        snap.codexExtras.resetsExpire = [Date().addingTimeInterval(5 * 86400), Date().addingTimeInterval(20 * 86400)]
+        snap.codexExtras.credits = Decimal(string: "42.5")
         snap.events = [AgentEvent(id: "s", provider: .claude, kind: .finished,
                                   text: String(repeating: "很长的等待说明文字，", count: 12),
                                   at: Date().addingTimeInterval(-45))]

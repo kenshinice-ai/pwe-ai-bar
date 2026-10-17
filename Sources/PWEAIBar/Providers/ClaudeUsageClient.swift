@@ -2,8 +2,9 @@ import Foundation
 
 /// One ephemeral session for quota traffic; credentials never enter a cookie store.
 ///
-/// One endpoint, and it only reads. The token endpoint that used to sit beside it is gone on
-/// purpose: renewing is Claude Code's to do, because only the renewer can store the replacement.
+/// Two endpoints, and both only read: the quota, and the prepaid balance. The token endpoint that
+/// used to sit beside them is gone on purpose: renewing is Claude Code's to do, because only the
+/// renewer can store the replacement.
 final class ClaudeUsageClient: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     static let shared = ClaudeUsageClient()
     static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
@@ -40,6 +41,19 @@ final class ClaudeUsageClient: NSObject, URLSessionTaskDelegate, @unchecked Send
         r.setValue("application/json", forHTTPHeaderField: "Accept")
         r.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         r.setValue(ClaudeProvider.userAgent, forHTTPHeaderField: "User-Agent")
+        return r
+    }
+
+    /// The organisation's prepaid balance, asked the way Claude Code asks it: the same bearer token,
+    /// the organisation in the path and in `x-organization-uuid`. Nil for anything but a UUID, which
+    /// is all that may go into that path.
+    static func prepaid(token: String, organization: String) -> URLRequest? {
+        guard let id = UUID(uuidString: organization)?.uuidString.lowercased(),
+              let url = URL(string: "https://api.anthropic.com/api/oauth/organizations/\(id)/prepaid/credits")
+        else { return nil }
+        var r = usage(token: token)
+        r.url = url
+        r.setValue(id, forHTTPHeaderField: "x-organization-uuid")
         return r
     }
 }

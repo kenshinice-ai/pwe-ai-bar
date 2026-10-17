@@ -21,11 +21,15 @@ actor ClaudeProvider {
         /// Asks Claude Code to renew its own login; true when it ran and reported success. Nothing
         /// by default, so no test ever starts the real Claude Code.
         var renew: () -> Bool = { false }
+        /// The organisation Claude Code's login belongs to, for the prepaid balance. Nothing by
+        /// default, so no test asks for a balance it did not set up.
+        var organization: () -> String? = { nil }
         static let live = Access(own: Credentials.ownToken,
                                  load: { try ClaudeCredentialStore().load(patient: $0) },
                                  save: { Credentials.storeOwnToken($0) },
                                  stamp: { ClaudeCredentialStore().stamp() },
-                                 renew: { ClaudeRenewer.live.renew() })
+                                 renew: { ClaudeRenewer.live.renew() },
+                                 organization: { ClaudeCredentialStore.organization() })
     }
     enum Blocker: Error, Equatable {
         case none, notLoggedIn, notInstalled, keychainRefused, unauthorized, forbidden, network
@@ -103,6 +107,7 @@ actor ClaudeProvider {
         /// does not, and that difference is a factor of two in what the subscription costs.
         var tier: String?
         var spend: ClaudeSpend?
+        var balance: ClaudeBalance?
         var lastSuccessAt: Date?
         var lastAttemptAt: Date?
         var source: Credentials.Source = .none
@@ -124,6 +129,8 @@ actor ClaudeProvider {
     private var seenStamp: Date?
     private var rejected: [String: Blocker] = [:]
     private var retryNetworkAt: Date?
+    /// When the balance was last asked, and for which organisation.
+    private var balanceAsked: (at: Date, organization: String)?
     private(set) var details = Details()
     private(set) var blocker: Blocker = .none
     var source: Credentials.Source { details.source }
@@ -409,6 +416,7 @@ actor ClaudeProvider {
             // clear are the ones where the reading may belong to somebody else.
             case .unauthorized, .forbidden, .notLoggedIn, .notInstalled, .credentialsChanged:
                 cache = []; details.spend = nil; details.plan = nil; details.tier = nil
+                details.balance = nil; balanceAsked = nil
                 details.lastSuccessAt = nil
             case .network, .invalidResponse:
                 retryNetworkAt = now().addingTimeInterval(60)
@@ -459,7 +467,32 @@ actor ClaudeProvider {
         details.source = token.source
         blocker = .none; retryNetworkAt = nil
         clearRenewal()
+        await refreshBalance(token)
         return (cache, cache.contains(where: \.isStale))
+    }
+
+    /// The prepaid balance moves when somebody buys credits or spends past the plan — rarely — so
+    /// it is asked at most every half hour. It is a footnote to the quota: a failure leaves the last
+    /// answer alone and is never why the quota reads as failed.
+    ///
+    /// Only for Claude Code's own login. The organisation comes from Claude Code's account file, and
+    /// a manual token may belong to another account entirely.
+    private func refreshBalance(_ token: Credentials.Token) async {
+        guard token.source == .claudeKeychain || token.source == .claudeFile,
+              let organization = access.organization() else {
+            details.balance = nil; balanceAsked = nil; return
+        }
+        if let asked = balanceAsked {
+            if asked.organization != organization { details.balance = nil }
+            else if now().timeIntervalSince(asked.at) < 1800 { return }
+        }
+        // Stamped before asking: an endpoint that fails is not asked again on every sweep.
+        balanceAsked = (now(), organization)
+        guard let request = ClaudeUsageClient.prepaid(token: token.value, organization: organization),
+              let reply = try? await self.request(request),
+              (reply.1 as? HTTPURLResponse)?.statusCode == 200, reply.0.count <= 1_048_576,
+              let root = try? JSONSerialization.jsonObject(with: reply.0) as? [String: Any] else { return }
+        details.balance = ClaudeBalance.map(root)
     }
 
     private func check(_ version: Int) throws {

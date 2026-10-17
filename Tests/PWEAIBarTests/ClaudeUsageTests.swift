@@ -788,7 +788,10 @@ final class ReadOnlyLoginTests: XCTestCase {
         for renewal in ["oauth/" + "token", "refresh" + "_token", "grant" + "_type"] {
             XCTAssertFalse(client.contains(renewal), "the client can renew a login: \(renewal)")
         }
-        XCTAssertEqual(client.components(separatedBy: "URL(string:").count - 1, 1, "one endpoint, and it reads")
+        // Two endpoints since 1.6.7 — the quota and the prepaid balance — and both only read: no
+        // request in the client ever sets a method, so every one of them is a GET.
+        XCTAssertEqual(client.components(separatedBy: "URL(string:").count - 1, 2, "two endpoints, both read")
+        XCTAssertFalse(client.contains("http" + "Method"), "a request that is not a GET")
     }
 
     /// In-process keychain reads — other tools' records, and attributes of Claude Code's — shut
