@@ -53,6 +53,10 @@
 "panel.refresh.a11y" = "刷新 Claude 额度";
 "panel.prepaid" = "预付余额 %@";
 "panel.prepaid.lapse" = "其中 %@ 赠送额度 %@过期";
+"panel.allowance" = "套餐赠送额度";
+"panel.allowance.max" = "Max 赠送额度";
+"panel.allowance.resets" = " · %@重置";
+"panel.allowance.used" = "%@ 已用 %@ / %@";
 "panel.extraSpend" = "额外消费 $%@";
 "panel.extraSpend.limit" = " / 本期上限 $%@";
 "panel.extraSpend.noLimit" = "（未提供上限）";

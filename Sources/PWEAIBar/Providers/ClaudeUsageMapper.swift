@@ -98,11 +98,42 @@ struct ClaudeBalance: Equatable {
     }
 }
 
+/// A dollar allowance that comes with the plan, beside the percentage windows. Measured 2026-10-18 on
+/// this Mac's Max account as `iguana_necktie`: `limit_dollars` 250, `used_dollars` 56.6455, resetting
+/// 2026-11-05; Lee identified it as the credit the Max plan includes. Found by shape rather than by
+/// that name — a node outside the windows with a dollar cap — because the name is a code word.
+struct ClaudeAllowance: Equatable {
+    let usedUSD: Decimal
+    let limitUSD: Decimal
+    let resetsAt: Date?
+}
+
 enum ClaudeUsageMapper {
     enum Failure: Error { case invalidResponse, conflictingWindows }
     struct Result {
         var windows: [QuotaWindow]
         var spend: ClaudeSpend?
+        var allowances: [ClaudeAllowance] = []
+    }
+
+    /// Every node that is not a quota window and carries a positive `limit_dollars`. The windows
+    /// carry the same fields, empty, so they are excluded by key: a window that one day gains a
+    /// dollar cap is still a window, not a second allowance.
+    static func allowances(_ root: [String: Any]) -> [ClaudeAllowance] {
+        root.keys.sorted().compactMap { key -> ClaudeAllowance? in
+            guard key != "five_hour", !key.hasPrefix("seven_day"), let node = root[key] as? [String: Any],
+                  let limit = ClaudeValue.number(node["limit_dollars"]), limit > 0,
+                  let used = ClaudeValue.number(node["used_dollars"]), used >= 0,
+                  let limitUSD = dollars(limit), let usedUSD = dollars(used) else { return nil }
+            return ClaudeAllowance(usedUSD: usedUSD, limitUSD: limitUSD, resetsAt: ClaudeValue.date(node["resets_at"]))
+        }
+    }
+
+    /// To the cent: `used_dollars` arrives as 56.6455, and a figure on screen is money.
+    private static func dollars(_ value: Double) -> Decimal? {
+        guard value.isFinite, abs(value) < 1e12 else { return nil }
+        return Decimal(string: String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), value),
+                       locale: Locale(identifier: "en_US_POSIX"))
     }
 
     /// One parser for every money figure in this response. Always POSIX: the digits arrive
@@ -177,7 +208,7 @@ enum ClaudeUsageMapper {
             let a = $0.id == "five_hour" ? 0 : $0.id == "seven_day" ? 1 : 2
             let b = $1.id == "five_hour" ? 0 : $1.id == "seven_day" ? 1 : 2
             return a == b ? $0.id < $1.id : a < b
-        }, spend: spend)
+        }, spend: spend, allowances: allowances(root))
     }
 
     private static func window(id: String, title: String, channel: Channel, node: [String: Any],

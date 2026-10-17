@@ -139,6 +139,10 @@
 "observed.day" = "read %d d ago";
 "observed.hour" = "read %d h ago";
 "observed.min" = "read %d min ago";
+"panel.allowance" = "Included credit";
+"panel.allowance.max" = "Max included credit";
+"panel.allowance.resets" = " · resets %@";
+"panel.allowance.used" = "%@ %@ used of %@";
 "panel.auto" = "Auto";
 "panel.equivalent" = "%@ equivalent";
 "panel.extraSpend" = "Extra spend $%@";

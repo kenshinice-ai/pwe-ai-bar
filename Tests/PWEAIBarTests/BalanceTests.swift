@@ -51,6 +51,27 @@ final class BalanceTests: XCTestCase {
         XCTAssertEqual(balance.nextLapse(after: now)?.expiresAt, ISO8601DateFormatter().date(from: "2027-01-10T00:00:00Z"))
     }
 
+    // MARK: The plan's own credit
+
+    /// The reply measured on 2026-10-18 on a Max account: the windows carry empty dollar fields,
+    /// one other node carries the credit. Found by shape, rounded to the cent.
+    func testThePlanCreditIsFoundByShapeAndRoundedToTheCent() throws {
+        let root = try JSONSerialization.jsonObject(with: Data("""
+        {"five_hour":{"utilization":53.0,"resets_at":"2026-10-18T03:39:59.735162+00:00","limit_dollars":null,"used_dollars":null},
+         "seven_day":{"utilization":7.0,"resets_at":"2026-10-21T03:59:59.735183+00:00","limit_dollars":null,"used_dollars":null},
+         "seven_day_omelette":{"utilization":1.0,"limit_dollars":40,"used_dollars":1},
+         "iguana_necktie":{"utilization":22.6582,"resets_at":"2026-11-05T07:59:00+00:00","limit_dollars":250,
+                           "used_dollars":56.6455,"remaining_dollars":193.3545,"locked_reason":null},
+         "nimbus_quill":null,
+         "spent_out":{"limit_dollars":0,"used_dollars":0}}
+        """.utf8)) as! [String: Any]
+        let mapped = try ClaudeUsageMapper.map(root, at: date)
+        XCTAssertEqual(mapped.allowances, [ClaudeAllowance(
+            usedUSD: Decimal(string: "56.65")!, limitUSD: 250,
+            resetsAt: ISO8601DateFormatter().date(from: "2026-11-05T07:59:00Z"))],
+                       "a window with a dollar cap stays a window; a zero cap is not an allowance")
+    }
+
     // MARK: The request
 
     /// Asked the way Claude Code asks: the organisation in the path and in its header.

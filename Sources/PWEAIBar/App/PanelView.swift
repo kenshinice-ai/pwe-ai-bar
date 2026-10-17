@@ -897,8 +897,20 @@ struct PanelView: View {
     /// within ten days — when Claude Code itself starts mentioning it. Amber, like Codex's resets:
     /// it is lost by doing nothing.
     private var claudeBalanceLines: [(text: String, soon: Bool)] {
-        guard let balance = snap.claudeDetails.balance else { return [] }
         var lines: [(text: String, soon: Bool)] = []
+        // The plan's own dollar credit first: it is spent before anything bought.
+        let details = snap.claudeDetails
+        for a in details.allowances {
+            let label = details.plan?.lowercased() == "max" ? L("panel.allowance.max", "Max included credit")
+                                                            : L("panel.allowance", "Included credit")
+            var text = String(format: L("panel.allowance.used", "%@ %@ used of %@"), label,
+                              Self.money(a.usedUSD, "USD"), Self.money(a.limitUSD, "USD"))
+            if let reset = a.resetsAt, reset > Date() {
+                text += String(format: L("panel.allowance.resets", " · resets %@"), Self.day(reset))
+            }
+            lines.append((text, a.limitUSD > 0 && a.usedUSD / a.limitUSD >= 0.9))
+        }
+        guard let balance = details.balance else { return lines }
         if balance.amount > 0 {
             lines.append((String(format: L("panel.prepaid", "Prepaid balance %@"),
                                  Self.money(balance.amount, balance.currency)), false))
@@ -915,6 +927,10 @@ struct PanelView: View {
         f.numberStyle = .currency
         f.locale = Locale(identifier: Loc.isCJK ? "zh_Hans_CN" : "en")
         f.currencyCode = currency
+        // "US$250", not "US$250.00": whole amounts lose their cents, as Claude Code writes them.
+        var whole = Decimal(), copy = amount
+        NSDecimalRound(&whole, &copy, 0, .plain)
+        if whole == amount { f.maximumFractionDigits = 0 }
         return f.string(from: NSDecimalNumber(decimal: amount)) ?? "\(currency) \(amount)"
     }
 

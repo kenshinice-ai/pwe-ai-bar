@@ -108,6 +108,7 @@ actor ClaudeProvider {
         var tier: String?
         var spend: ClaudeSpend?
         var balance: ClaudeBalance?
+        var allowances: [ClaudeAllowance] = []
         var lastSuccessAt: Date?
         var lastAttemptAt: Date?
         var source: Credentials.Source = .none
@@ -416,7 +417,7 @@ actor ClaudeProvider {
             // clear are the ones where the reading may belong to somebody else.
             case .unauthorized, .forbidden, .notLoggedIn, .notInstalled, .credentialsChanged:
                 cache = []; details.spend = nil; details.plan = nil; details.tier = nil
-                details.balance = nil; balanceAsked = nil
+                details.balance = nil; balanceAsked = nil; details.allowances = []
                 details.lastSuccessAt = nil
             case .network, .invalidResponse:
                 retryNetworkAt = now().addingTimeInterval(60)
@@ -463,7 +464,7 @@ actor ClaudeProvider {
             return w
         }
         details.plan = token.plan; details.tier = token.rateLimitTier
-        details.spend = mapped.spend; details.lastSuccessAt = now()
+        details.spend = mapped.spend; details.allowances = mapped.allowances; details.lastSuccessAt = now()
         details.source = token.source
         blocker = .none; retryNetworkAt = nil
         clearRenewal()

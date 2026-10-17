@@ -371,6 +371,9 @@ enum Probe {
         // Codex resets of which the first lapses within the week.
         // Decimals from strings, as the mapper makes them: a Double literal prints 1234.5599999….
         snap.claudeDetails.spend = ClaudeSpend(usedUSD: Decimal(string: "1234.56")!, limitUSD: 5000)
+        snap.claudeDetails.plan = "max"
+        snap.claudeDetails.allowances = [ClaudeAllowance(usedUSD: Decimal(string: "231.4")!, limitUSD: 250,
+                                                         resetsAt: Date().addingTimeInterval(18 * 86400))]
         snap.claudeDetails.balance = ClaudeBalance(
             amount: Decimal(string: "1234.5")!, currency: "AUD",
             promos: [.init(amount: 25, currency: "AUD", expiresAt: Date().addingTimeInterval(3 * 86400))])

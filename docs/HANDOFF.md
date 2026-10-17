@@ -93,10 +93,19 @@ macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。
 
 - Claude 的免费重置：`/api/oauth/usage?cedar_ember=1&skip_spend=1` 多一个 `cedar_ember` 对象。
   实测 `eligible: false`、`ineligible_reason: "surface"`、`grants: []`。未核实：可能只对 Claude Code 客户端发，本 app 不冒充它去问。
-- `iguana_necktie`：同一个额度回复里的美元额度，实测 `limit_dollars: 250`、`used_dollars: 56.65`，2026-11-05 重置。
-  Claude Code 里没有这个名字，不知道是什么额度。Lee 没说是什么之前不显示。
 
-测试：`BalanceTests` 七条（实测回复、指数和旧字段、最先过期的赠送额度、请求的路径和头、半小时一次、失败不影响额度、没有 org 或手动令牌不问）。
+
+## Max 计划自带的美元额度（2026-10-18，未发版）
+
+额度回复里有一个美元额度，Lee 10-18 确认是 Max 计划送的。2026-10-18 实测：`iguana_necktie`，`limit_dollars: 250`、`used_dollars: 56.6455`，2026-11-05 重置。
+
+- 按形状找，不按名字：额度窗口以外、`limit_dollars` 大于 0 的节点（`ClaudeUsageMapper.allowances`）。`iguana_necktie` 是代号，可能会改。
+- 额度窗口也带这几个字段，都是 `null`，按键名排除（`five_hour`、`seven_day*`）。
+- 金额取到分：`used_dollars` 来的是 56.6455。
+- 显示：Claude 一节一行「Max 赠送额度 已用 US$56.65 / US$250 · 11月5日重置」。不是 Max 计划时写「套餐赠送额度」。用到 90% 变琥珀色。
+- 只显示，不进提醒和菜单栏：用完它不会挡住任何东西，只是开始花别的钱。
+
+测试：`BalanceTests` 八条（实测回复、Max 赠送额度按形状找、指数和旧字段、最先过期的赠送额度、请求的路径和头、半小时一次、失败不影响额度、没有 org 或手动令牌不问）。
 
 ---
 
