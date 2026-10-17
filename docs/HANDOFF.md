@@ -69,7 +69,17 @@ macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。
 
 > ⚠️ 不要加「用掉重置」的按钮。用不用、什么时候用，是用户在 Codex 里的决定。本 app 只读不写，这一条和 Claude 登录只读是同一个原则。
 
-Claude 这边没有对应的东西：`/api/oauth/usage` 里和钱有关的只有 `extra_usage`（本期额外消费和月上限），面板已显示。claude.ai 的预付余额只在网页设置里，要用网页登录才读得到，本 app 不碰。未核实：Lee 的账户没开额外用量，没有真实数据可对。
+Claude 这边也有，同一个登录就能读（2026-10-18 从 Claude Code 2.1.299 里找到，并对 Lee 的账户各读了一次；本 app 还没接）。
+10-18 之前这里写的「预付余额要网页登录才读得到」是错的。
+
+- 预付余额：`GET /api/oauth/organizations/{org}/prepaid/credits`，头带 `x-organization-uuid`；org 在 `~/.claude.json` 的 `oauthAccount.organizationUuid`。
+  回 `amount`（分）、`currency`、`promo_tranches`（每笔有 `remaining_amount_minor_units`、`expires_at`）、`auto_reload_settings`。
+  Lee 的账户实测：A$0.00，没有赠送额度。Claude Code 只在 `promo_tranches` 快过期时提醒。
+- 免费重置：`GET /api/oauth/usage?cedar_ember=1&skip_spend=1` 多一个 `cedar_ember` 对象（`grants`、`next_grant_id`、`eligible`）。
+  实测 `eligible: false`，`ineligible_reason: "surface"`，`grants: []`。未核实：可能只对 Claude Code 客户端发，本 app 问不出来。
+- 同一个回复里还有 `iguana_necktie`：`limit_dollars: 250`、`used_dollars: 56.65`，2026-11-05 重置。
+  Claude Code 里没有这个名字，不知道是什么额度，问清楚之前不显示。
+- `extra_usage` 实测为 `null`：Lee 的账户没开额外用量。
 
 测试：`QuotaTests` 两条（实测回复的形状；余额只在大于 0 时显示）。
 
