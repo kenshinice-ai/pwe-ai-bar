@@ -1,6 +1,8 @@
 # PWE AI Bar — 接手说明
 
-最后更新 2026-10-18。**1.6.7 已发布**（2026-10-18）：Claude 一节显示预付余额，见「Claude 的预付余额」。
+最后更新 2026-10-18。**1.6.8 已发布**（2026-10-18）：Claude 一节显示 Max 计划自带的美元额度，见「Max 计划自带的美元额度」。
+校验和 `a3231957…53d1`，站点、cask、更新端点都是 1.6.8，本机经 `brew upgrade` 装好，面板显示「Max 赠送额度 已用 US$56.65 / US$250 · 11月5日重置」。
+**1.6.7 已发布**（2026-10-18）：Claude 一节显示预付余额，见「Claude 的预付余额」。
 校验和 `3f23e2eb…0b0b`，站点、cask、更新端点都是 1.6.7，本机经 `brew upgrade` 装好；装好的 app 跑 `--credentials` 读到 AU$0.00。
 **1.6.6 已发布**（2026-10-18）：Codex 一节显示免费重置次数和 credits 余额，见「Codex 的免费重置和 credits」。
 校验和 `0616a2da…34cc`，站点、cask、更新端点都是 1.6.6，本机经 `brew upgrade` 装好。第一次走新的发版脚本：app 本身也钉上公证票据
@@ -95,7 +97,7 @@ macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。
   实测 `eligible: false`、`ineligible_reason: "surface"`、`grants: []`。未核实：可能只对 Claude Code 客户端发，本 app 不冒充它去问。
 
 
-## Max 计划自带的美元额度（2026-10-18，未发版）
+## Max 计划自带的美元额度（2026-10-18，随 1.6.8 发布）
 
 额度回复里有一个美元额度，Lee 10-18 确认是 Max 计划送的。2026-10-18 实测：`iguana_necktie`，`limit_dollars: 250`、`used_dollars: 56.6455`，2026-11-05 重置。
 
