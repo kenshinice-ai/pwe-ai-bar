@@ -1,6 +1,7 @@
 # PWE AI Bar — 接手说明
 
-最后更新 2026-10-18。**1.6.7**（2026-10-18）：Claude 一节显示预付余额，见「Claude 的预付余额」。
+最后更新 2026-10-18。**1.6.7 已发布**（2026-10-18）：Claude 一节显示预付余额，见「Claude 的预付余额」。
+校验和 `3f23e2eb…0b0b`，站点、cask、更新端点都是 1.6.7，本机经 `brew upgrade` 装好；装好的 app 跑 `--credentials` 读到 AU$0.00。
 **1.6.6 已发布**（2026-10-18）：Codex 一节显示免费重置次数和 credits 余额，见「Codex 的免费重置和 credits」。
 校验和 `0616a2da…34cc`，站点、cask、更新端点都是 1.6.6，本机经 `brew upgrade` 装好。第一次走新的发版脚本：app 本身也钉上公证票据
 （本机 `stapler validate` 已通过），ship-check 通过，摘要在 GitHub release 正文里。第一次尝试推送时 DNS 断了，没有发出去；
