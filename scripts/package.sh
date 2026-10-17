@@ -67,6 +67,18 @@ else
 fi
 codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | sed 's/^/    /'
 
+# Staple, waiting for the ticket if Apple has not published it yet. Right after "Accepted" the
+# ticket's record can still be missing: stapler fails with "Record not found", error 65 (AI Bar's
+# app, 2026-10-18, stapled fine on a retry seconds later). Five tries, ten seconds apart.
+staple() {
+  local i
+  for i in 1 2 3 4 5; do
+    xcrun stapler staple "$1" >/dev/null 2>&1 && { xcrun stapler validate "$1"; return 0; }
+    echo "    ticket not published yet — retrying in 10 s ($i/5)"; sleep 10
+  done
+  echo "✗ could not staple $(basename "$1")"; xcrun stapler staple "$1"; exit 1
+}
+
 # The app gets its own ticket before it goes into the image. Stapling only the image left the
 # installed app without one (2026-10-16: `stapler validate` on /Applications/PWE AI Bar.app), so
 # its first launch had to reach Apple to be recognised. Loan Bar and Lumen Bar already did this.
@@ -84,8 +96,7 @@ if [[ "$NOTARIZE" == "1" ]]; then
     [[ -n "$ID" ]] && xcrun notarytool log "$ID" --keychain-profile "$PROFILE" 2>&1 | sed 's/^/    /'
     exit 1
   fi
-  xcrun stapler staple "$APP"
-  xcrun stapler validate "$APP"
+  staple "$APP"
 fi
 
 echo "▸ Disk image…"
@@ -152,8 +163,7 @@ if [[ "$NOTARIZE" == "1" ]]; then
     [[ -n "$ID" ]] && xcrun notarytool log "$ID" --keychain-profile "$PROFILE" 2>&1 | sed 's/^/    /'
     exit 1
   fi
-  xcrun stapler staple "$IMAGE"
-  xcrun stapler validate "$IMAGE"
+  staple "$IMAGE"
 fi
 
 cp "$IMAGE" "$DMG"
