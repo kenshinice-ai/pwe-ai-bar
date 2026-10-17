@@ -1,6 +1,9 @@
 # PWE AI Bar — 接手说明
 
-最后更新 2026-10-18。**1.6.6**（2026-10-18）：Codex 一节显示免费重置次数和 credits 余额，见「Codex 的免费重置和 credits」。
+最后更新 2026-10-18。**1.6.6 已发布**（2026-10-18）：Codex 一节显示免费重置次数和 credits 余额，见「Codex 的免费重置和 credits」。
+校验和 `0616a2da…34cc`，站点、cask、更新端点都是 1.6.6，本机经 `brew upgrade` 装好。第一次走新的发版脚本：app 本身也钉上公证票据
+（本机 `stapler validate` 已通过），ship-check 通过，摘要在 GitHub release 正文里。第一次尝试推送时 DNS 断了，没有发出去；
+那次的 DMG 和另一会话的打包共用了 `$TMPDIR` 里的固定目录，所以撤掉本地的 Release 提交和标签，从头重建后才发布。
 **1.6.5 已发布**（2026-10-16，跳过 1.6.4，Lee 定）：战绩页「按项目」，见下面。校验和 `63adf38e…b1ee`，
 站点、cask、更新端点都是 1.6.5，本机经 `brew upgrade` 装好。教程片已补「按项目」镜头，待 Lee 过目。
 **1.6.3 已发布**（2026-10-14）：设置窗口底部「GitHub」旁加了「支持 PWE…」，链到 `https://pwestudio.site/support`；
