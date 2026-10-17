@@ -18,7 +18,7 @@ final class BilingualRenderTests: XCTestCase {
                               rules: RuleEngine(defaults: space.defaults, away: { false }, remaining: { true }),
                               readEvents: { [] },
                               readLocal: { _, _ in .init(trophy: Trophy(), context: nil, lastTurnAt: nil) },
-                              readCodex: { ([], nil) },
+                              readCodex: { ([], nil, .init()) },
                               deliver: { _, _ in false }, tracks: { (true, true) })
             var snap = Snapshot()
             let at = Date()

@@ -91,6 +91,47 @@ final class QuotaTests: XCTestCase {
         XCTAssertEqual(local.band, .hot)
         XCTAssertFalse(local.confirmedExhausted)
     }
+    /// The shape measured on 2026-10-18: one free reset with its expiry, and a balance of "0",
+    /// which is no credits rather than a figure worth a line.
+    func testCodexExtrasReadTheMeasuredShape() throws {
+        let json = """
+        {"rateLimitsByLimitId":{"codex":{"limitId":"codex","planType":"team",
+           "credits":{"hasCredits":false,"unlimited":false,"balance":"0"}}},
+         "rateLimitResetCredits":{"availableCount":1,"credits":[
+           {"id":"a","resetType":"codexRateLimits","status":"available",
+            "grantedAt":1791416226,"expiresAt":1794008226,"title":"Full reset (Weekly + 5 hr)"},
+           {"id":"b","resetType":"codexRateLimits","status":"redeemed","expiresAt":1791500000}]}}
+        """
+        let object = try JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]
+        let extras = CodexExtras(object, pool: (object["rateLimitsByLimitId"] as! [String: [String: Any]])["codex"])
+        XCTAssertEqual(extras.resets, 1)
+        XCTAssertEqual(extras.resetsExpire, [Date(timeIntervalSince1970: 1794008226)], "a redeemed one is not listed")
+        XCTAssertNil(extras.credits)
+        XCTAssertFalse(extras.unlimitedCredits)
+
+        let before = extras.resetsLeft(at: Date(timeIntervalSince1970: 1794008226 - 60))
+        XCTAssertEqual(before.count, 1)
+        XCTAssertEqual(before.soonest, Date(timeIntervalSince1970: 1794008226))
+        // Read before it lapsed, looked at after: the count in hand is out of date.
+        XCTAssertEqual(extras.resetsLeft(at: Date(timeIntervalSince1970: 1794008226 + 60)).count, 0)
+    }
+
+    func testCodexCreditsAreShownOnlyWhileThereAreSome() throws {
+        func extras(_ credits: String) throws -> CodexExtras {
+            let pool = try JSONSerialization.jsonObject(with: Data(#"{"credits":\#(credits)}"#.utf8)) as! [String: Any]
+            return CodexExtras([:], pool: pool)
+        }
+        XCTAssertEqual(try extras(#"{"hasCredits":true,"unlimited":false,"balance":"12.5"}"#).credits,
+                       Decimal(string: "12.5", locale: Locale(identifier: "en_US_POSIX")))
+        XCTAssertNil(try extras(#"{"hasCredits":true,"unlimited":false,"balance":"0"}"#).credits)
+        XCTAssertNil(try extras(#"{"hasCredits":false,"unlimited":false,"balance":"40"}"#).credits)
+        XCTAssertTrue(try extras(#"{"hasCredits":true,"unlimited":true,"balance":"0"}"#).unlimitedCredits)
+        // No list of expiries: the count stands on its own.
+        let bare = CodexExtras(["rateLimitResetCredits": ["availableCount": 2]], pool: nil)
+        XCTAssertEqual(bare.resetsLeft(at: Date()).count, 2)
+        XCTAssertNil(bare.resetsLeft(at: Date()).soonest)
+    }
+
     /// The app server answers for right now, which the rollout logs cannot: they only record
     /// what Codex saw the last time it ran. It also carries two things the logs never do.
     func testAppServerMappingKeepsPoolsApartAndReadsPlanAndResetCredits() async {
@@ -109,7 +150,7 @@ final class QuotaTests: XCTestCase {
         let reading = await CodexAppServer().map(object)
 
         XCTAssertEqual(reading.planType, "team")
-        XCTAssertEqual(reading.resetCredits, 2)
+        XCTAssertEqual(reading.extras.resets, 2)
         XCTAssertEqual(reading.windows.map(\.percent), [83, 44, nil])
         XCTAssertEqual(reading.windows.map(\.title), ["5-hour", "Weekly", "Extra credits"])
         XCTAssertEqual(reading.windows.map(\.id), ["codex_300", "codex_10080", "codex_credits"])

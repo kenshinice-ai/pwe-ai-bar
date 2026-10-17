@@ -26,7 +26,7 @@ final class Store: ObservableObject {
     private let readEvents: () async -> [AgentEvent]
     private let readLocal: (TrophyRange, Subscription?) async -> Transcript.Result
     private let pricing = Pricing.load()
-    private let readCodex: () async -> ([QuotaWindow], String?)
+    private let readCodex: () async -> ([QuotaWindow], String?, CodexExtras)
     private let deliver: (RuleEngine.Alert, Bool) async -> Bool
     private let tracks: () -> (claude: Bool, codex: Bool)
     private let tracksExtra: (Provider) -> Bool
@@ -61,7 +61,7 @@ final class Store: ObservableObject {
     init(claude: ClaudeProvider = ClaudeProvider(), rules: RuleEngine? = nil,
          readEvents: (() async -> [AgentEvent])? = nil,
          readLocal: ((TrophyRange, Subscription?) async -> Transcript.Result)? = nil,
-         readCodex: (() async -> ([QuotaWindow], String?))? = nil,
+         readCodex: (() async -> ([QuotaWindow], String?, CodexExtras))? = nil,
          deliver: ((RuleEngine.Alert, Bool) async -> Bool)? = nil,
          tracks: (() -> (claude: Bool, codex: Bool))? = nil,
          tracksExtra: ((Provider) -> Bool)? = nil,
@@ -74,7 +74,7 @@ final class Store: ObservableObject {
         self.readEvents = readEvents ?? { await HookEventReader.shared.events() }
         self.readCodex = readCodex ?? {
             let rows = await CodexProvider.shared.windows()
-            return (rows, await CodexProvider.shared.plan)
+            return (rows, await CodexProvider.shared.plan, await CodexProvider.shared.extras)
         }
         if let readLocal { self.readLocal = readLocal }
         else {
@@ -186,9 +186,10 @@ final class Store: ObservableObject {
                 snapshot.stale = false
             }
             if tracks().codex {
-                let (rows, plan) = await readCodex()
+                let (rows, plan, extras) = await readCodex()
                 snap.windows += rows
                 snap.plans[.codex] = plan
+                snap.codexExtras = extras
             }
             // The other five, in parallel and each on its own clock. None of them may hold up
             // the two that this app is actually about.

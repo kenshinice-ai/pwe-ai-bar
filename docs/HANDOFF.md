@@ -1,6 +1,7 @@
 # PWE AI Bar — 接手说明
 
-最后更新 2026-10-16。**1.6.5 已发布**（2026-10-16，跳过 1.6.4，Lee 定）：战绩页「按项目」，见下面。校验和 `63adf38e…b1ee`，
+最后更新 2026-10-18。**1.6.6**（2026-10-18）：Codex 一节显示免费重置次数和 credits 余额，见「Codex 的免费重置和 credits」。
+**1.6.5 已发布**（2026-10-16，跳过 1.6.4，Lee 定）：战绩页「按项目」，见下面。校验和 `63adf38e…b1ee`，
 站点、cask、更新端点都是 1.6.5，本机经 `brew upgrade` 装好。教程片已补「按项目」镜头，待 Lee 过目。
 **1.6.3 已发布**（2026-10-14）：设置窗口底部「GitHub」旁加了「支持 PWE…」，链到 `https://pwestudio.site/support`；
 仓库加了 `.github/FUNDING.yml`，README 中英各一句。依据是 `07 TOOLS/HANDOFF.md` §0 第 9 条（Lee 10-14 定）：
@@ -46,6 +47,28 @@ macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。
 > ⚠️ 发布用的渲染（`--panel`、`--stress`）一律传 `redactProjects: true`，显示「项目 A、B、C」。不打码的话，站点截图和教程片会把客户的文件夹名发出去。只有用户自己打开的战绩窗口显示真名。
 
 测试：`ProjectTests` 九条。
+
+---
+
+## Codex 的免费重置和 credits（2026-10-18，随 1.6.6 发布）
+
+`account/rateLimits/read` 的回复里有两样东西，rollout 日志里都没有。1.6.6 之前，第一样读了没显示，第二样没读。
+
+- `rateLimitResetCredits`：OpenAI 发给账户的免费重置，每次清零周额度和 5 小时额度。
+  2026-10-18 本机实测：1 次，10-08 发放，11-07 过期。
+- 额度池里的 `credits`：买的 credits 余额，字符串（本机实测 `"0"`）。
+
+读取在 `CodexExtras`（`CodexAppServer.swift`），显示在面板 Codex 一节的额度行下面（`PanelView.codexExtraLines`）：
+
+- 有重置时一行「1 次免费重置 · 11月7日过期」。离过期不到 7 天时用琥珀色。
+- 余额大于 0 才显示「剩余 N credits」；`unlimited` 显示「credits 不限量」。
+- 读数之后过期的重置不再算数：有过期时间列表时，以列表为准，不信旧的 `availableCount`。
+
+> ⚠️ 不要加「用掉重置」的按钮。用不用、什么时候用，是用户在 Codex 里的决定。本 app 只读不写，这一条和 Claude 登录只读是同一个原则。
+
+Claude 这边没有对应的东西：`/api/oauth/usage` 里和钱有关的只有 `extra_usage`（本期额外消费和月上限），面板已显示。claude.ai 的预付余额只在网页设置里，要用网页登录才读得到，本 app 不碰。未核实：Lee 的账户没开额外用量，没有真实数据可对。
+
+测试：`QuotaTests` 两条（实测回复的形状；余额只在大于 0 时显示）。
 
 ---
 

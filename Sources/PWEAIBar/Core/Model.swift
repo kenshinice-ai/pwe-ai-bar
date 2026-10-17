@@ -202,6 +202,7 @@ struct AgentEvent: Identifiable, Codable {
 struct Snapshot {
     var windows: [QuotaWindow] = []
     var claudeDetails = ClaudeProvider.Details()
+    var codexExtras = CodexExtras()
     var contextPercent: Double?
     var events: [AgentEvent] = []
     var trophy: Trophy = Trophy()

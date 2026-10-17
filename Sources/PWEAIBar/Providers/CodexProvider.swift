@@ -35,7 +35,7 @@ actor CodexProvider {
     /// Attempts that have failed in a row. Each one doubles the wait before the next.
     private var failures = 0
     private(set) var plan: String?
-    private(set) var resetCredits = 0
+    private(set) var extras = CodexExtras()
 
     init(root: URL = CodexProvider.sessions, now: @escaping () -> Date = Date.init,
          tailBytes: Int = 4 << 20, server: CodexAppServer? = nil) {
@@ -49,7 +49,7 @@ actor CodexProvider {
     func windows() async -> [QuotaWindow] {
         if let reading = await liveReading(), !reading.windows.isEmpty {
             plan = reading.planType
-            resetCredits = reading.resetCredits
+            extras = reading.extras
             let date = now()
             // Held-over readings are marked as what they are. Two things used to be reported as
             // current here that were not: a value kept after a failed refresh, and a value whose

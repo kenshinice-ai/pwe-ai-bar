@@ -51,7 +51,8 @@ and no keychain authorisation dialog either. Why not, below.
 
 - **Claude Code**'s five-hour and weekly windows as real percentages from `/api/oauth/usage`,
   with model-scoped limits listed separately
-- **Codex**, read from its own app server, with no credentials at all
+- **Codex**, read from its own app server, with no credentials at all — including the free resets
+  OpenAI has granted the account and when they expire, and any credits left
 - The current session's context usage
 - Five more, read-only (see the table below)
 - **A trophy page**: what the same work would have cost at API list prices, the return against your

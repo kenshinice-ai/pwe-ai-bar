@@ -217,6 +217,12 @@
 "note.unconfirmed" = "待确认";
 "note.noReading" = "暂无有效读数";
 "codex.extraCredits" = "附加额度";
+"codex.reset.one" = "1 次免费重置";
+"codex.reset.many" = "%d 次免费重置";
+"codex.reset.expires" = " · %@过期";
+"codex.reset.firstExpires" = " · 最早一次 %@过期";
+"codex.credits" = "剩余 %@ credits";
+"codex.credits.unlimited" = "credits 不限量";
 "codex.quota" = "额度";
 "window.minutes" = "%d 分钟窗口";
 "window.hours" = "%d 小时窗口";

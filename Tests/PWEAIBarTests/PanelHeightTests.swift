@@ -37,7 +37,7 @@ final class PanelHeightTests: XCTestCase {
                           rules: RuleEngine(defaults: space.defaults, away: { false }, remaining: { true }),
                           readEvents: { [] },
                           readLocal: { _, _ in .init(trophy: Trophy(), context: nil, lastTurnAt: nil) },
-                          readCodex: { ([], nil) },
+                          readCodex: { ([], nil, .init()) },
                           deliver: { _, _ in XCTFail("Measuring must not notify"); return false },
                           tracks: { (false, false) })
 

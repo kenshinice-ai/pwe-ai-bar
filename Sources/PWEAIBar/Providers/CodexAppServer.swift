@@ -16,13 +16,57 @@ import Foundation
 /// process is killed rather than waited on. Notifications arrive unasked (`remoteControl/status/
 /// changed` turned up on the first run), so replies are matched by `id` and everything else is
 /// discarded.
+/// What a Codex account holds besides its quota: free resets the account was granted, and credits
+/// bought on top. Neither reaches a rollout log; only the app server says.
+///
+/// Measured 2026-10-18 on this Mac's team account: one "Full reset (Weekly + 5 hr)", granted
+/// 2026-10-08 and expiring 2026-11-07, and a credit balance of "0". The app shows both and uses
+/// neither — spending a reset is the reader's decision, made in Codex.
+struct CodexExtras: Equatable {
+    /// `rateLimitResetCredits.availableCount`, which counts resets whatever their expiry.
+    var resets = 0
+    /// When each available reset lapses, soonest first. Empty when the server sends no list.
+    var resetsExpire: [Date] = []
+    /// The bought balance, only while there is one. `nil` for "0" and for no credits at all.
+    var credits: Decimal?
+    var unlimitedCredits = false
+
+    init() {}
+
+    init(_ result: [String: Any], pool: [String: Any]?) {
+        let grant = result["rateLimitResetCredits"] as? [String: Any]
+        resets = max((grant?["availableCount"] as? NSNumber)?.intValue ?? 0, 0)
+        resetsExpire = ((grant?["credits"] as? [[String: Any]]) ?? [])
+            .filter { ($0["status"] as? String) == "available" }
+            .compactMap { ($0["expiresAt"] as? NSNumber)?.doubleValue }
+            .filter(\.isFinite).map { Date(timeIntervalSince1970: $0) }.sorted()
+        let credits = pool?["credits"] as? [String: Any]
+        unlimitedCredits = credits?["unlimited"] as? Bool == true
+        // The balance arrives as a string ("0"); read it without the current locale, which would
+        // read "1.5" as fifteen on a machine that writes decimals with a comma.
+        let raw = (credits?["balance"] as? String) ?? (credits?["balance"] as? NSNumber)?.stringValue
+        if credits?["hasCredits"] as? Bool == true, let raw,
+           let amount = Decimal(string: raw, locale: Locale(identifier: "en_US_POSIX")), amount > 0 {
+            self.credits = amount
+        }
+    }
+
+    /// Resets still usable at `now`. A list that says when they lapse is trusted over the count,
+    /// which may be a reading from before the soonest one ran out.
+    func resetsLeft(at now: Date) -> (count: Int, soonest: Date?) {
+        guard !resetsExpire.isEmpty else { return (resets, nil) }
+        let live = resetsExpire.filter { $0 > now }
+        return (min(resets, live.count), live.first)
+    }
+}
+
 actor CodexAppServer {
     static let shared = CodexAppServer()
 
     struct Reading {
         var windows: [QuotaWindow] = []
         var planType: String?
-        var resetCredits: Int = 0
+        var extras = CodexExtras()
     }
 
     private let locate: () -> String?
@@ -74,8 +118,7 @@ actor CodexAppServer {
             ?? (result["rateLimits"] as? [String: Any]).map { ["codex": $0] }
             ?? [:]
         var out = Reading()
-        out.resetCredits = ((result["rateLimitResetCredits"] as? [String: Any])?["availableCount"]
-            as? NSNumber)?.intValue ?? 0
+        out.extras = CodexExtras(result, pool: pools["codex"])
 
         if let quota = pools["codex"] {
             out.planType = quota["planType"] as? String

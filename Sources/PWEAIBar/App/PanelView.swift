@@ -432,6 +432,13 @@ struct PanelView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            if p == .codex {
+                ForEach(codexExtraLines, id: \.text) { line in
+                    Text(line.text).font(Theme.sans(10.5))
+                        .foregroundStyle(line.soon ? Theme.health(.warm, dark: isDark) : Theme.text2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             // A provider that failed keeps its heading and says why. Dropping the section
             // instead is indistinguishable from never having turned it on, and the one thing
             // someone needs at that moment is which of those two it is.
@@ -879,6 +886,34 @@ struct PanelView: View {
                                 : String(format: L("reset.inHoursMin", "%d h %d m to go"), hours, minutes)
         }
         return String(format: L("reset.inDaysToGo", "%d d to go"), s / 86400)
+    }
+
+    /// Codex's free resets and bought credits, each only while there is one. A reset that lapses
+    /// within a week turns amber: it is the one thing here that is lost by doing nothing.
+    private var codexExtraLines: [(text: String, soon: Bool)] {
+        let extras = snap.codexExtras
+        var lines: [(text: String, soon: Bool)] = []
+        let (count, soonest) = extras.resetsLeft(at: Date())
+        if count > 0 {
+            var text = count == 1 ? L("codex.reset.one", "1 free reset")
+                                  : String(format: L("codex.reset.many", "%d free resets"), count)
+            if let soonest {
+                let f = DateFormatter()
+                f.locale = Locale(identifier: Loc.isCJK ? "zh_Hans_CN" : "en")
+                f.setLocalizedDateFormatFromTemplate("MMMd")
+                text += String(format: count == 1 ? L("codex.reset.expires", " · expires %@")
+                                                  : L("codex.reset.firstExpires", " · first expires %@"),
+                               f.string(from: soonest))
+            }
+            lines.append((text, soonest.map { $0.timeIntervalSinceNow < 7 * 86400 } ?? false))
+        }
+        if extras.unlimitedCredits {
+            lines.append((L("codex.credits.unlimited", "Unlimited credits"), false))
+        } else if let credits = extras.credits {
+            lines.append((String(format: L("codex.credits", "%@ credits left"),
+                                 NSDecimalNumber(decimal: credits).stringValue), false))
+        }
+        return lines
     }
 
     private func resetText(_ w: QuotaWindow) -> String? {

@@ -44,6 +44,12 @@
 "chart.nowPartial" = "now · partial";
 "chart.peak" = "peak %@/h";
 "codex.extraCredits" = "Extra credits";
+"codex.reset.one" = "1 free reset";
+"codex.reset.many" = "%d free resets";
+"codex.reset.expires" = " · expires %@";
+"codex.reset.firstExpires" = " · first expires %@";
+"codex.credits" = "%@ credits left";
+"codex.credits.unlimited" = "Unlimited credits";
 "codex.quota" = "Quota";
 "compact.day" = "%dd";
 "compact.min" = "%dm";

@@ -49,7 +49,7 @@ brew install --cask kenshinice-ai/tap/pwe-ai-bar
 ### 看板
 
 - **Claude Code** 五小时与周窗口的真实百分比，来自 `/api/oauth/usage`；模型独立额度分开列
-- **Codex** 额度，读它自己的 app server，零凭据
+- **Codex** 额度，读它自己的 app server，零凭据；也显示账户拿到的免费重置次数和过期日，以及剩余 credits
 - 当前会话的上下文占用
 - 另外五家只读接入（见下表）
 - **战绩页**：按 API 目录价折算的等效成本、按档位算的回本倍数、模型与日期分布，日期区间可调

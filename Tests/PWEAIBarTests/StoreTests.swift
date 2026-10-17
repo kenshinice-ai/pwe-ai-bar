@@ -24,7 +24,7 @@ final class StoreTests: XCTestCase {
                           rules: RuleEngine(defaults: space.defaults, away: { false }, remaining: { true }),
                           readEvents: { [] },
                           readLocal: { _, _ in localCalled = true; return .init(trophy: Trophy(), context: nil, lastTurnAt: nil) },
-                          readCodex: { try? await Task.sleep(nanoseconds: 600_000_000); return ([], nil) },
+                          readCodex: { try? await Task.sleep(nanoseconds: 600_000_000); return ([], nil, .init()) },
                           deliver: { _, _ in false }, tracks: { (true, true) }, tracksExtra: { _ in false },
                           observe: { $0 })
         store.refresh()
@@ -46,7 +46,7 @@ final class StoreTests: XCTestCase {
         let rules = RuleEngine(defaults: space.defaults, away: { false }, remaining: { true })
         var delivered: [RuleEngine.Alert] = []
         let store = Store(claude: p, rules: rules, readEvents: { await reader.events() },
-                          readLocal: { _, _ in .init(trophy: Trophy(), context: nil, lastTurnAt: nil) }, readCodex: { ([], nil) },
+                          readLocal: { _, _ in .init(trophy: Trophy(), context: nil, lastTurnAt: nil) }, readCodex: { ([], nil, .init()) },
                           deliver: { alert, _ in delivered.append(alert); return true }, tracks: { (true, false) },
                           // An injected reader has no spool to watch, so it is polled; at the
                           // production backstop of 10 s this would outlast the 5 s it asserts.

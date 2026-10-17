@@ -896,7 +896,7 @@ final class LoginWatchTests: XCTestCase {
                           rules: RuleEngine(defaults: space.defaults, away: { false }, remaining: { true }),
                           readEvents: { [] },
                           readLocal: { _, _ in .init(trophy: Trophy(), context: nil, lastTurnAt: nil) },
-                          readCodex: { ([], nil) }, deliver: { _, _ in false },
+                          readCodex: { ([], nil, .init()) }, deliver: { _, _ in false },
                           tracks: { (true, false) }, tracksExtra: { _ in false }, observe: { $0 },
                           eventInterval: 0.05, lastActivity: Date().addingTimeInterval(-7200))
         store.start(observeSystem: false)
@@ -945,7 +945,7 @@ extension LoginWatchTests {
                           rules: RuleEngine(defaults: space.defaults, away: { false }, remaining: { true }),
                           readEvents: { [] },
                           readLocal: { _, _ in .init(trophy: Trophy(), context: nil, lastTurnAt: nil) },
-                          readCodex: { ([], nil) }, deliver: { _, _ in false },
+                          readCodex: { ([], nil, .init()) }, deliver: { _, _ in false },
                           tracks: { (true, false) }, tracksExtra: { _ in false }, observe: { $0 },
                           eventInterval: 0.05, lastActivity: Date().addingTimeInterval(-7200))
         store.start(observeSystem: false)
