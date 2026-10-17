@@ -185,7 +185,21 @@ xcrun stapler validate "$DMG" >/dev/null && echo "✓ ticket stapled to the disk
 
 MOUNT=$(hdiutil attach -nobrowse -readonly "$DMG" | awk -F'\t' '/\/Volumes\//{print $NF}' | tail -1)
 spctl -a -vv "$MOUNT/PWE AI Bar.app"
-xcrun stapler validate "$MOUNT/PWE AI Bar.app" >/dev/null && echo "✓ ticket stapled to the app"
+xcrun stapler validate "$MOUNT/PWE AI Bar.app" >/dev/null || {
+  echo "✗ the app inside the disk image carries no ticket — stopping before publishing"; exit 1; }
+echo "✓ ticket stapled to the app"
+
+echo
+echo "── ship-content check ────────────────────────────────────"
+# What is inside the app, which Gatekeeper does not ask (07 TOOLS/ship-check.sh). The two allowed
+# strings are where it looks for the Claude and Codex CLIs and Devin's credentials; registered in
+# the pwe-release skill's references/apps.md.
+[[ -x ../ship-check.sh ]] || { echo "✗ ../ship-check.sh not found — it gates the release"; exit 1; }
+SHIP=$(../ship-check.sh "$MOUNT/PWE AI Bar.app" --source Sources \
+         --allow '\.local/bin/(claude|codex)' --allow '\.local/share/devin/credentials\.toml') \
+  || { echo "$SHIP"; echo "✗ stopping before publishing"; exit 1; }
+echo "$SHIP"
+SHIP_SUMMARY=$(grep -E '^(ship-check |  (signing|linking|strings):)' <<<"$SHIP")
 hdiutil detach "$MOUNT" -quiet
 MOUNT=""
 
@@ -204,12 +218,14 @@ git push -q origin "v$VERSION"
 TAGGED="v$VERSION"   # past here a failure needs a human, and cleanup says exactly what to run
 echo "✓ tagged v$VERSION and pushed"
 
+# The ship-check summary goes into the notes: the record of what this binary is.
+SHIP_NOTES=$'**Ship-content check**\n```\n'"$SHIP_SUMMARY"$'\n```'
 if [[ -n "$NOTES_FILE" && -f "$NOTES_FILE" ]]; then
   gh release create "v$VERSION" "$DMG" dist/SHA256SUMS.txt \
-    --repo "$REPO" --title "PWE AI Bar $VERSION" --notes-file "$NOTES_FILE"
+    --repo "$REPO" --title "PWE AI Bar $VERSION" --notes "$(cat "$NOTES_FILE")"$'\n\n'"$SHIP_NOTES"
 else
   gh release create "v$VERSION" "$DMG" dist/SHA256SUMS.txt \
-    --repo "$REPO" --title "PWE AI Bar $VERSION" --generate-notes
+    --repo "$REPO" --title "PWE AI Bar $VERSION" --notes "$SHIP_NOTES" --generate-notes
 fi
 echo "✓ release published"
 

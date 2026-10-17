@@ -67,6 +67,27 @@ else
 fi
 codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | sed 's/^/    /'
 
+# The app gets its own ticket before it goes into the image. Stapling only the image left the
+# installed app without one (2026-10-16: `stapler validate` on /Applications/PWE AI Bar.app), so
+# its first launch had to reach Apple to be recognised. Loan Bar and Lumen Bar already did this.
+if [[ "$NOTARIZE" == "1" ]]; then
+  [[ "$KIND" == "developer-id" ]] || { echo "✗ Notarisation needs a Developer ID identity."; exit 1; }
+  PROFILE="${NOTARY_PROFILE:-PWE_NOTARY}"
+  echo "▸ Submitting the app to Apple (profile: $PROFILE)…"
+  ditto -c -k --keepParent "$APP" "$WORK/app.zip"
+  SUBMIT="$(xcrun notarytool submit "$WORK/app.zip" --keychain-profile "$PROFILE" --wait 2>&1)" || true
+  rm -f "$WORK/app.zip"
+  echo "$SUBMIT" | sed 's/^/    /'
+  if ! grep -q "status: Accepted" <<<"$SUBMIT"; then
+    ID="$(grep -m1 "  id: " <<<"$SUBMIT" | awk '{print $2}')"
+    echo "✗ Apple did not accept the app."
+    [[ -n "$ID" ]] && xcrun notarytool log "$ID" --keychain-profile "$PROFILE" 2>&1 | sed 's/^/    /'
+    exit 1
+  fi
+  xcrun stapler staple "$APP"
+  xcrun stapler validate "$APP"
+fi
+
 echo "▸ Disk image…"
 rm -rf "$STAGE" "$DMG"; mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/"
