@@ -1,7 +1,9 @@
 # Feature cards
 
 Three 1080 × 1350 cards for a LinkedIn image post about 1.6.6 to 1.6.8, in English, with the post's text.
-Status, 2026-10-18: drawn, not yet reviewed by Lee, not posted. They replace a new film shot (Lee, 2026-10-18).
+Status, 2026-10-18: posted to LinkedIn on Lee's go, three images and `post.en.txt`:
+https://www.linkedin.com/feed/update/urn:li:activity:7517439146496311296/
+They replace a new film shot (Lee, 2026-10-18). The tutorial film itself was never posted.
 
 | Card | Shows | From |
 |---|---|---|
