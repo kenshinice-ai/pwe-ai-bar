@@ -3,8 +3,10 @@
 A 56-second film of PWE AI Bar, and a silent 8-second loop of its three verdicts for the product page.
 Vertical 1080 × 1920, Chinese and English narration, one edit for both.
 
-Status, 2026-10-16: rebuilt for 1.6.5 with a `projects` take — the trophy page's by-project section,
-cropped, project names hidden — after the cost take. Not yet reviewed by Lee and not posted anywhere.
+Status, 2026-10-18: not posted, and not planned. Lee chose an image post instead for 1.6.6–1.6.8
+(`Video/cards/`, posted to LinkedIn 2026-10-18). The film was last rebuilt on 2026-10-16 for 1.6.5, with a
+`projects` take — the trophy page's by-project section, cropped, project names hidden — after the cost take.
+It does not show the Codex resets, the prepaid balance or the Max credit.
 The page loop is unchanged. (2026-10-10: Lee reviewed the first cut; it was never posted.)
 
 The pipeline is the one in `07 TOOLS/PWE Loan Bar/Video/tutorial` (its README explains the script
