@@ -38,7 +38,7 @@ macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。
 
 ## 等 Lee
 
-- **[决定] 过目新教程片，决定发不发 LinkedIn** — `Video/tutorial/build/tutorial-en.mp4`（61 秒）、`tutorial-zh.mp4`（58 秒），新增「按项目」镜头，项目名已打码；推荐看过后发英文版 · 不定的话片子停在本机，没在任何地方发过 · 自 2026-10-16
+- **[决定] 过目 1.6.8 图文，决定发不发 LinkedIn** — 三张英文卡片和正文在 `~/Movies/PWE Films/ai-bar/cards-1.6.8/`（做法见 `Video/cards/README.md`）；推荐发，发之前不会动 · 不定的话图文停在本机 · 自 2026-10-18
 
 ---
 

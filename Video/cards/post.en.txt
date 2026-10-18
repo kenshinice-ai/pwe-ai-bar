@@ -1,0 +1,13 @@
+PWE AI Bar 1.6.8 shows three things my AI plans were already giving me, and that I couldn't see.
+
+1. The Max plan includes a monthly dollar credit beside the usage limits. AI Bar now shows how much of it is used and when it resets. Mine: $94.37 of $250, resetting 5 November.
+
+2. OpenAI sometimes grants a Codex account a free rate-limit reset, clearing both the weekly and the five-hour limit. It expires if you don't use it, and nothing told me I had one. AI Bar does: 1 free reset, expiring 7 November.
+
+3. If your organisation has prepaid for Claude, the balance shows too, and promotional credit turns amber in its last ten days.
+
+All of it is read-only, through the logins Claude Code and Codex already have on your Mac. No account, no API key. It only shows; using a reset stays your call.
+
+Free for macOS: https://pwestudio.site/aibar
+
+The first two images are my own usage. The third uses sample figures, because I have no prepaid balance.

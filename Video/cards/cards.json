@@ -1,0 +1,53 @@
+{
+  "version": "1.6.8",
+  "cards": [
+    {
+      "id": "max-credit",
+      "render": "panel",
+      "crop": [
+        240,
+        600
+      ],
+      "spot": [
+        546,
+        590
+      ],
+      "title": "Your Max plan's $250 credit, counted",
+      "subtitle": "How much is used and when it resets, under the usage limits.",
+      "tag": "Real usage on this Mac",
+      "pad": 14
+    },
+    {
+      "id": "codex-reset",
+      "render": "panel",
+      "crop": [
+        604,
+        812
+      ],
+      "spot": [
+        756,
+        797
+      ],
+      "title": "A free Codex reset you'd have missed",
+      "subtitle": "OpenAI granted this account one. Nothing said so until now.",
+      "tag": "Real usage on this Mac"
+    },
+    {
+      "id": "prepaid",
+      "render": "stress",
+      "crop": [
+        826,
+        912
+      ],
+      "pad": 34,
+      "spot": [
+        828,
+        912
+      ],
+      "title": "Prepaid balance, when there is one",
+      "subtitle": "And promotional credit, in amber, in its last ten days.",
+      "tag": "Sample figures, drawn by the app. This Mac has no prepaid balance.",
+      "dim": false
+    }
+  ]
+}
