@@ -14,8 +14,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 DEST="${1:-../PWE Loan Bar/site/public/aibar/img}"
-APP="build/PWE AI Bar.app/Contents/MacOS/PWEAIBar"
-[[ -x "$APP" ]] || { echo "✗ build/PWE AI Bar.app is not there — run ./scripts/build-app.sh first"; exit 1; }
+# PWEAIBAR_BIN draws from another build of the same code, e.g. the SwiftPM build in $TMPDIR, which
+# avoids assembling an app inside iCloud Drive (the codesign trap in the pwe-release skill).
+APP="${PWEAIBAR_BIN:-build/PWE AI Bar.app/Contents/MacOS/PWEAIBar}"
+[[ -x "$APP" ]] || { echo "✗ $APP is not there — run ./scripts/build-app.sh first, or set PWEAIBAR_BIN"; exit 1; }
 [[ -d "$DEST" ]] || { echo "✗ no such destination: $DEST"; exit 1; }
 
 WORK="$(mktemp -d)"
