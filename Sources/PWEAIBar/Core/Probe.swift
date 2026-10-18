@@ -16,7 +16,7 @@ enum Probe {
         // Deliberately synthetic, and it must say so: these numbers exercise calm/warm/exhausted
         // in one frame, which live data will not do on demand. Mistaking this sheet for a live
         // reading is a good way to go hunting for a bug that is not there.
-        print("  （合成数据，非实时读数：58 / 87 / 耗尽）")
+        print("  （合成数据，非实时读数：58 / 87 / 已用尽）")
         var snap = Snapshot()
         snap.windows = [
             QuotaWindow(id: "session", provider: .claude, channel: .session, title: "五小时窗口",
@@ -26,7 +26,7 @@ enum Probe {
                         percent: 87, severity: .warning,
                         resetsAt: Date().addingTimeInterval(60000), isActive: true),
             QuotaWindow(id: "codex", provider: .codex, channel: .codex, title: "Codex",
-                        percent: nil, severity: .critical, note: "耗尽"),
+                        percent: nil, severity: .critical, note: L("verdict.spent", "Spent")),
         ]
         snap.contextPercent = 39
 

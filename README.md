@@ -14,11 +14,11 @@ But its real job is to find you at the moment it is your turn.
 
 **English** · [简体中文](README.zh-Hans.md)
 
-<img src="docs/menubar-crop.png" alt="Menu bar readout" width="250">
+<img src="docs/menubar-en.png" alt="Menu bar readout" width="257">
 
 <img src="docs/panel-en-dark.png" alt="Panel, dark" width="330"> <img src="docs/panel-en-light.png" alt="Panel, light" width="330">
 
-<sub>English and 简体中文, following the Mac or set in the app.</sub>
+<sub>English and 简体中文, following the Mac or set in the app. The panels are real usage on the author's Mac (1.6.8, 2026-10-18); the menu bar strip uses sample figures, drawn by the app.</sub>
 
 </div>
 

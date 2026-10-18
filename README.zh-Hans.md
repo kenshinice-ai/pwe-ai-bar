@@ -14,11 +14,11 @@
 
 [English](README.md) · **简体中文**
 
-<img src="docs/menubar-crop.png" alt="菜单栏读数" width="250">
+<img src="docs/menubar-zh-Hans.png" alt="菜单栏读数" width="258">
 
 <img src="docs/panel-zh-Hans-dark.png" alt="面板，深色" width="330"> <img src="docs/panel-zh-Hans-light.png" alt="面板，浅色" width="330">
 
-<sub>中英双语，跟随系统或在应用内切换。</sub>
+<sub>中英双语，跟随系统或在应用内切换。面板是作者本机的真实用量（1.6.8，2026-10-18）；菜单栏那一条是 app 自己画的样例数字。</sub>
 
 </div>
 
