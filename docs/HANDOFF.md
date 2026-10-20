@@ -33,6 +33,9 @@ macOS 菜单栏应用，SwiftUI + AppKit，Swift Package，无第三方依赖。
 
 ---
 
+> ⚠️ 2026-10-21 起，工具站改版部署之前，不要改 `07 TOOLS/PWE Loan Bar/site/public/`、`style.css`，也不要跑 `site/deploy.sh`。不然合并时冲突，或者把旧版站点再部署一次。
+> 改版在 pwemacloanbar 的分支 `site-redesign`（工作区 `~/Developer/pwestudio-redesign`），等 Lee 确认后由「PWE Tools AI 设计」会话部署。这期间要发 AI Bar，先发消息给那个会话，由它把改动并进分支。改版上线后删掉这条。
+
 > ⚠️ 改工具站页面前，先读 `pwe-release` 技能「The site」一节（2026-10-14 重构后的规矩）。
 > 不读就手改了页面的公共部分的话，`site/deploy.sh` 会停下。页头页脚由 `site/chrome.py` 生成；链接写成 `/aibar/`；部署后提交 `site/public/` 下被改的文件。
 
