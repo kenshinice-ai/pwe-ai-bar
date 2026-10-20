@@ -107,6 +107,54 @@ final class UpdateCheckTests: XCTestCase {
         XCTAssertEqual(updates.available?.version, "1.3.0", "but a later one speaks up")
     }
 
+    /// "Later" quiets the daily reminder. It must not make a check the reader asked for say there
+    /// is nothing newer — dismissing a reminder does not change what the newest version is.
+    @MainActor func testAManualCheckShowsADismissedVersion() async throws {
+        let space = try TestSpace()
+        let updates = UpdateCheck(defaults: space.defaults, now: { Date() },
+                                  fetch: { _ in (Self.body("1.2.0"), Self.ok) })
+        await updates.check(version: "1.1.6")
+        updates.dismiss()
+
+        let daily = await updates.check(version: "1.1.6")
+        XCTAssertEqual(daily, .newer(UpdateCheck.Release(version: "1.2.0", published: "2026-09-12")),
+                       "the daily check still knows 1.2.0 exists")
+        XCTAssertNil(updates.available, "but does not remind about it again")
+
+        let asked = await updates.check(version: "1.1.6", manual: true)
+        XCTAssertEqual(asked, daily)
+        XCTAssertEqual(updates.available?.version, "1.2.0", "asked for, it is shown")
+    }
+
+    @MainActor func testAnAnnouncedReleaseEqualToThisBuildIsCurrent() async throws {
+        let space = try TestSpace()
+        let updates = UpdateCheck(defaults: space.defaults, now: { Date() },
+                                  fetch: { _ in (Self.body("1.1.6"), Self.ok) })
+        let outcome = await updates.check(version: "1.1.6", manual: true)
+        XCTAssertEqual(outcome, .current)
+        XCTAssertNil(updates.available)
+    }
+
+    /// `check.js` answers a product it has not been told about with the caller's own version and
+    /// nothing else. That is no information — reading it as "up to date" claims a certainty
+    /// nobody has.
+    @MainActor func testAnEchoWithNoReleaseFieldsIsUnknown() async throws {
+        let space = try TestSpace()
+        let updates = UpdateCheck(defaults: space.defaults, now: { Date() },
+                                  fetch: { _ in (Data(#"{"version":"1.1.6"}"#.utf8), Self.ok) })
+        let outcome = await updates.check(version: "1.1.6", manual: true)
+        XCTAssertEqual(outcome, .unknown)
+        XCTAssertNil(updates.available)
+    }
+
+    @MainActor func testNoAnswerIsUnreachable() async throws {
+        let space = try TestSpace()
+        let updates = UpdateCheck(defaults: space.defaults, now: { Date() },
+                                  fetch: { _ in throw URLError(.notConnectedToInternet) })
+        let outcome = await updates.check(version: "1.1.6", manual: true)
+        XCTAssertEqual(outcome, .unreachable)
+    }
+
     /// A field this build has never heard of must not stop an old copy from learning there is a
     /// new one — the old copy is exactly the one that needs to.
     @MainActor func testAnUnknownFieldDoesNotBreakTheAnswer() async throws {

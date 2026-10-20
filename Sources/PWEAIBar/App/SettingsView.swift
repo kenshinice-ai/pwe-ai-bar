@@ -330,7 +330,8 @@ struct SettingsView: View {
                 HStack(spacing: 7) {
                     Button(L("settings.updates.now", "Check now")) {
                         checking = true
-                        Task { await updates.check(); checking = false }
+                        // Asked for, so a version once put off with "Later" shows again.
+                        Task { await updates.check(manual: true); checking = false }
                     }.font(Theme.sans(11)).disabled(checking)
                     if checking { ProgressView().controlSize(.small) }
                 }
